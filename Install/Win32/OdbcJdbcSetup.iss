@@ -23,7 +23,7 @@
 ;
 ;  OdbcJdbcSetup.iss
 ;
-;  Currently compiled against InnoSetup v5.3 from http://www.innosetup.com/
+;  Currently compiled against InnoSetup v6.4 from https://innosetup.com/
 ;
 ;
 
@@ -52,34 +52,14 @@ BUILD_ENV undefined
 
 #define FIREBIRD_URL "http://www.firebirdsql.org"
 
-;---- If we haven't already set PlatformTarget then pick it up from the environment.
-#ifndef PlatformTarget
-#define PlatformTarget GetEnv("FB_TARGET_PLATFORM")
-#endif
-#if PlatformTarget == ""
-#define PlatformTarget "x64"
-#endif
-
-;---- If we haven't already set ProductVersion then pick it up from the environment.
-#ifndef ProductVersion
-#define ProductVersion GetEnv("PRODUCT_VERSION")
-#endif
-
-#define BUILD_ROOT="..\..\"
+#define BUILD_ROOT "..\\..\\"
 #define SOURCE_LIBS "Builds\"+AddBackslash(BUILD_ENV)+AddBackslash(PlatformTarget)+AddBackslash(BUILDCONFIG)
 #define SOURCE_DOCS="Install\"
 
 #if PlatformTarget == "x64"
-#define SOURCE_LIBS32="Builds\"+AddBackslash(BUILD_ENV)+AddBackslash("Win32")+AddBackslash(BUILDCONFIG)
+#define SOURCE_LIBS32="Builds\\"+AddBackslash(BUILD_ENV)+AddBackslash("Win32")+AddBackslash(BUILDCONFIG)
 #endif
 
-; Check if HTML help is available
-#ifndef HtmlHelp
-#define HtmlHelp GetEnv("HTMLHELP")
-#endif
-#if HtmlHelp == ""
-#undef HtmlHelp
-#endif
 
 [Setup]
 DisableDirPage=No
@@ -124,6 +104,7 @@ ArchitecturesAllowed=arm64 x64compatible
 ArchitecturesAllowed=x86os
 #endif
 
+
 [Languages]
 Name: en; MessagesFile: compiler:Default.isl
 Name: ru; MessagesFile: compiler:Default.isl,compiler:Languages\Russian.isl
@@ -155,7 +136,6 @@ Source: {#SOURCE_DOCS}\HtmlHelp\images\*.*; DestDir: {app}\images; Components: D
 #endif
 Source: {#SOURCE_DOCS}\Win32\Readme.txt; DestDir: {app}; Components: DocumentationComponent; Flags: isreadme
 Source: {#SOURCE_DOCS}\IDPLicense.txt; DestDir: {app}; Components: DocumentationComponent
-;Source: {#SOURCE_DOCS}\ReleaseNotes_v2.0.html; DestDir: {app}; Components: DocumentationComponent
 
 #if PlatformTarget == "x64"
 Source: {#SOURCE_LIBS32}{#OBJNAME}.dll; DestDir: {sys}; Components: DeveloperComponent DeploymentComponent; Flags: regserver restartreplace 32bit
@@ -167,6 +147,7 @@ Source: {#SOURCE_DOCS}\HtmlHelp\{#OBJNAME}.chm; DestDir: {syswow64}; Components:
 #endif
 #endif
 
+
 [Icons]
 Name: {group}\Uninstall Firebird ODBC driver; Filename: {uninstallexe}; Components: DocumentationComponent; Comment: Remove Firebird ODBC Driver Documentation
 Name: {group}\Uninstall Firebird ODBC driver; Filename: {uninstallexe}; Components: DeveloperComponent; Comment: Remove Firebird ODBC Driver Library and Documentation
@@ -175,17 +156,8 @@ Name: {group}\Firebird ODBC Help; Filename: {app}\{#OBJNAME}.chm; Components: Do
 Name: {group}\Firebird ODBC Help; Filename: {sys}\{#OBJNAME}.chm; Components: DeveloperComponent
 Name: {app}\Firebird ODBC Help; Filename: {sys}\{#OBJNAME}.chm; Components: DeveloperComponent
 #endif
-;Name: {group}\Firebird ODBC v2.0 Release Notes; Filename: {app}\ReleaseNotes_v2.0.html; Components: DocumentationComponent
 Name: {group}\Firebird ODBC readme.txt; Filename: {app}\Readme.txt; Components: DocumentationComponent
 Name: {group}\Firebird ODBC license.txt; Filename: {app}\IDPLicense.txt; Components: DocumentationComponent
-
-
-[Run]
-;Filename: {sys}\regsvr32.exe; Parameters: "/s ""{app}""\{#OBJNAME}.dll"; Components: DeveloperComponent DeploymentComponent
-
-
-[UninstallRun]
-;Filename: {sys}\regsvr32.exe; Parameters: "/u /s ""{app}""\{#OBJNAME}.dll"; Components: DeveloperComponent DeploymentComponent
 
 
 [UninstallDelete]
