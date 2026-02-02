@@ -1,0 +1,42 @@
+name: test
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ${{ matrix.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            platform: x64
+            runner: windows-latest
+            os: windows
+          - arch: x64
+            runner: ubuntu-latest
+            os: linux
+          - arch: arm64
+            runner: ubuntu-22.04-arm
+            os: linux
+    steps:
+    - uses: actions/checkout@v4
+
+    - name: Install PSFirebird
+      shell: pwsh
+      run: |
+        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+        Install-Module -Name PowerShellGet -Force -AllowClobber -Scope CurrentUser
+
+        Register-PackageSource -Name 'NuGet' -Location 'https://api.nuget.org/v3/index.json' -ProviderName NuGet -Force
+        Install-Module -Name PSFirebird -Force -AllowClobber -Scope CurrentUser -Repository PSGallery
+
+    - name: Run Tests
+      shell: pwsh
+      run: |
+        ./run.ps1 Test
