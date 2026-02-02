@@ -10,7 +10,18 @@ param(
     [string]$Solution = "Builds\MsVc2022.win\OdbcFb.sln"
 )
 
-$ErrorActionPreference = "Stop"
+#
+# Configuration
+#
+
+# Firebird version to use for testing
+$global:FirebirdVersion = '5.0.3'
+
+
+
+#
+# Functions
+#
 
 function Find-MSBuild {
     $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
@@ -45,10 +56,24 @@ function Find-VSTest {
 }
 
 function Requires-ConnectionString {
-    if (-not $env:FIREBIRD_ODBC_CONNECTION) {
-        Write-Warning "Environment variable FIREBIRD_ODBC_CONNECTION is not set. Skipping test execution."
-        exit 0
-    }
+    if ($env:FIREBIRD_ODBC_CONNECTION) {
+        Write-Host "Using environment variable FIREBIRD_ODBC_CONNECTION."
+    } else {
+        Write-Host "Using temporary Firebird environment."
+
+        Import-Module PSFirebird
+        $fb = New-FirebirdEnvironment -Version $FirebirdVersion
+
+        $tempPath = [System.IO.Path]::GetTempPath()
+        $dbPath = Join-Path $tempPath "testdb.fdb"
+        $db = New-FirebirdDatabase -Database $dbPath -Environment $fb -Force
+
+        $clientLibrary = Join-Path $fb.Path 'fbclient.dll'
+        $connectionString = "Driver={Firebird ODBC Driver};Database=$dbPath;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=$clientLibrary"
+        
+        $env:FIREBIRD_ODBC_CONNECTION = $connectionString
+        return $connectionString
+    }        
 }
 
 
@@ -56,6 +81,14 @@ function Requires-ConnectionString {
 #
 # Main
 #
+
+$ErrorActionPreference = "Stop"
+
+# Configure GitHub API authentication if token is available to avoid rate limits.
+$githubToken = if ($env:GITHUB_TOKEN) { $env:GITHUB_TOKEN } elseif ($env:GH_TOKEN) { $env:GH_TOKEN } else { $null }
+if ($githubToken) {
+    $PSDefaultParameterValues['Invoke-RestMethod:Headers'] = @{ Authorization = "token $githubToken" }
+}
 
 $msbuild = Find-MSBuild
 
