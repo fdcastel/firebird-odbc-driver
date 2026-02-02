@@ -145,6 +145,7 @@
     <ClCompile Include="..\Cases\FetchBindingTests.cpp" />
     <ClCompile Include="..\Cases\GetDataTests.cpp" />
     <ClCompile Include="..\Cases\InfoTests.cpp" />
+    <ClCompile Include="..\Cases\Issue244Tests.cpp" />
     <ClCompile Include="..\Cases\StatementAttrsTests.cpp" />
     <ClCompile Include="..\Cases\TransactionsTests.cpp" />
     <ClCompile Include="..\Cases\UnicodeTests.cpp" />
