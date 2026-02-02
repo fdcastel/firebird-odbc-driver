@@ -4,6 +4,8 @@ VisualStudioVersion = 17.6.33815.320
 MinimumVisualStudioVersion = 10.0.40219.1
 Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OdbcFb", "OdbcFb.vcxproj", "{C6127398-654D-4196-B8C1-5BB32D75D7FD}"
 EndProject
+Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "OdbcTests", "..\..\Tests\OdbcTests\OdbcTests.vcxproj", "{8BC9CEB9-8B4A-11D0-8D11-00A0C91BC942}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|ARM64 = Debug|ARM64
@@ -26,6 +28,18 @@ Global
 		{C6127398-654D-4196-B8C1-5BB32D75D7FD}.Release|Win32.Build.0 = Release|Win32
 		{C6127398-654D-4196-B8C1-5BB32D75D7FD}.Release|x64.ActiveCfg = Release|x64
 		{C6127398-654D-4196-B8C1-5BB32D75D7FD}.Release|x64.Build.0 = Release|x64
+		{8BC9CEB9-8B4A-11D0-8D11-00A0C91BC942}.Debug|ARM64.ActiveCfg = Release|ARM64
+		{8BC9CEB9-8B4A-11D0-8D11-00A0C91BC942}.Debug|ARM64.Build.0 = Release|ARM64
+		{8BC9CEB9-8B4A-11D0-8D11-00A0C91BC942}.Debug|Win32.ActiveCfg = Release|Win32
+		{8BC9CEB9-8B4A-11D0-8D11-00A0C91BC942}.Debug|Win32.Build.0 = Release|Win32
+		{8BC9CEB9-8B4A-11D0-8D11-00A0C91BC942}.Debug|x64.ActiveCfg = Release|x64
+		{8BC9CEB9-8B4A-11D0-8D11-00A0C91BC942}.Debug|x64.Build.0 = Release|x64
+		{8BC9CEB9-8B4A-11D0-8D11-00A0C91BC942}.Release|ARM64.ActiveCfg = Release|ARM64
+		{8BC9CEB9-8B4A-11D0-8D11-00A0C91BC942}.Release|ARM64.Build.0 = Release|ARM64
+		{8BC9CEB9-8B4A-11D0-8D11-00A0C91BC942}.Release|Win32.ActiveCfg = Release|Win32
+		{8BC9CEB9-8B4A-11D0-8D11-00A0C91BC942}.Release|Win32.Build.0 = Release|Win32
+		{8BC9CEB9-8B4A-11D0-8D11-00A0C91BC942}.Release|x64.ActiveCfg = Release|x64
+		{8BC9CEB9-8B4A-11D0-8D11-00A0C91BC942}.Release|x64.Build.0 = Release|x64
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
