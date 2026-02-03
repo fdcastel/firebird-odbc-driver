@@ -3762,7 +3762,18 @@ int OdbcConvert::transferStringWToAllowedType(DescRecord * from, DescRecord * to
 	}
 
 	GET_WLEN_FROM_OCTETLENGTHPTR;
-	cch = wcscch(pointerFrom, len);
+	
+	// Validate length is reasonable
+	if (len < 0 || len > 1000000) // 1M characters max
+	{
+		len = 0;
+		cch = 0;
+		lenMbs = 0;
+	}
+	else
+	{
+		cch = wcscch(pointerFrom, len);
+	}
 
 	if ( !to->isLocalDataPtr )
 	{
