@@ -32,7 +32,9 @@ size_t Utf16Length(const SQLWCHAR* str)
         return 0;
     
     size_t len = 0;
-    while (str[len] != 0)
+    // Safety limit to prevent infinite loop on non-null-terminated strings
+    const size_t MAX_REASONABLE_LENGTH = 1000000; // 1 million characters
+    while (str[len] != 0 && len < MAX_REASONABLE_LENGTH)
         len++;
     
     return len;

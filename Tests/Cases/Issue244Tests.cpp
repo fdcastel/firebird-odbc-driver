@@ -116,6 +116,10 @@ namespace OdbcTests
         // Test 4: Test UTF-16 data roundtrip with non-ASCII characters
         TEST_METHOD(Test_UTF16_Data_Roundtrip)
         {
+            // Drop table if it exists from previous run (ignore errors)
+            SQLExecDirect(testBase->stmt, 
+                (SQLWCHAR*)L"DROP TABLE test_unicode_data", SQL_NTS);
+            
             // Create table with Unicode data
             SQLRETURN rc = SQLExecDirect(testBase->stmt, 
                 (SQLWCHAR*)L"CREATE TABLE test_unicode_data (text VARCHAR(100) CHARACTER SET UTF8)", 
@@ -242,6 +246,10 @@ namespace OdbcTests
         {
             // The driver should NOT use mbstowcs/wcstombs which are locale-dependent
             // It should use proper UTF-16 <-> UTF-8 conversion
+            
+            // Drop table if it exists from previous run (ignore errors)
+            SQLExecDirect(testBase->stmt, 
+                (SQLWCHAR*)L"DROP TABLE test_locale", SQL_NTS);
             
             // Insert data with characters outside current locale
             SQLRETURN rc = SQLExecDirect(testBase->stmt, 

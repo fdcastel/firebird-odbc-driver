@@ -3811,13 +3811,16 @@ int OdbcConvert::transferStringWToAllowedType(DescRecord * from, DescRecord * to
 	}
 	else
 	{
-		SQLWCHAR &wcEnd = *(pointerFrom + len);
-		SQLWCHAR saveEnd = wcEnd;
-		wcEnd = 0;	// We guarantee the end null terminator
+		// Sanity check: if we got this far, len should be valid and pointerFrom should be accessible
+		// The string should be null-terminated (since we used SQL_NTS or calculated the length)
+		// Temporarily modify the end to ensure null termination for the conversion
+		SQLWCHAR *endPtr = pointerFrom + len;
+		SQLWCHAR saveEnd = *endPtr;
+		*endPtr = 0;	// We guarantee the end null terminator
 		// Convert UTF-16 to UTF-8 for Firebird
 		SQLUINTEGER spaceLeft = (to->octetLength - from->dataOffset) * to->headSqlVarPtr->getSqlMultiple();
 		lenMbs = (SQLUINTEGER)Utf16ToUtf8( pointerFrom, to->localDataPtr + to->dataOffset, spaceLeft);
-		wcEnd = saveEnd;
+		*endPtr = saveEnd;
 	}
 
 	if ( from->data_at_exec )
