@@ -65,6 +65,9 @@
 
 size_t wcscch(const SQLWCHAR* s, size_t len)
 {
+  if (!s || len == 0)
+    return 0;
+    
   size_t ret = len;
   while (len--)
   {
@@ -3788,12 +3791,12 @@ int OdbcConvert::transferStringWToAllowedType(DescRecord * from, DescRecord * to
 	{
   		OdbcError *error = parentStmt->postError (new OdbcError (0, "01004", "Data truncated"));
 		ret = SQL_SUCCESS_WITH_INFO;
-		do
+		while (len > 0 && cch + from->dataOffset > to->octetLength)
 		{
 			len--;
-			if (len > 0 && !IS_LOW_SURROGATE(pointerFrom[len-1]))
+			if (len > 0 && !IS_LOW_SURROGATE(pointerFrom[len]))
 				cch--;
-		} while (len > 0 && cch + from->dataOffset > to->octetLength);
+		}
 	}
 
 	if ( len < 0 )

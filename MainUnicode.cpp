@@ -169,10 +169,13 @@ public:
 		SQLWCHAR saveWC = 0;
 		bool needRestore = false;
 
+		if (!wcString)
+			return NULL;
+
 		// CRITICAL FIX: Use Utf16Length instead of wcslen which expects wchar_t*
 		if ( length == SQL_NTS )
 			length = (int)Utf16Length( wcString );
-		else if ( wcString[length] != 0 )
+		else if ( length > 0 && wcString[length] != 0 )
 		{
 			saveWC = wcString[length];
 			wcString[length] = 0;
