@@ -40,6 +40,7 @@
 #include "IscDbc/SQLException.h"
 
 #include "TemplateConvert.h"
+#include "Utf16Convert.h"
 
 #ifndef _WINDOWS
 // for Linux
@@ -62,7 +63,7 @@
 #define HI_LONG(l)          ((int)(((UQUAD)(l) >> 32) & 0xFFFFFFFF))
 #endif
 
-size_t wcscch(const wchar_t* s, size_t len)
+size_t wcscch(const SQLWCHAR* s, size_t len)
 {
   size_t ret = len;
   while (len--)
@@ -1119,12 +1120,12 @@ SQLLEN * OdbcConvert::getAdressBindIndTo(char * pointer)
 	if ( octetLengthPtr )					\
 	{										\
 		if ( *octetLengthPtr == SQL_NTS )	\
-			len = (int)wcslen ( pointerFrom );	\
+			len = (int)Utf16Length ( pointerFrom );	\
 		else								\
-			len = *octetLengthPtr / 2;		\
+			len = *octetLengthPtr / sizeof(SQLWCHAR);	\
 	}										\
 	else									\
-		len = (int)wcslen( pointerFrom );	\
+		len = (int)Utf16Length( pointerFrom );	\
 
 #define ODBCCONVERT_CONV(TYPE_FROM,C_TYPE_FROM,TYPE_TO,C_TYPE_TO)								\
 int OdbcConvert::conv##TYPE_FROM##To##TYPE_TO(DescRecord * from, DescRecord * to)				\
@@ -3745,7 +3746,7 @@ int OdbcConvert::transferStringWToAllowedType(DescRecord * from, DescRecord * to
 	ODBCCONVERT_CHECKNULL_SQLDA;
 
 	SQLLEN * octetLengthPtr = getAdressBindIndFrom((char*)from->octetLengthPtr);
-	wchar_t * pointerFrom = (wchar_t *)getAdressBindDataFrom((char*)from->dataPtr);
+	SQLWCHAR * pointerFrom = (SQLWCHAR *)getAdressBindDataFrom((char*)from->dataPtr);
 
 	SQLINTEGER len;
 	SQLINTEGER cch;
@@ -3781,13 +3782,19 @@ int OdbcConvert::transferStringWToAllowedType(DescRecord * from, DescRecord * to
 		cch = len = 0;
 		lenMbs = 0;
 	}
+	else if (pointerFrom == NULL || len == 0)
+	{
+		cch = len = 0;
+		lenMbs = 0;
+	}
 	else
 	{
-		wchar_t &wcEnd = *(pointerFrom + len);
-		wchar_t saveEnd = wcEnd;
-		wcEnd = L'\0';	// We guarantee the end L'\0'
+		SQLWCHAR &wcEnd = *(pointerFrom + len);
+		SQLWCHAR saveEnd = wcEnd;
+		wcEnd = 0;	// We guarantee the end null terminator
+		// Convert UTF-16 to UTF-8 for Firebird
 		SQLUINTEGER spaceLeft = (to->octetLength - from->dataOffset) * to->headSqlVarPtr->getSqlMultiple();
-		lenMbs = (SQLUINTEGER)to->WcsToMbs( to->localDataPtr + to->dataOffset, pointerFrom, spaceLeft);
+		lenMbs = (SQLUINTEGER)Utf16ToUtf8( pointerFrom, to->localDataPtr + to->dataOffset, spaceLeft);
 		wcEnd = saveEnd;
 	}
 

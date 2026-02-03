@@ -584,6 +584,7 @@
     <ClCompile Include="..\..\Main.cpp" />
     <ClCompile Include="..\..\MainUnicode.cpp" />
     <ClCompile Include="..\..\MbsAndWcs.cpp" />
+    <ClCompile Include="..\..\Utf16Convert.cpp" />
     <ClCompile Include="..\..\OdbcConnection.cpp" />
     <ClCompile Include="..\..\OdbcConvert.cpp" />
     <ClCompile Include="..\..\OdbcDateTime.cpp" />

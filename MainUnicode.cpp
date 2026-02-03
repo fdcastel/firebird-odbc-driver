@@ -30,6 +30,7 @@
 #include "OdbcStatement.h"
 #include "SafeEnvThread.h"
 #include "Main.h"
+#include "Utf16Convert.h"
 
 #define GETCONNECT_STMT( hStmt ) (((OdbcStatement*)hStmt)->connection)
 #define GETCONNECT_DESC( hDesc ) (((OdbcDesc*)hDesc)->connection)
@@ -85,7 +86,7 @@ public:
 			if ( length == SQL_NTS )
 				lengthString = 0;
 			else if ( retCountOfBytes )
-				lengthString = length / sizeof(wchar_t);
+				lengthString = length / sizeof(SQLWCHAR);
 			else
 				lengthString = length;
 		}
@@ -125,28 +126,27 @@ public:
 			{
 				size_t len;
 
+				// CRITICAL FIX: Use UTF-8 to UTF-16 conversion, not locale-dependent conversion
+				// SQLWCHAR is ALWAYS 16-bit UTF-16, not platform wchar_t
 				if ( connection )
-					len = connection->MbsToWcs( (wchar_t*)unicodeString, (const char*)byteString, lengthString );
+				{
+					// When we have a connection, assume Firebird data is in UTF-8
+					len = Utf8ToUtf16( (const char*)byteString, unicodeString, lengthString );
+				}
 				else
 				{
-#ifdef _WINDOWS
-					len = MultiByteToWideChar( codePage, 0, (const char*)byteString, -1,
-											  unicodeString, lengthString );
-					if ( len > 0 )
-						len--;
-#else
-					len = mbstowcs( (wchar_t*)unicodeString, (const char*)byteString, lengthString );
-#endif
+					// Without connection, also assume UTF-8 (standard encoding)
+					len = Utf8ToUtf16( (const char*)byteString, unicodeString, lengthString );
 				}
 
-				if ( len > 0 )
+				if ( len > 0 && len < (size_t)lengthString )
 				{
-					*(LPWSTR)(unicodeString + len) = L'\0';
+					unicodeString[len] = 0; // Null terminate
 
 					if ( realLength )
 					{
 						if ( returnCountOfBytes )
-							*realLength = (TypeRealLen)( len * 2 );
+							*realLength = (TypeRealLen)( len * sizeof(SQLWCHAR) );
 						else
 							*realLength = (TypeRealLen)len;
 					}
@@ -158,7 +158,7 @@ public:
 
 		case NONE:
 			if ( realLength && returnCountOfBytes )
-				*realLength *= 2;
+				*realLength *= sizeof(SQLWCHAR);
 			break;
 		}
 	}
@@ -166,47 +166,43 @@ public:
 	SQLCHAR * convUnicodeToString( SQLWCHAR *wcString, int length )
 	{
 		size_t bytesNeeded;
-		wchar_t *ptEndWC = NULL;
-		wchar_t saveWC;
+		SQLWCHAR saveWC = 0;
+		bool needRestore = false;
 
+		// CRITICAL FIX: Use Utf16Length instead of wcslen which expects wchar_t*
 		if ( length == SQL_NTS )
-			length = (int)wcslen( (const wchar_t*)wcString );
-		else if ( wcString[length] != L'\0' )
+			length = (int)Utf16Length( wcString );
+		else if ( wcString[length] != 0 )
 		{
-			ptEndWC = (wchar_t*)&wcString[length];
-			saveWC = *ptEndWC;
-			*ptEndWC = L'\0';
+			saveWC = wcString[length];
+			wcString[length] = 0;
+			needRestore = true;
 		}
 
+		// CRITICAL FIX: Use UTF-16 to UTF-8 conversion, not locale-dependent conversion
 		if ( connection )
-			bytesNeeded = connection->WcsToMbs( NULL, (const wchar_t*)wcString, length );
+		{
+			// When we have a connection, convert UTF-16 to UTF-8 for Firebird
+			bytesNeeded = Utf16ToUtf8Length( wcString );
+		}
 		else
 		{
-#ifdef _WINDOWS
-			bytesNeeded = WideCharToMultiByte( codePage, (DWORD)0, wcString, length, NULL, (int)0, NULL, NULL );
-#else
-			bytesNeeded = wcstombs( NULL, (const wchar_t*)wcString, length );
-#endif
+			// Without connection, also use UTF-8 (standard encoding)
+			bytesNeeded = Utf16ToUtf8Length( wcString );
 		}
 
 		byteString = new SQLCHAR[ bytesNeeded + 2 ];
 
 		if ( connection )
-			bytesNeeded = connection->WcsToMbs( (char *)byteString, (const wchar_t*)wcString, bytesNeeded );
+			bytesNeeded = Utf16ToUtf8( wcString, (char *)byteString, bytesNeeded + 1 );
 		else
-		{
-#ifdef _WINDOWS
-			bytesNeeded = WideCharToMultiByte( codePage, 0, wcString, length, (LPSTR)byteString, (int)bytesNeeded, NULL, NULL );
-#else
-			bytesNeeded = wcstombs( (char *)byteString, (const wchar_t*)wcString, bytesNeeded );
-#endif
-		}
+			bytesNeeded = Utf16ToUtf8( wcString, (char *)byteString, bytesNeeded + 1 );
 
 		byteString[ bytesNeeded ] = '\0';
 		lengthString = (int)bytesNeeded;
 
-		if ( ptEndWC )
-			*ptEndWC = saveWC;
+		if ( needRestore )
+			wcString[length] = saveWC;
 
 		return byteString;
 	}

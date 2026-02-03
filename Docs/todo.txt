@@ -1,0 +1,53 @@
+$env:FIREBIRD_ODBC_CONNECTION='Driver={Firebird ODBC Driver};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=/fbodbc-tests/fb502/fbclient.dll'
+
+
+
+
+
+
+https://learn.microsoft.com/en-us/sql/odbc/reference/appendixes/c-to-sql-binary?view=sql-server-ver17&source=recommendations
+https://github.com/FirebirdSQL/firebird-odbc-driver/issues/244
+
+
+
+
+
+
+
+
+https://learn.microsoft.com/en-us/sql/odbc/reference/appendixes/c-to-sql-binary?view=sql-server-ver17&source=recommendations
+
+
+https://github.com/FirebirdSQL/firebird-odbc-driver/issues/244
+
+
+
+
+
+https://firebirdsql.org/file/documentation/html/en/refdocs/fblangref50/firebird-50-language-reference.html
+
+
+
+
+
+# ODBC 64-Bit Information
+https://learn.microsoft.com/en-us/sql/odbc/reference/odbc-64-bit-information?view=sql-server-ver17
+
+
+# Data types
+https://learn.microsoft.com/en-us/sql/odbc/reference/appendixes/sql-data-types?view=sql-server-ver17
+
+
+
+# Converting data
+https://learn.microsoft.com/en-us/sql/odbc/reference/appendixes/converting-data-from-c-to-sql-data-types?view=sql-server-ver17
+https://learn.microsoft.com/en-us/sql/odbc/reference/appendixes/converting-data-from-sql-to-c-data-types?view=sql-server-ver17
+
+
+
+# All functions
+https://learn.microsoft.com/en-us/sql/odbc/reference/syntax/odbc-api-reference?view=sql-server-ver17
+
+
+# Unicode PR
+gh pr checkout 247
