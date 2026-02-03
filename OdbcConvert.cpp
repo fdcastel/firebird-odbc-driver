@@ -3780,9 +3780,9 @@ int OdbcConvert::transferStringWToAllowedType(DescRecord * from, DescRecord * to
 		do
 		{
 			len--;
-			if (!IS_LOW_SURROGATE(pointerFrom[len-1]))
+			if (len > 0 && !IS_LOW_SURROGATE(pointerFrom[len-1]))
 				cch--;
-		} while (cch + from->dataOffset > to->octetLength);
+		} while (len > 0 && cch + from->dataOffset > to->octetLength);
 	}
 
 	if ( len < 0 )
