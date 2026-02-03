@@ -3753,6 +3753,14 @@ int OdbcConvert::transferStringWToAllowedType(DescRecord * from, DescRecord * to
 	SQLINTEGER lenMbs;
 	SQLRETURN ret = SQL_SUCCESS;
 
+	// NULL pointer safety check
+	if (!pointerFrom)
+	{
+		if (indicatorTo)
+			setIndicatorPtr(indicatorTo, SQL_NULL_DATA, to);
+		return SQL_SUCCESS;
+	}
+
 	GET_WLEN_FROM_OCTETLENGTHPTR;
 	cch = wcscch(pointerFrom, len);
 
