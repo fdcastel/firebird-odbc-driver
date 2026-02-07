@@ -2,9 +2,7 @@ name: Build and Test
 
 on:
   push:
-    branches: [ "main", "master", "develop" ]
   pull_request:
-    branches: [ "main", "master", "develop" ]
 
 env:
   BUILD_TYPE: Release
