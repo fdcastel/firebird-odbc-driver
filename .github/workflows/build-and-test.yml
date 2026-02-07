@@ -122,24 +122,17 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y unixodbc unixodbc-dev cmake g++
-        # Firebird requires libncurses5/libtinfo5 which may not be in newer Ubuntu
-        sudo apt-get install -y libncurses5 libtinfo5 || {
-          # On Ubuntu 24.04+, create compatibility symlinks from ncurses6
-          sudo apt-get install -y libncurses6 libtinfo6
-          if [ ! -f /lib/x86_64-linux-gnu/libncurses.so.5 ] && [ -f /lib/x86_64-linux-gnu/libncurses.so.6 ]; then
-            sudo ln -sf /lib/x86_64-linux-gnu/libncurses.so.6 /lib/x86_64-linux-gnu/libncurses.so.5
+        # PSFirebird needs to 'apt-get download' libncurses5/libtinfo5 packages.
+        # These don't exist in Ubuntu 24.04+ repos, so add Ubuntu 22.04 (jammy) as a fallback source.
+        if ! apt-cache show libncurses5 > /dev/null 2>&1; then
+          ARCH=$(dpkg --print-architecture)
+          echo "deb [arch=${ARCH}] http://archive.ubuntu.com/ubuntu/ jammy main universe" | sudo tee /etc/apt/sources.list.d/jammy.list
+          # For ARM64, use ports.ubuntu.com
+          if [ "$ARCH" = "arm64" ]; then
+            echo "deb [arch=${ARCH}] http://ports.ubuntu.com/ubuntu-ports/ jammy main universe" | sudo tee /etc/apt/sources.list.d/jammy.list
           fi
-          if [ ! -f /lib/x86_64-linux-gnu/libtinfo.so.5 ] && [ -f /lib/x86_64-linux-gnu/libtinfo.so.6 ]; then
-            sudo ln -sf /lib/x86_64-linux-gnu/libtinfo.so.6 /lib/x86_64-linux-gnu/libtinfo.so.5
-          fi
-          # Also check aarch64 paths
-          if [ ! -f /lib/aarch64-linux-gnu/libncurses.so.5 ] && [ -f /lib/aarch64-linux-gnu/libncurses.so.6 ]; then
-            sudo ln -sf /lib/aarch64-linux-gnu/libncurses.so.6 /lib/aarch64-linux-gnu/libncurses.so.5
-          fi
-          if [ ! -f /lib/aarch64-linux-gnu/libtinfo.so.5 ] && [ -f /lib/aarch64-linux-gnu/libtinfo.so.6 ]; then
-            sudo ln -sf /lib/aarch64-linux-gnu/libtinfo.so.6 /lib/aarch64-linux-gnu/libtinfo.so.5
-          fi
-        }
+          sudo apt-get update
+        fi
         
     - name: Setup Firebird Environment
       shell: pwsh
