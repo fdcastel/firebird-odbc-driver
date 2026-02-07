@@ -46,6 +46,7 @@ public:
 
 	int			recordNumber;
 	int			dataTypes;
+	int			serverMajorVersion;
 	Sqlda		outputSqlda;
 	std::vector<SQLLEN> indicators;
 };

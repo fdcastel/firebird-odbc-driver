@@ -74,6 +74,7 @@
 //////////////////////////////////////////////////////////////////////
 
 #include <stdio.h>
+#include <string>
 #ifndef _WINDOWS
 #include <unistd.h>
 #include <dlfcn.h>
@@ -656,6 +657,8 @@ SQLRETURN OdbcConnection::sqlDriverConnect(SQLHWND hWnd, const SQLCHAR * connect
 
 			defOptions |= DEF_WIRECOMPRESSION;
 		}
+		else if ( IS_KEYWORD( SETUP_CONNSETTINGS ) || IS_KEYWORD( KEY_DSN_CONNSETTINGS ) )
+			connSettings = value;
 		else if ( IS_KEYWORD( "ODBC" ) )
 			;
 		else
@@ -1689,6 +1692,59 @@ SQLRETURN OdbcConnection::connect(const char *sharedLibrary, const char * databa
 		properties->release();
 
 		env->envShare = connection->getEnvironmentShare();
+
+		// Execute ConnSettings SQL statements if specified
+		if (connSettings && !connSettings.IsEmpty())
+		{
+			try
+			{
+				// Split by semicolons and execute each statement
+				const char* csql = connSettings;
+				std::string current;
+				for (const char* p = csql; ; ++p)
+				{
+					if (*p == ';' || *p == '\0')
+					{
+						// Trim whitespace
+						size_t start = current.find_first_not_of(" \t\r\n");
+						if (start != std::string::npos)
+						{
+							std::string sqlStmt = current.substr(start);
+							size_t end = sqlStmt.find_last_not_of(" \t\r\n");
+							if (end != std::string::npos)
+								sqlStmt = sqlStmt.substr(0, end + 1);
+							if (!sqlStmt.empty())
+							{
+								PreparedStatement* cstmt = connection->prepareStatement(sqlStmt.c_str());
+								try
+								{
+									cstmt->execute();
+									cstmt->close();
+									connection->commitAuto();
+								}
+								catch (...)
+								{
+									cstmt->close();
+									throw;
+								}
+							}
+						}
+						current.clear();
+						if (*p == '\0') break;
+					}
+					else
+					{
+						current += *p;
+					}
+				}
+			}
+			catch (SQLException &exception)
+			{
+				connection->close();
+				connection = NULL;
+				return sqlReturn( SQL_ERROR, "HY000", exception.getText(), exception.getSqlcode() );
+			}
+		}
 
 		// Next two lines added by CA
 		connection->setAutoCommit( autoCommit );

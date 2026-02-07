@@ -48,6 +48,9 @@ public:
 	void addRef();
 	void loadClientLiblary( Properties *properties );
 	bool isFirebirdVer2_0(){ return majorFb == 2; }
+	int getMajorVersion() const { return majorFb; }
+	int getMinorVersion() const { return minorFb; }
+	bool isVersionAtLeast(int major, int minor = 0) const { return (majorFb > major) || (majorFb == major && minorFb >= minor); }
 	void createDatabase(const char *dbName, Properties *properties);
 	void openDatabase(const char * dbName, Properties * properties);
 	Attachment();

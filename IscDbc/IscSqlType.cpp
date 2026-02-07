@@ -195,6 +195,21 @@ void IscSqlType::buildType ()
 			}
 			break;
 
+		case blr_sql_time_tz:
+			{
+			// TIME WITH TIME ZONE (Firebird 4.0+)
+			// Map to SQL_TIME / SQL_VARCHAR since ODBC has no TZ-aware time type.
+			// When EnableCompatBind=Y (default), Firebird sends this as plain TIME.
+			if ( appOdbcVersion == 2 )
+				type = JDBC_SQL_TIME;
+			else
+				type = JDBC_TIME;
+			typeName = "TIME WITH TIME ZONE";
+			length = MAX_TIME_LENGTH + 6; // room for TZ offset
+			bufferLength = 6;
+			}
+			break;
+
 		case blr_timestamp:
 			{
 			if ( appOdbcVersion == 2 ) // SQL_OV_ODBC2
@@ -204,6 +219,59 @@ void IscSqlType::buildType ()
 			typeName = "TIMESTAMP";
 			length = MAX_TIMESTAMP_LENGTH;
 			bufferLength = 16; // sizeof(tagTIMESTAMP_STRUCT); 
+			}
+			break;
+
+		case blr_timestamp_tz:
+			{
+			// TIMESTAMP WITH TIME ZONE (Firebird 4.0+)
+			// Map to SQL_TIMESTAMP / SQL_VARCHAR since ODBC has no TZ-aware type.
+			// When EnableCompatBind=Y (default), Firebird sends this as plain TIMESTAMP.
+			if ( appOdbcVersion == 2 )
+				type = JDBC_SQL_TIMESTAMP;
+			else
+				type = JDBC_TIMESTAMP;
+			typeName = "TIMESTAMP WITH TIME ZONE";
+			length = MAX_TIMESTAMP_LENGTH + 6;
+			bufferLength = 16;
+			}
+			break;
+
+		case blr_int128:
+			{
+			// INT128 (Firebird 4.0+)
+			// No ODBC 128-bit integer type; map to VARCHAR for full precision.
+			// When EnableCompatBind=Y (default), Firebird sends this as VARCHAR.
+			type = JDBC_VARCHAR;
+			typeName = "INT128";
+			length = 40;	// max digits of 128-bit integer + sign
+			bufferLength = 42;
+			}
+			break;
+
+		case blr_dec64:
+			{
+			// DECFLOAT(16) (Firebird 4.0+)
+			// Map to SQL_DOUBLE for compatibility. Precision may be lossy.
+			// When EnableCompatBind=Y (default), Firebird sends this as DOUBLE.
+			type = JDBC_DOUBLE;
+			typeName = "DECFLOAT";
+			length = 16;
+			bufferLength = sizeof(double);
+			precision = 16;
+			}
+			break;
+
+		case blr_dec128:
+			{
+			// DECFLOAT(34) (Firebird 4.0+)
+			// Map to VARCHAR for full precision representation.
+			// When EnableCompatBind=Y (default), Firebird sends this as VARCHAR.
+			type = JDBC_VARCHAR;
+			typeName = "DECFLOAT";
+			length = 42;	// max digits of DECFLOAT(34) + sign + exponent
+			bufferLength = 44;
+			precision = 34;
 			}
 			break;
 

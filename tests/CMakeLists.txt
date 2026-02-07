@@ -31,6 +31,10 @@ add_executable(firebird_odbc_tests
     test_savepoint.cpp
     test_catalog.cpp
     test_escape_sequences.cpp
+    test_server_version.cpp
+    test_batch_params.cpp
+    test_conn_settings.cpp
+    test_scrollable_cursor.cpp
 )
 
 # Link with Google Test and the ODBC library

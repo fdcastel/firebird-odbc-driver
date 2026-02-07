@@ -230,6 +230,10 @@ public:
 	virtual void		releaseSavepoint(const char* name) = 0;
 	virtual void		rollbackSavepoint(const char* name) = 0;
 
+	// Server version detection for feature-flagging (Firebird 3.0/4.0/5.0)
+	virtual int			getServerMajorVersion() = 0;
+	virtual int			getServerMinorVersion() = 0;
+
 	virtual Blob*		genHTML (Properties *context, int genHeaders) = 0;
 	virtual int			getNativeSql (const char * inStatementText, int textLength1,
 										char * outStatementText, int bufferLength,

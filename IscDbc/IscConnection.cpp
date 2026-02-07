@@ -2292,6 +2292,16 @@ void IscConnection::rollbackSavepoint(const char* name)
 	}
 }
 
+int IscConnection::getServerMajorVersion()
+{
+	return attachment ? attachment->getMajorVersion() : 0;
+}
+
+int IscConnection::getServerMinorVersion()
+{
+	return attachment ? attachment->getMinorVersion() : 0;
+}
+
 int IscConnection::getDatabaseDialect()
 {
 	return attachment->getDatabaseDialect();

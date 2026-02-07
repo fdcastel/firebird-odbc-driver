@@ -102,7 +102,11 @@ public:
 	// Savepoint support
 	virtual void setSavepoint(const char* name);
 	virtual void releaseSavepoint(const char* name);
-	virtual void rollbackSavepoint(const char* name);	EnvironmentShare* getEnvironmentShare();
+	virtual void rollbackSavepoint(const char* name);
+
+	// Server version detection
+	virtual int getServerMajorVersion();
+	virtual int getServerMinorVersion();	EnvironmentShare* getEnvironmentShare();
 	virtual void connectionToEnvShare();
 	virtual void connectionFromEnvShare();
 	int	getUseAppOdbcVersion () { return useAppOdbcVersion; }

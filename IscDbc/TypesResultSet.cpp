@@ -104,6 +104,12 @@ struct Types {
 #define DATE(type,code,prec,prefix,suffix,datetimesub) 0,sizeof(type)-1,type,code,prec,sizeof(prefix)-1,prefix,sizeof(suffix)-1,suffix,0,"",NULLABLE,CASE_INSENSITIVE,SEARCHABLE_EXCEPT_LIKE,NOT_NUMERIC,NOT_MONEY,NOT_NUMERIC,sizeof(type)-1,type,UNSCALED,UNSCALED,TYPE_SQL_DATETIME,datetimesub,NOT_NUMERIC,NOT_NUMERIC
 #define DATETIME(type,code,prec,prefix,suffix,datetimesub) 0,sizeof(type)-1,type,code,prec,sizeof(prefix)-1,prefix,sizeof(suffix)-1,suffix,0,"",NULLABLE,CASE_INSENSITIVE,SEARCHABLE_EXCEPT_LIKE,NOT_NUMERIC,NOT_MONEY,NOT_NUMERIC,sizeof(type)-1,type,0,4,TYPE_SQL_DATETIME,datetimesub,NOT_NUMERIC,NOT_NUMERIC
 
+// Version-aware macros: the 'label' field (first char) stores the minimum server major version.
+// 0 = always available, 4 = Firebird 4.0+, 5 = Firebird 5.0+.
+#define NUMERIC_V(ver,type,code,prec,attr,min,max,numprecradix) ver,sizeof(type)-1,type,code,prec,0,"",0,"",sizeof(attr)-1,attr,NULLABLE,CASE_INSENSITIVE,SEARCHABLE_EXCEPT_LIKE,NOT_SIGNED,NOT_MONEY,NOT_AUTO_INCR,sizeof(type)-1,type,min,max,code,NOT_NUMERIC,numprecradix,NOT_NUMERIC
+#define DATETIME_V(ver,type,code,prec,prefix,suffix,datetimesub) ver,sizeof(type)-1,type,code,prec,sizeof(prefix)-1,prefix,sizeof(suffix)-1,suffix,0,"",NULLABLE,CASE_INSENSITIVE,SEARCHABLE_EXCEPT_LIKE,NOT_NUMERIC,NOT_MONEY,NOT_NUMERIC,sizeof(type)-1,type,0,4,TYPE_SQL_DATETIME,datetimesub,NOT_NUMERIC,NOT_NUMERIC
+#define ALPHA_V(ver,type,code,prec) ver,sizeof(type)-1,type,code,prec,1,"'",1,"'",6,"length",NULLABLE,CASE_SENSITIVE,SEARCHABLE,NOT_NUMERIC,NOT_MONEY,NOT_NUMERIC,sizeof(type)-1,type,UNSCALED,UNSCALED,code,NOT_NUMERIC,NOT_NUMERIC,NOT_NUMERIC
+
 static Types types [] = 
 {
 	ALPHA ("CHAR", JDBC_CHAR, MAX_CHAR_LENGTH),
@@ -125,6 +131,12 @@ static Types types [] =
 	NUMERIC ("DOUBLE PRECISION", JDBC_DOUBLE, MAX_DOUBLE_DIGIT_LENGTH, "", UNSCALED, UNSCALED, 2),
 	NUMERIC ("BIGINT", JDBC_BIGINT, MAX_QUAD_LENGTH,"", 0, MAX_QUAD_LENGTH, 10),
 	NUMERIC ("BOOLEAN", JDBC_BOOLEAN, MAX_BOOLEAN_LENGTH, "", UNSCALED, UNSCALED, NOT_NUMERIC),
+	// Firebird 4.0+ types (label = 4 = minimum server major version)
+	NUMERIC_V (4, "INT128", JDBC_NUMERIC, 38, "precision,scale", 0, 38, 10),
+	NUMERIC_V (4, "DECFLOAT", JDBC_DOUBLE, 34, "precision", UNSCALED, UNSCALED, 10),
+	DATETIME_V (4, "TIME WITH TIME ZONE", JDBC_TIME, MAX_TIME_LENGTH, "{t'","'}", 2),
+	DATETIME_V (4, "TIMESTAMP WITH TIME ZONE", JDBC_TIMESTAMP, MAX_TIMESTAMP_LENGTH, "{ts'","'}", 3),
+	// Date/time types must remain at the end (adjusted for ODBC 2.x/3.x in constructor)
 	DATE("DATE",JDBC_DATE,MAX_DATE_LENGTH,"{d'","'}",1),
 	DATETIME("TIME",JDBC_TIME,MAX_TIME_LENGTH,"{t'","'}",2),
 	DATETIME("TIMESTAMP",JDBC_TIMESTAMP,MAX_TIMESTAMP_LENGTH,"{ts'","'}",3)
@@ -139,6 +151,7 @@ TypesResultSet::TypesResultSet(int dataType, int appOdbcVersion, int bytesPerCha
 	outputSqlda {conn, Sqlda::SQLDA_OUTPUT}
 {	
 	dataTypes = dataType;
+	serverMajorVersion = conn ? conn->getServerMajorVersion() : 3;
 
 	int endRow = sizeof (types) / sizeof (types [0]);
 
@@ -225,6 +238,8 @@ TypesResultSet::~TypesResultSet() {}
 
 bool TypesResultSet::nextFetch()
 {
+	int totalRows = sizeof (types) / sizeof (types [0]);
+
 	if (dataTypes != 0)
 	{
 		if ( recordNumber != 0 )
@@ -239,11 +254,19 @@ bool TypesResultSet::nextFetch()
 		sqldataOffsetPtr = (uintptr_t)types + (recordNumber - 1) * sizeof (*types);
 	}
 
-	if (++recordNumber > sizeof (types) / sizeof (types [0]))
-		return false;
+	// Advance to next row, skipping version-gated types not supported by this server
+	while (true)
+	{
+		if (++recordNumber > totalRows)
+			return false;
+
+		int minVersion = types[recordNumber - 1].label;
+		if (minVersion == 0 || serverMajorVersion >= minVersion)
+			break;
+	}
 
 	auto & var = sqlda->sqlvar;
-	sqldataOffsetPtr += sizeof (*types);
+	sqldataOffsetPtr = (uintptr_t)types + (recordNumber - 1) * sizeof (*types);
 
 	SET_INDICATOR_STR(0);						// TYPE_NAME
 	SET_INDICATOR_VAL(1,short,false);			// DATA_TYPE
@@ -292,8 +315,13 @@ bool TypesResultSet::next()
 int TypesResultSet::findType()
 {	
 	for(int i=0; i<sizeof (types)/sizeof (types [0]) ; i++)
+	{
+		int minVersion = types[i].label;
+		if (minVersion != 0 && serverMajorVersion < minVersion)
+			continue;
 		if (types[i].typeType == dataTypes)
-			return i;		
+			return i;
+	}
 
 	return -1;
 }

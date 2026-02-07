@@ -119,6 +119,7 @@ public:
 	JString		jdbcDriver;
 	JString		pageSize;
 	JString		setCompatBindStr;
+	JString		connSettings;
 	bool		enableCompatBind;
 	bool		enableWireCompression;
 	int			optTpb;
