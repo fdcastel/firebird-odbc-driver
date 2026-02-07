@@ -107,15 +107,8 @@ HINSTANCE m_hInstance = NULL;
 UINT codePage = CP_ACP;
 
 namespace OdbcJdbcLibrary {
-
-#if _MSC_VER > 1000
-void clearAtlResource();
-#endif // _MSC_VER > 1000
 void initCodePageTranslate(  int userLCID );
-
 };
-
-BOOL APIENTRY DllMainSetup(  HINSTANCE hinstDLL, DWORD fdwReason, LPVOID );
 
 BOOL APIENTRY DllMain(  HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved )
 {
@@ -126,14 +119,6 @@ BOOL APIENTRY DllMain(  HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved 
 		initCodePageTranslate( GetUserDefaultLCID() );
 		setlocale( LC_ALL, ".ACP" );
 	}
-	else if ( fdwReason == DLL_PROCESS_DETACH )
-	{
-#if _MSC_VER > 1000
-		clearAtlResource();
-#endif // _MSC_VER > 1000
-	}
-
-	DllMainSetup( hinstDLL, fdwReason, lpvReserved );
 
     return TRUE;
 }

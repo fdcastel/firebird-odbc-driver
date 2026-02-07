@@ -94,17 +94,6 @@ public:
 	void Lock();
 	void UnLock();
 
-#ifdef _WINDOWS
-#if _MSC_VER > 1000
-
-public:
-	// realised into TransactionResourceAsync.cpp
-	bool IsInstalledMsTdsInterface();
-	bool enlistTransaction( SQLPOINTER globalTransaction );
-
-#endif // _MSC_VER > 1000
-#endif // _WINDOWS
-
 public:
 
 	OdbcEnv		*env;
@@ -152,14 +141,6 @@ public:
 	MBSTOWCS	MbsToWcs;
 
 	PODBC_USER_EVENTS_INTERFASE userEventsInterfase;
-
-#ifdef _WINDOWS
-#if _MSC_VER > 1000
-
-	bool		enlistConnect;
-
-#endif // _MSC_VER > 1000
-#endif
 
 };
 

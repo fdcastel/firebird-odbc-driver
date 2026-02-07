@@ -327,9 +327,6 @@ OdbcConnection::OdbcConnection(OdbcEnv *parent)
 	enableWireCompression = false;
 
 #ifdef _WINDOWS
-#if _MSC_VER > 1000
-	enlistConnect = false;
-#endif // _MSC_VER > 1000
 	WcsToMbs			= _WcsToMbs;
 	MbsToWcs			= _MbsToWcs;
 #else
@@ -389,27 +386,6 @@ SQLRETURN OdbcConnection::sqlSetConnectAttr( SQLINTEGER attribute, SQLPOINTER va
 
 	switch ( attribute )
 	{
-#ifdef _WINDOWS
-#if _MSC_VER > 1000
-
-	case 1207: // SQL_ENLIST_IN_DTC Enlist connection in the DTC transaction
-
-		if ( !IsInstalledMsTdsInterface() )
-		{
-			return sqlReturn( SQL_ERROR, 
-							  "IM001", 
-							  "Unable start DTC transaction : library 'xolehlp.dll' failed to load" );
-		}
-
-		enlistTransaction( value );
-		autoCommit = false;
-		if ( connection )
-			connection->setAutoCommit( autoCommit );
-		break;
-
-#endif // _MSC_VER > 1000
-#endif
-
 	case SQL_ATTR_ANSI_APP:
 		if ( (intptr_t) value == SQL_AA_FALSE )
 			return sqlReturn (SQL_ERROR, "IM001", "Driver does not support this function");

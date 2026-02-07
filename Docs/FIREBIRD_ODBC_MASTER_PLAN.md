@@ -4,7 +4,7 @@
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
 **Last Updated**: February 7, 2026  
-**Version**: 1.3
+**Version**: 1.4
 
 > This document consolidates all known issues from PLAN.md, ISSUE-244.md, FIREBIRD_ODBC_NEW_FIXES_PLAN.md,
 > and newly identified architectural deficiencies discovered through deep comparison with psqlodbc.
@@ -75,7 +75,7 @@
 | M-3 | No server version feature-flagging (psqlodbc uses `PG_VERSION_GE` macros) | New (comparison) | ❌ OPEN | IscDbc/IscConnection.cpp |
 | M-4 | No ODBC escape sequence parsing (`{fn ...}`, `{d ...}`, `{ts ...}`, `{oj ...}`) | New (comparison) | ❌ OPEN | IscDbc/ |
 | M-5 | Connection settings (`ConnSettings` — SQL to execute on connect) not supported | New (comparison) | ❌ OPEN | OdbcConnection.cpp |
-| M-6 | No DTC/XA distributed transaction support (psqlodbc has `msdtc_enlist.cpp`, `pgxalib.cpp`) | New (comparison) | ❌ OPEN | — |
+| M-6 | ~~No DTC/XA distributed transaction support~~ — ATL/DTC support removed entirely (unnecessary complexity, not needed by Firebird) | New (comparison) | ✅ WONTFIX | Removed: AtlStubs.cpp, ResourceManagerSink.cpp/h, TransactionResourceAsync.cpp/h |
 | M-7 | No batch parameter execution (`SQL_ATTR_PARAMSET_SIZE` > 1) testing or validation | New (comparison) | ❌ OPEN | OdbcStatement.cpp |
 | M-8 | `SQLGetTypeInfo` may not return complete type information for all Firebird types | New (analysis) | ❌ OPEN | IscDbc/IscSqlType.cpp |
 | M-9 | No declare/fetch mode for large result sets (psqlodbc uses `use_declarefetch` for chunked retrieval) | New (comparison) | ❌ OPEN | IscDbc/IscResultSet.cpp |
@@ -344,7 +344,7 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 | 4.5 Implement declare/fetch mode for large result sets | M-9 | 5 days |
 | 4.6 Add `ConnSettings` support (SQL to execute on connect) | M-5 | 1 day |
 | 4.7 Implement scrollable cursor support (forward-only + static at minimum) | M-2 | 5 days |
-| 4.8 Evaluate DTC/XA distributed transaction support feasibility | M-6 | 3 days (investigation) |
+| ~~4.8 Evaluate DTC/XA distributed transaction support feasibility~~ | M-6 | WONTFIX — ATL/DTC removed entirely |
 
 **Deliverable**: Feature-complete ODBC driver supporting all commonly-used ODBC features.
 
@@ -667,5 +667,5 @@ Quick reference for which files need changes in each phase.
 
 ---
 
-*Document version: 1.3 — February 7, 2026*  
+*Document version: 1.4 — February 7, 2026*  
 *This is the single authoritative reference for all Firebird ODBC driver improvements.*

@@ -70,31 +70,9 @@ set(ODBCJDBC_SOURCES
     OdbcError.cpp
     OdbcObject.cpp
     OdbcStatement.cpp
+    SafeEnvThread.cpp
     Utf16Convert.cpp
 )
-
-# Add Windows-specific transaction support files if ATL is available
-# These require Visual Studio with ATL installed
-if(WIN32 AND MSVC)
-    # Try to find if ATL is available (optional)
-    include(CheckIncludeFileCXX)
-    check_include_file_cxx("atlbase.h" HAVE_ATL)
-    
-    if(HAVE_ATL)
-        list(APPEND ODBCJDBC_SOURCES
-            AtlStubs.cpp
-            ResourceManagerSink.cpp
-            SafeEnvThread.cpp
-            TransactionResourceAsync.cpp
-        )
-        message(STATUS "ATL found - including Windows transaction support")
-    else()
-        list(APPEND ODBCJDBC_SOURCES
-            AtlStubs.cpp
-        )
-        message(STATUS "ATL not found - building without Windows transaction support")
-    endif()
-endif()
 
 set(ODBCJDBC_HEADERS
     ConnectDialog.h
@@ -110,12 +88,10 @@ set(ODBCJDBC_HEADERS
     OdbcJdbc.h
     OdbcObject.h
     OdbcStatement.h
-    ResourceManagerSink.h
     SafeEnvThread.h
     SecurityPassword.h
     SetupAttributes.h
     TemplateConvert.h
-    TransactionResourceAsync.h
     Utf16Convert.h
     WriteBuildNo.h
     resource.h
@@ -123,11 +99,6 @@ set(ODBCJDBC_HEADERS
 
 # Create the main ODBC driver library
 add_library(OdbcFb ${ODBCJDBC_SOURCES} ${ODBCJDBC_HEADERS})
-
-# Add HAVE_ATL definition if ATL was found (must come after add_library)
-if(HAVE_ATL)
-    target_compile_definitions(OdbcFb PRIVATE HAVE_ATL)
-endif()
 
 # Set library output name
 if(WIN32)
