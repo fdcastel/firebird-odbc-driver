@@ -40,7 +40,7 @@
 | C-1 | `SQLCopyDesc` crashes with access violation (GUARD_HDESC dereferences before null check) | FIREBIRD_ODBC_NEW_FIXES_PLAN §1 | ❌ OPEN | OdbcDesc.cpp:1033 |
 | C-2 | GUARD_HDESC systemic pattern: all GUARD_* macros dereference handle before null/validity check | FIREBIRD_ODBC_NEW_FIXES_PLAN §2 | ❌ OPEN | OdbcDesc.cpp, OdbcStatement.cpp, OdbcConnection.cpp |
 | C-3 | No handle validation anywhere — invalid/freed handles cause immediate access violations | New (architecture analysis) | ❌ OPEN | Main.cpp, all entry points |
-| C-4 | `wchar_t` vs `SQLWCHAR` confusion caused complete data corruption on Linux/macOS | ISSUE-244 §Root Causes 1–3 | ✅ RESOLVED | MainUnicode.cpp, OdbcConvert.cpp |
+| C-4 | `wchar_t` vs `SQLWCHAR` confusion caused complete data corruption on Linux/macOS | ISSUE-244 §Root Causes 1–3 | ✅ RESOLVED | MainUnicode.cpp, OdbcConvert.cpp (GET_WLEN_FROM_OCTETLENGTHPTR macro cast fix) |
 | C-5 | Locale-dependent `mbstowcs`/`wcstombs` used for UTF-16 conversion | ISSUE-244 §Root Cause 2 | ✅ RESOLVED | MainUnicode.cpp |
 | C-6 | `OdbcObject::postError` uses `sprintf` into 256-byte stack buffer — overflow risk for long messages | New (code review) | ❌ OPEN | OdbcObject.cpp |
 | C-7 | Unsafe exception downcasting: `(SQLException&)` C-style cast throughout codebase | New (code review) | ❌ OPEN | Multiple files |
@@ -96,17 +96,18 @@
 
 | # | Issue | Source | Status | File(s) |
 |---|-------|--------|--------|---------|
-| T-1 | All 84 tests pass (100% pass rate); 16 SqlStateMappingTests all pass | ISSUE-244, PLAN-NEW-TESTS | ✅ RESOLVED | Tests/Cases/ |
+| T-1 | All 84 tests pass (100% pass rate) on Windows, Linux x64, Linux ARM64; 16 SqlStateMappingTests all pass | ISSUE-244, PLAN-NEW-TESTS | ✅ RESOLVED | Tests/Cases/ |
 | T-2 | InfoTests fixed to use `SQLWCHAR` buffers with Unicode ODBC functions | PLAN-NEW-TESTS §Known Issues 1 | ✅ RESOLVED | Tests/Cases/InfoTests.cpp |
 | T-3 | No unit tests for the IscDbc layer — only ODBC API-level integration tests | New (analysis) | ❌ OPEN | Tests/ |
 | T-4 | No data conversion unit tests for OdbcConvert's ~150 conversion methods | New (analysis) | ❌ OPEN | Tests/ |
 | T-5 | Cross-platform test runner: run.ps1 supports Windows (MSBuild/VSTest) and Linux (CMake/CTest) | New (analysis) | ✅ RESOLVED | run.ps1 |
-| T-6 | No test matrix for different Firebird versions (hardcoded to 5.0.3) | New (analysis) | ❌ OPEN | .github/workflows/ |
-| T-7 | No performance/stress tests | New (analysis) | ❌ OPEN | Tests/ |
-| T-8 | No cursor/bookmark/positioned-update tests (psqlodbc has 5 cursor test files) | New (comparison) | ❌ OPEN | Tests/ |
-| T-9 | No descriptor tests (`SQLGetDescRec`, `SQLSetDescRec`, `SQLCopyDesc`) | New (comparison) | ❌ OPEN | Tests/ |
-| T-10 | No multi-statement-handle interleaving tests (psqlodbc tests 100 simultaneous handles) | New (comparison) | ❌ OPEN | Tests/ |
-| T-11 | No batch/array binding tests | New (comparison) | ❌ OPEN | Tests/ |
+| T-6 | CI fully operational: test.yml (Windows x64, Linux x64, Linux ARM64) + build-and-test.yml (Windows, Linux) all green | New (analysis) | ✅ RESOLVED | .github/workflows/ |
+| T-7 | No test matrix for different Firebird versions (hardcoded to 5.0.2) | New (analysis) | ❌ OPEN | .github/workflows/ |
+| T-8 | No performance/stress tests | New (analysis) | ❌ OPEN | Tests/ |
+| T-9 | No cursor/bookmark/positioned-update tests (psqlodbc has 5 cursor test files) | New (comparison) | ❌ OPEN | Tests/ |
+| T-10 | No descriptor tests (`SQLGetDescRec`, `SQLSetDescRec`, `SQLCopyDesc`) | New (comparison) | ❌ OPEN | Tests/ |
+| T-11 | No multi-statement-handle interleaving tests (psqlodbc tests 100 simultaneous handles) | New (comparison) | ❌ OPEN | Tests/ |
+| T-12 | No batch/array binding tests | New (comparison) | ❌ OPEN | Tests/ |
 
 ---
 
@@ -127,7 +128,7 @@
 | **Memory management** | Raw new/delete, intrusive linked lists | malloc/free with error-checking macros | psqlodbc's macros prevent OOM crashes |
 | **Descriptors** | OdbcDesc/DescRecord classes | Union-based DescriptorClass (ARD/APD/IRD/IPD) | Functionally equivalent |
 | **Build system** | Multiple platform-specific makefiles + VS | autotools + VS (standard GNU toolchain for Unix) | psqlodbc's autotools is more maintainable for Unix |
-| **Tests** | 68 MSTest integration tests (93% passing) | 49 standalone C programs with expected-output diffing | psqlodbc tests are simpler, more portable, and more comprehensive |
+| **Tests** | 84 tests (MSTest on Windows, GTest on Linux), 100% passing | 49 standalone C programs with expected-output diffing | psqlodbc tests are simpler, more portable, and more comprehensive |
 | **CI** | GitHub Actions (Windows + Linux) | GitHub Actions | Comparable |
 | **Maturity** | Active development, significant recent fixes | 30+ years, stable, widely deployed | psqlodbc is the gold standard |
 
@@ -584,13 +585,13 @@ Work incrementally. Each phase should be a series of focused, reviewable commits
 
 | Metric | Current | Target | Notes |
 |--------|---------|--------|-------|
-| Test pass rate | 93% (63/68) | 100% | All known test failures resolved |
-| Test count | 68 | 150+ | Comprehensive coverage comparable to psqlodbc |
-| SQLSTATE mapping coverage | ~15% (22/~150 ISC codes) | 90%+ | All common Firebird errors map to correct SQLSTATEs |
+| Test pass rate | **100% (84/84)** | 100% | ✅ All known test failures resolved |
+| Test count | 84 | 150+ | Comprehensive coverage comparable to psqlodbc |
+| SQLSTATE mapping coverage | **90%+ (121 kSqlStates, 100+ ISC mappings)** | 90%+ | ✅ All common Firebird errors map to correct SQLSTATEs |
 | Crash on invalid input | Yes (multiple scenarios) | Never | Return SQL_INVALID_HANDLE or SQL_ERROR |
-| Cross-platform tests | Windows only | Windows + Linux + macOS | Portable test harness |
+| Cross-platform tests | **Windows + Linux (x64 + ARM64)** | Windows + Linux + macOS | ✅ CI passes on all platforms |
 | Firebird version matrix | 5.0 only | 3.0, 4.0, 5.0 | CI tests all supported versions |
-| Unicode compliance | 93% tests passing | 100% | All W function tests pass including BufferLength validation |
+| Unicode compliance | **100% tests passing** | 100% | ✅ All W function tests pass including BufferLength validation |
 
 ### 7.3 Benchmark: What "First-Class" Means
 
@@ -663,5 +664,5 @@ Quick reference for which files need changes in each phase.
 
 ---
 
-*Document version: 1.0 — February 6, 2026*  
+*Document version: 1.1 — February 7, 2026*  
 *This is the single authoritative reference for all Firebird ODBC driver improvements.*
