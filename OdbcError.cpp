@@ -27,6 +27,7 @@
 #include "OdbcEnv.h"
 #include "OdbcConnection.h"
 #include "OdbcError.h"
+#include "OdbcSqlState.h"
 
 #define LABEL_ODBC				"[ODBC Firebird Driver]";
 
@@ -487,62 +488,65 @@ public:
 
 OdbcError::OdbcError(int code, const char *state, JString errorMsg)
 {
-	short link;
-
 	msg = LABEL_ODBC;
 	nativeCode = code;
+	connection = NULL;
 
-	if ( code && listSqlError.findError( code, link ) )
-	{
-		Hash &code = codes[link];
-		memcpy( sqlState, code.string, 6 );
-	}
+	// Use new comprehensive mapping: try SQL code first, then fall back to provided state.
+	// Always store ODBC 3.x SQLSTATE; version adjustment happens at output time via getVersionedSqlState().
+	sqlStateIndex = -1;
+	if (code)
+		sqlStateIndex = findSqlStateBySqlCode(code);
+	if (sqlStateIndex < 0 && state)
+		sqlStateIndex = findSqlStateByString(state);
+
+	if (sqlStateIndex >= 0)
+		memcpy(sqlState, kSqlStates[sqlStateIndex].ver3State, 6);
+	else if (state)
+		memcpy(sqlState, state, 6);
 	else
-		memcpy( sqlState, state, 6 ); // Always 6
+		memcpy(sqlState, "HY000", 6);
 
 	msg += errorMsg;
 	next = NULL;
 	rowNumber = 0;
 	columnNumber = 0;
-	connection = NULL;
 }
 
 OdbcError::OdbcError(int code, int fbcode, const char *state, JString errorMsg)
 {
-	short link;
-	bool changedState = false;
-
 	msg = LABEL_ODBC;
 	nativeCode = code;
+	connection = NULL;
 
-	if ( fbcode )
+	// Use new comprehensive mapping with ISC code priority.
+	// Priority: ISC error code → SQL error code → provided state string → HY000
+	// Always store ODBC 3.x SQLSTATE; version adjustment happens at output time via getVersionedSqlState().
+	sqlStateIndex = -1;
+
+	if (fbcode)
 	{
 		msg += "[Firebird]";
-
-		if ( listServerError.findError( fbcode, link ) )
-		{
-			Hash &code = codes[link];
-			memcpy( sqlState, code.string, 6 );
-			changedState = true;
-		}
+		sqlStateIndex = findSqlStateByIscCode(fbcode);
 	}
 
-	if ( !changedState )
-	{
-		if ( code && listSqlError.findError( code, link ) )
-		{
-			Hash &code = codes[link];
-			memcpy( sqlState, code.string, 6 );
-		}
-		else
-			memcpy( sqlState, state, 6 ); // Always 6
-	}
+	if (sqlStateIndex < 0 && code)
+		sqlStateIndex = findSqlStateBySqlCode(code);
+
+	if (sqlStateIndex < 0 && state)
+		sqlStateIndex = findSqlStateByString(state);
+
+	if (sqlStateIndex >= 0)
+		memcpy(sqlState, kSqlStates[sqlStateIndex].ver3State, 6);
+	else if (state)
+		memcpy(sqlState, state, 6);
+	else
+		memcpy(sqlState, "HY000", 6);
 
 	msg += errorMsg;
 	next = NULL;
 	rowNumber = 0;
 	columnNumber = 0;
-	connection = NULL;
 }
 
 OdbcError::~OdbcError()
@@ -550,10 +554,25 @@ OdbcError::~OdbcError()
 
 }
 
+const char* OdbcError::getVersionedSqlState() const
+{
+	// If we have a valid index and a connection with an environment,
+	// return the version-appropriate SQLSTATE string.
+	if (sqlStateIndex >= 0 && sqlStateIndex < kSqlStatesCount && connection && connection->env)
+	{
+		bool useOdbc3 = (connection->env->useAppOdbcVersion != SQL_OV_ODBC2);
+		return useOdbc3 ? kSqlStates[sqlStateIndex].ver3State
+		                : kSqlStates[sqlStateIndex].ver2State;
+	}
+
+	// No version info available or state not in table — return stored state
+	return sqlState;
+}
+
 SQLRETURN OdbcError::sqlGetDiagRec(UCHAR * stateBuffer, SQLINTEGER * nativeCodePtr, UCHAR * msgBuffer, int msgBufferLength, SWORD * msgLength)
 {
 	if (stateBuffer)
-		strcpy ((char*) stateBuffer, sqlState);
+		strcpy ((char*) stateBuffer, getVersionedSqlState());
 	
 	if (nativeCodePtr)
 		*nativeCodePtr = nativeCode;
@@ -590,18 +609,22 @@ SQLRETURN OdbcError::sqlGetDiagField(int diagId, SQLPOINTER ptr, int msgBufferLe
 	switch (diagId)
 		{
 		case SQL_DIAG_CLASS_ORIGIN:
-			if (sqlState [0] == 'I' && sqlState [1] == 'M')
+			{
+			const char *vstate = getVersionedSqlState();
+			if (vstate [0] == 'I' && vstate [1] == 'M')
 				string = CLASS_ODBC;
 			else
 				string = CLASS_ISO;
+			}
 			break;
 
 		case SQL_DIAG_SUBCLASS_ORIGIN:
 			{
 			short link;
+			const char *vstate = getVersionedSqlState();
 			string = CLASS_ISO;
 
-			if ( listODBCError.findError( sqlState, link ) )
+			if ( listODBCError.findError( vstate, link ) )
 				if ( codes[link].subClassOdbc )
 					string = CLASS_ODBC;
 			}
@@ -630,7 +653,7 @@ SQLRETURN OdbcError::sqlGetDiagField(int diagId, SQLPOINTER ptr, int msgBufferLe
 			break;
 		
 		case SQL_DIAG_SQLSTATE:
-			string = sqlState;
+			string = getVersionedSqlState();
 			break;			
 
 		case SQL_DIAG_ROW_NUMBER:

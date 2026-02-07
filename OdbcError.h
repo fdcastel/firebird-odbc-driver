@@ -40,6 +40,7 @@ public:
 	void setRowNumber (int number);
 	SQLRETURN sqlGetDiagField (int diagId, SQLPOINTER ptr, int bufferLength, SQLSMALLINT *stringLength);
 	SQLRETURN sqlGetDiagRec (UCHAR *stateBuffer, SQLINTEGER *nativeCode, UCHAR *msgBuffer, int msgBufferLength, SWORD *msgLength);
+	const char* getVersionedSqlState() const;
 	OdbcError(int code, const char *state, JString errorMsg);
 	OdbcError(int code, int fbcode, const char *state, JString errorMsg);
 	~OdbcError();
@@ -47,6 +48,7 @@ public:
 	OdbcConnection	*connection;
 	OdbcError		*next;
 	char			sqlState[6];
+	int				sqlStateIndex;
 	JString			msg;
 	int				nativeCode;
 	int				rowNumber;
