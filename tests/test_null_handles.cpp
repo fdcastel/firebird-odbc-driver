@@ -168,7 +168,7 @@ protected:
         };
 
         for (auto path : paths) {
-            hDriver_ = dlopen(path, RTLD_NOW);
+            hDriver_ = dlopen(path, RTLD_NOW | RTLD_NODELETE);
             if (hDriver_) break;
         }
         ASSERT_NE(hDriver_, nullptr)

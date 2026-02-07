@@ -4,9 +4,11 @@
  */
 
 #ifdef _WINDOWS
-#ifndef HAVE_ATL
 
 #include <windows.h>
+
+#ifndef HAVE_ATL
+
 #include "OdbcConnection.h"
 #include "SafeEnvThread.h"
 
