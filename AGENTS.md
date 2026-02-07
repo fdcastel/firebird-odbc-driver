@@ -22,9 +22,9 @@ Whenever you’re asked to do something, follow this process after completing th
   - If the workflow fails, fix the issue and repeat this step until the workflow completes successfully.
 
 
-## 📋 MANDATORY: Update PROJECT_PLAN.md
+## 📋 MANDATORY: Update Docs\FIREBIRD_ODBC_MASTER_PLAN.md
 
-**RULE #1**: Every time you make significant changes to this project, you MUST update [PROJECT_PLAN.md](PROJECT_PLAN.md).
+**RULE #1**: Every time you make significant changes to this project, you MUST update [Docs\FIREBIRD_ODBC_MASTER_PLAN.md](Docs\FIREBIRD_ODBC_MASTER_PLAN.md).
 
 ### What Requires a Plan Update?
 
@@ -45,7 +45,7 @@ Whenever you’re asked to do something, follow this process after completing th
 
 ### How to Update the Plan
 
-1. **Read the current plan first**: Always read [PROJECT_PLAN.md](PROJECT_PLAN.md) before making changes
+1. **Read the current plan first**: Always read [Docs\FIREBIRD_ODBC_MASTER_PLAN.md](Docs\FIREBIRD_ODBC_MASTER_PLAN.md) before making changes
 2. **Update relevant sections**:
    - Mark completed items in the current phase with ✅
    - Update "Current Status" section
@@ -64,14 +64,6 @@ Whenever you’re asked to do something, follow this process after completing th
 - [x] OdbcConnection class with connect/disconnect
 - [x] OdbcStatement class with basic execution
 ...
-
-## Current Status
-
-**Phase**: Phase 2 - Driver Discovery  
-**Version**: 2.1.0-dev  
-**Last Milestone**: Core ODBC infrastructure complete  
-**Next Milestone**: SQLGetInfo implementation
-```
 
 ---
 
@@ -92,7 +84,7 @@ Whenever you’re asked to do something, follow this process after completing th
 
 - ❌ Source code files (go in `src/`, `include/`)
 - ❌ Unit tests (go in `tests/`)
-- ❌ Documentation (README.md, PROJECT_PLAN.md, etc.)
+- ❌ Documentation (README.md, Docs\FIREBIRD_ODBC_MASTER_PLAN.md, etc.)
 - ❌ Build files (go in `build/` directory)
 - ❌ CMake files (CMakeLists.txt, cmake/*.cmake)
 
@@ -253,7 +245,7 @@ ci: add Linux build to GitHub Actions
 1. **CMake Package**: If available via `find_package()`, add to root `CMakeLists.txt`
 2. **FetchContent**: For header-only or small libraries
 3. **Git Submodule**: For larger dependencies requiring specific versions
-4. **Update PROJECT_PLAN.md**: Add to "Dependencies" section with rationale
+4. **Update Docs\FIREBIRD_ODBC_MASTER_PLAN.md**: Add to "Dependencies" section with rationale
 
 **Example FetchContent**:
 ```cmake
@@ -325,7 +317,7 @@ Before considering work complete:
 - [ ] RAII used for all ODBC handles (no manual cleanup)
 - [ ] Error handling extracts full diagnostic records
 - [ ] No memory leaks (checked with valgrind or sanitizers)
-- [ ] PROJECT_PLAN.md is updated (if applicable)
+- [ ] Docs\FIREBIRD_ODBC_MASTER_PLAN.md is updated (if applicable)
 - [ ] README.md is updated (if user-facing changes)
 - [ ] Git commit message follows conventional commits
 
@@ -337,7 +329,7 @@ This project grows over time. When you notice:
 
 - Repetitive code → Create a helper function or template
 - Complex logic → Add comments and break into smaller functions
-- Missing tests → Add them to the next phase in PROJECT_PLAN.md
+- Missing tests → Add them to the next phase in Docs\FIREBIRD_ODBC_MASTER_PLAN.md
 - Unclear documentation → Improve it immediately
 - Platform-specific code → Abstract into platform layer
 
