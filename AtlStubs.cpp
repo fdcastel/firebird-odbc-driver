@@ -35,12 +35,15 @@ bool OdbcConnection::enlistTransaction(void *)
 
 } // namespace OdbcJdbcLibrary
 
-// Global function - not in namespace
+#endif // !HAVE_ATL
+
+// DllMainSetup is needed by DllMain in Main.cpp regardless of ATL availability.
+// The ATL-path files (SafeEnvThread.cpp, etc.) don't define it, so we provide
+// the stub unconditionally.
 BOOL APIENTRY DllMainSetup(HINSTANCE, DWORD, LPVOID)
 {
-    // No-op when ATL is not available
+    // No-op stub
     return TRUE;
 }
 
-#endif // !HAVE_ATL
 #endif // _WINDOWS

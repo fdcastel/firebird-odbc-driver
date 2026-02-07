@@ -178,10 +178,11 @@ protected:
     }
 
     static void TearDownTestSuite() {
-        if (hDriver_) {
-            dlclose(hDriver_);
-            hDriver_ = nullptr;
-        }
+        // Don't dlclose the driver - it can cause "double free" crashes
+        // during process teardown when the driver's global destructors
+        // conflict with the test process cleanup. The OS will clean up
+        // when the process exits.
+        hDriver_ = nullptr;
     }
 
     template<typename FuncType>

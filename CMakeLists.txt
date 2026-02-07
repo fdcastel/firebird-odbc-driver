@@ -82,6 +82,7 @@ if(WIN32 AND MSVC)
     
     if(HAVE_ATL)
         list(APPEND ODBCJDBC_SOURCES
+            AtlStubs.cpp
             ResourceManagerSink.cpp
             SafeEnvThread.cpp
             TransactionResourceAsync.cpp
@@ -122,6 +123,11 @@ set(ODBCJDBC_HEADERS
 
 # Create the main ODBC driver library
 add_library(OdbcFb ${ODBCJDBC_SOURCES} ${ODBCJDBC_HEADERS})
+
+# Add HAVE_ATL definition if ATL was found (must come after add_library)
+if(HAVE_ATL)
+    target_compile_definitions(OdbcFb PRIVATE HAVE_ATL)
+endif()
 
 # Set library output name
 if(WIN32)
