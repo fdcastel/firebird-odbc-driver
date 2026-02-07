@@ -65,14 +65,6 @@ void trace (const char *msg);
 									arg1==SQL_HANDLE_STMT ? ((OdbcStatement*)arg)->connection:		\
 									arg1==SQL_HANDLE_DESC ? ((OdbcDesc*)arg)->connection : NULL )
 
-#else
-
-#define GUARD
-#define GUARD_ENV(arg)			NULL_CHECK(arg)
-#define GUARD_HSTMT(arg)		NULL_CHECK(arg)
-#define GUARD_HDBC(arg)			NULL_CHECK(arg)
-#define GUARD_HDESC(arg)		NULL_CHECK(arg)
-#define GUARD_HTYPE(arg1,arg2)	NULL_CHECK(arg1)
 
 #endif
 

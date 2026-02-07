@@ -860,6 +860,8 @@ SQLRETURN OdbcDesc::sqlSetDescField(int recNumber, int fieldId, SQLPOINTER value
 	clearErrors();
 	DescRecord *record = NULL;
 
+	try
+	{
 	if (recNumber)
 		record = getDescRecord (recNumber);
 
@@ -1167,6 +1169,12 @@ SQLRETURN OdbcDesc::sqlSetDescField(int recNumber, int fieldId, SQLPOINTER value
 		default:
 			return sqlReturn (SQL_ERROR, "HY091", "Invalid descriptor field identifier");
 		}
+	}
+	catch ( SQLException &exception )
+	{
+		postError ("HY000", exception);
+		return SQL_ERROR;
+	}
 
 	return sqlSuccess();
 }

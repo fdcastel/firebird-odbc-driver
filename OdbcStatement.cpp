@@ -837,19 +837,27 @@ SQLRETURN OdbcStatement::sqlFetch()
 		return sqlReturn (SQL_ERROR, "S1008", "Operation canceled");
 	}
 
-	if( enFetch == NoneFetch )
+	try
 	{
-		enFetch = Fetch;
-		schemaFetchData = getSchemaFetchData();
-		rebindColumn();
-		convert->setBindOffsetPtrFrom(sqldataOutOffsetPtr, NULL);
-		isFetchStaticCursor = isStaticCursor();
+		if( enFetch == NoneFetch )
+		{
+			enFetch = Fetch;
+			schemaFetchData = getSchemaFetchData();
+			rebindColumn();
+			convert->setBindOffsetPtrFrom(sqldataOutOffsetPtr, NULL);
+			isFetchStaticCursor = isStaticCursor();
+		}
+
+		if ( isFetchStaticCursor )
+			return sqlFetchScrollCursorStatic ( SQL_FETCH_NEXT, 1);
+
+		return fetchData();
 	}
-
-	if ( isFetchStaticCursor )
-		return sqlFetchScrollCursorStatic ( SQL_FETCH_NEXT, 1);
-
-	return fetchData();
+	catch ( SQLException &exception )
+	{
+		postError ("HY000", exception);
+		return SQL_ERROR;
+	}
 }
 
 #ifdef DEBUG
@@ -1255,6 +1263,8 @@ char *strDebOrientSetPos[]=
 
 SQLRETURN OdbcStatement::sqlSetPos (SQLUSMALLINT row, SQLUSMALLINT operation, SQLUSMALLINT lockType)
 {
+	clearErrors();
+
 #ifdef DEBUG
 	char strTmp[128];
 	sprintf(strTmp,"\t%s : current bookmark %i : row %i\n",strDebOrientSetPos[operation],
@@ -1262,23 +1272,31 @@ SQLRETURN OdbcStatement::sqlSetPos (SQLUSMALLINT row, SQLUSMALLINT operation, SQ
 	OutputDebugString(strTmp); 
 #endif
 
-	switch ( operation )
+	try
 	{
-	case SQL_POSITION:
-		if( fetchBookmarkPtr )
-			rowNumber = (*(int*)fetchBookmarkPtr - 1) + row - 1;
-		else
-			rowNumber = row - 1;
-		if( resultSet )
-			resultSet->setPosRowInSet(rowNumber);
-		++countFetched;
-		break;
-	case SQL_REFRESH:
-		break;
-	case SQL_UPDATE:
-		break;
-	case SQL_DELETE:
-		break;
+		switch ( operation )
+		{
+		case SQL_POSITION:
+			if( fetchBookmarkPtr )
+				rowNumber = (*(int*)fetchBookmarkPtr - 1) + row - 1;
+			else
+				rowNumber = row - 1;
+			if( resultSet )
+				resultSet->setPosRowInSet(rowNumber);
+			++countFetched;
+			break;
+		case SQL_REFRESH:
+			break;
+		case SQL_UPDATE:
+			break;
+		case SQL_DELETE:
+			break;
+		}
+	}
+	catch ( SQLException &exception )
+	{
+		postError ("HY000", exception);
+		return SQL_ERROR;
 	}
 
 	return sqlSuccess();
@@ -1831,60 +1849,55 @@ SQLRETURN OdbcStatement::sqlGetData(int column, int cType, PTR pointer, SQLLEN b
 {
 	clearErrors();
 
-	if( !implementationGetDataDescriptor )
+	try
 	{
-		if ( !listBindGetData )
-			listBindGetData = new ListBindColumn;
-		else
-			listBindGetData->removeAll();
-
-		implementationGetDataDescriptor = connection->allocDescriptor (odtImplementationGetData);
-		convert->setBindOffsetPtrFrom(sqldataOutOffsetPtr, NULL);
-		implementationGetDataDescriptor->getDescRecord (implementationRowDescriptor->headCount, false);
-	}
-
-	DescRecord *record = implementationGetDataDescriptor->getDescRecord (column);
-	
-	if ( record->callType != cType )
-	{
-		record->parameterType = SQL_PARAM_OUTPUT;
-
-		if ( cType == SQL_ARD_TYPE )
+		if( !implementationGetDataDescriptor )
 		{
-			DescRecord *recordArd = applicationRowDescriptor->getDescRecord (column);
-			*record = recordArd;
-		}
-//		else if ( cType == SQL_APD_TYPE )
-//		{
-//			DescRecord *recordApd = applicationParamDescriptor->getDescRecord (column);
-//			*record = recordApd;
-//		}
-		else
-		{
-			record->type = cType;
-			record->length = bufferLength;
-			record->conciseType = cType;
+			if ( !listBindGetData )
+				listBindGetData = new ListBindColumn;
+			else
+				listBindGetData->removeAll();
+
+			implementationGetDataDescriptor = connection->allocDescriptor (odtImplementationGetData);
+			convert->setBindOffsetPtrFrom(sqldataOutOffsetPtr, NULL);
+			implementationGetDataDescriptor->getDescRecord (implementationRowDescriptor->headCount, false);
 		}
 
-		record->callType = cType;
+		DescRecord *record = implementationGetDataDescriptor->getDescRecord (column);
+		
+		if ( record->callType != cType )
+		{
+			record->parameterType = SQL_PARAM_OUTPUT;
 
-		if ( prepareGetData(column, record) )
+			if ( cType == SQL_ARD_TYPE )
+			{
+				DescRecord *recordArd = applicationRowDescriptor->getDescRecord (column);
+				*record = recordArd;
+			}
+			else
+			{
+				record->type = cType;
+				record->length = bufferLength;
+				record->conciseType = cType;
+			}
+
+			record->callType = cType;
+
+			if ( prepareGetData(column, record) )
+				return SQL_ERROR;
+		}
+		else if ( !record->isPrepared && prepareGetData(column, record) )
 			return SQL_ERROR;
-	}
-	else if ( !record->isPrepared && prepareGetData(column, record) )
-		return SQL_ERROR;
-	
-	record->dataPtr = pointer;
-	record->length = bufferLength;
-	record->indicatorPtr = indicatorPointer;
+		
+		record->dataPtr = pointer;
+		record->length = bufferLength;
+		record->indicatorPtr = indicatorPointer;
 
-	if ( fetchRetData == SQL_RD_ON )
-	{
-		if ( isStaticCursor() )
-			resultSet->getDataFromStaticCursor (column);
-
-		try
+		if ( fetchRetData == SQL_RD_ON )
 		{
+			if ( isStaticCursor() )
+				resultSet->getDataFromStaticCursor (column);
+
 			CBindColumn &bindCol = (*listBindGetData)[column];
 			convert->setBindOffsetPtrTo(NULL, NULL);
 
@@ -1896,11 +1909,11 @@ SQLRETURN OdbcStatement::sqlGetData(int column, int cType, PTR pointer, SQLLEN b
 				return SQL_SUCCESS_WITH_INFO;
 			}
 		}
-		catch ( SQLException &exception )
+	}
+	catch ( SQLException &exception )
 	{
-			postError ("HY000", exception);
-			return SQL_ERROR;
-		}
+		postError ("HY000", exception);
+		return SQL_ERROR;
 	}
 
 	return sqlSuccess();
@@ -3116,70 +3129,81 @@ SQLRETURN OdbcStatement::sqlParamData(SQLPOINTER *ptr)
 
 SQLRETURN OdbcStatement::sqlPutData (SQLPOINTER value, SQLLEN valueSize)
 {
+	clearErrors();
+
 	if (parameterNeedData == 0)
 		return sqlReturn (SQL_ERROR, "HY010", "Function sequence error :: OdbcStatement::sqlPutData");
 
     if (parameterNeedData > implementationParamDescriptor->headCount)
 		return sqlReturn (SQL_ERROR, "HY000", "General error :: OdbcStatement::sqlPutData");
 
-	DescRecord *binding = applicationParamDescriptor->getDescRecord (parameterNeedData);
-
-	if ( valueSize != SQL_NULL_DATA && binding->isBlobOrArray )
+	try
 	{
-		if ( !binding->startedTransfer )
-			binding->beginBlobDataTransfer();
+		DescRecord *binding = applicationParamDescriptor->getDescRecord (parameterNeedData);
 
-		if ( valueSize == SQL_NTS )
-			if ( binding->conciseType == SQL_C_WCHAR )
-				valueSize = (SQLINTEGER)wcslen( (wchar_t*)value ) * sizeof(wchar_t);
-			else // if ( binding->conciseType == SQL_C_CHAR )
-				valueSize = (SQLINTEGER)strlen( (char*)value );
-
-		if( valueSize )
+		if ( valueSize != SQL_NULL_DATA && binding->isBlobOrArray )
 		{
-			if ( binding->conciseType == SQL_C_WCHAR )
+			if ( !binding->startedTransfer )
+				binding->beginBlobDataTransfer();
+
+			if ( valueSize == SQL_NTS )
+				if ( binding->conciseType == SQL_C_WCHAR )
+					valueSize = (SQLINTEGER)wcslen( (wchar_t*)value ) * sizeof(wchar_t);
+				else // if ( binding->conciseType == SQL_C_CHAR )
+					valueSize = (SQLINTEGER)strlen( (char*)value );
+
+			if( valueSize )
 			{
-				CBindColumn &bindParam = (*listBindIn)[ parameterNeedData - 1 ];
+				if ( binding->conciseType == SQL_C_WCHAR )
+				{
+					CBindColumn &bindParam = (*listBindIn)[ parameterNeedData - 1 ];
 
-				// for WcsToMbs we need to assure a L'\0' terminated source buffer
-				wchar_t* wcEnd = ((wchar_t*) value) + valueSize / sizeof(wchar_t);
-				wchar_t wcSave = *wcEnd;
-				*wcEnd = L'\0';
+					// for WcsToMbs we need to assure a L'\0' terminated source buffer
+					wchar_t* wcEnd = ((wchar_t*) value) + valueSize / sizeof(wchar_t);
+					wchar_t wcSave = *wcEnd;
+					*wcEnd = L'\0';
 
-				// ipd->headSqlVarPtr->getSqlMultiple() cannot be used to calculate the conversion
-				// buffer size, because for blobs it seems to return always 1
-				// so we call the conversion function to calculate the required buffer size
-				// size_t lenMbs = valueSize / sizeof(wchar_t) * ipd->headSqlVarPtr->getSqlMultiple();
-				size_t lenMbs = bindParam.impRecord->WcsToMbs(NULL, (const wchar_t*)value, 0 );
-				char* tempValue = new char[lenMbs+1];
-				lenMbs = bindParam.impRecord->WcsToMbs(tempValue, (const wchar_t*)value, lenMbs );
-				binding->putBlobSegmentData (lenMbs, tempValue);
-				delete [] tempValue;
+					// ipd->headSqlVarPtr->getSqlMultiple() cannot be used to calculate the conversion
+					// buffer size, because for blobs it seems to return always 1
+					// so we call the conversion function to calculate the required buffer size
+					// size_t lenMbs = valueSize / sizeof(wchar_t) * ipd->headSqlVarPtr->getSqlMultiple();
+					size_t lenMbs = bindParam.impRecord->WcsToMbs(NULL, (const wchar_t*)value, 0 );
+					char* tempValue = new char[lenMbs+1];
+					lenMbs = bindParam.impRecord->WcsToMbs(tempValue, (const wchar_t*)value, lenMbs );
+					binding->putBlobSegmentData (lenMbs, tempValue);
+					delete [] tempValue;
 
-				*wcEnd = wcSave;
+					*wcEnd = wcSave;
+				}
+				else
+					binding->putBlobSegmentData (valueSize, value);
 			}
-			else
-				binding->putBlobSegmentData (valueSize, value);
+		}
+		else
+		{
+			if ( !binding->startedTransfer )
+				binding->startedTransfer = true;
+
+			if ( valueSize == SQL_NTS )
+				if ( binding->conciseType == SQL_C_WCHAR )
+					valueSize = (SQLINTEGER)wcslen( (wchar_t*)value ) * sizeof(wchar_t);
+				else // if ( binding->conciseType == SQL_C_CHAR )
+					valueSize = (SQLINTEGER)strlen( (char*)value );
+
+			CBindColumn &bindParam = (*listBindIn)[ parameterNeedData - 1 ];
+			SQLPOINTER valueSave = binding->dataPtr;
+			binding->dataPtr = value;
+			*binding->indicatorPtr = valueSize;
+			(convert->*bindParam.appRecord->fnConv)(bindParam.appRecord,bindParam.impRecord);
+			binding->dataPtr = valueSave;
 		}
 	}
-	else
+	catch ( SQLException &exception )
 	{
-		if ( !binding->startedTransfer )
-			binding->startedTransfer = true;
-
-		if ( valueSize == SQL_NTS )
-			if ( binding->conciseType == SQL_C_WCHAR )
-				valueSize = (SQLINTEGER)wcslen( (wchar_t*)value ) * sizeof(wchar_t);
-			else // if ( binding->conciseType == SQL_C_CHAR )
-				valueSize = (SQLINTEGER)strlen( (char*)value );
-
-		CBindColumn &bindParam = (*listBindIn)[ parameterNeedData - 1 ];
-		SQLPOINTER valueSave = binding->dataPtr;
-		binding->dataPtr = value;
-		*binding->indicatorPtr = valueSize;
-		(convert->*bindParam.appRecord->fnConv)(bindParam.appRecord,bindParam.impRecord);
-		binding->dataPtr = valueSave;
+		postError ("HY000", exception);
+		return SQL_ERROR;
 	}
+
 	return sqlSuccess();
 }
 

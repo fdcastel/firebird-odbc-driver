@@ -384,6 +384,8 @@ SQLRETURN OdbcConnection::sqlSetConnectAttr( SQLINTEGER attribute, SQLPOINTER va
 {
 	clearErrors();
 
+	try
+	{
 	switch ( attribute )
 	{
 	case SQL_ATTR_ANSI_APP:
@@ -461,6 +463,12 @@ SQLRETURN OdbcConnection::sqlSetConnectAttr( SQLINTEGER attribute, SQLPOINTER va
 
 	default:
 		return sqlReturn (SQL_ERROR, "HY092", "Invalid attribute/option identifier");
+	}
+	}
+	catch ( SQLException &exception )
+	{
+		postError ("HY000", exception);
+		return SQL_ERROR;
 	}
 
 	return sqlSuccess();
@@ -1065,23 +1073,26 @@ SQLRETURN OdbcConnection::sqlGetFunctions(SQLUSMALLINT functionId, SQLUSMALLINT 
 {
 	clearErrors();
 
-	switch (functionId)
+	try
 	{
-	case SQL_API_ODBC3_ALL_FUNCTIONS:
-		memcpy (supportedPtr, functionsBitmap, sizeof (functionsBitmap));
-		return sqlSuccess();
+		switch (functionId)
+		{
+		case SQL_API_ODBC3_ALL_FUNCTIONS:
+			memcpy (supportedPtr, functionsBitmap, sizeof (functionsBitmap));
+			return sqlSuccess();
 
-	case SQL_API_ALL_FUNCTIONS:
-		memcpy (supportedPtr, functionsArray, sizeof (functionsArray));
-		return sqlSuccess();
+		case SQL_API_ALL_FUNCTIONS:
+			memcpy (supportedPtr, functionsArray, sizeof (functionsArray));
+			return sqlSuccess();
+		}
+
+		*supportedPtr = (SQL_FUNC_EXISTS (functionsBitmap, functionId)) ? SQL_TRUE : SQL_FALSE;
 	}
-
-	/***
-	if (functionId >= 0 && functionId < SQL_API_ODBC3_ALL_FUNCTIONS_SIZE  * 16)
-		return sqlReturn (SQL_ERROR, "HY095", "Function type out of range");
-	***/
-
-	*supportedPtr = (SQL_FUNC_EXISTS (functionsBitmap, functionId)) ? SQL_TRUE : SQL_FALSE;
+	catch ( SQLException &exception )
+	{
+		postError ("HY000", exception);
+		return SQL_ERROR;
+	}
 
 	return sqlSuccess();
 }
@@ -1139,6 +1150,8 @@ SQLRETURN OdbcConnection::sqlGetInfo( SQLUSMALLINT type, SQLPOINTER ptr, SQLSMAL
 	uintptr_t value = (uintptr_t) item->value;
 	DatabaseMetaData *metaData = NULL;
 
+	try
+	{
 	if (connection)
 		metaData = connection->getMetaData();
 	else
@@ -1520,6 +1533,12 @@ SQLRETURN OdbcConnection::sqlGetInfo( SQLUSMALLINT type, SQLPOINTER ptr, SQLSMAL
 		if (ptr)
 			*((SQLUINTEGER*) ptr) = value;
 		break;
+	}
+	}
+	catch ( SQLException &exception )
+	{
+		postError ("HY000", exception);
+		return SQL_ERROR;
 	}
 
 	return sqlSuccess();
@@ -2060,6 +2079,8 @@ SQLRETURN OdbcConnection::sqlGetConnectAttr(int attribute, SQLPOINTER ptr, int b
 	int value;
 	const char *string = NULL;
 
+	try
+	{
 	switch (attribute)
 	{
 	case SQL_ATTR_ASYNC_ENABLE:
@@ -2117,6 +2138,12 @@ SQLRETURN OdbcConnection::sqlGetConnectAttr(int attribute, SQLPOINTER ptr, int b
 
 	if (lengthPtr)
 		*lengthPtr = sizeof (int);
+	}
+	catch ( SQLException &exception )
+	{
+		postError ("HY000", exception);
+		return SQL_ERROR;
+	}
 
 	return sqlSuccess();
 }

@@ -4,7 +4,7 @@
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
 **Last Updated**: February 7, 2026  
-**Version**: 1.4
+**Version**: 1.5
 
 > This document consolidates all known issues from PLAN.md, ISSUE-244.md, FIREBIRD_ODBC_NEW_FIXES_PLAN.md,
 > and newly identified architectural deficiencies discovered through deep comparison with psqlodbc.
@@ -88,7 +88,7 @@
 | L-2 | No smart pointers — raw `new`/`delete` everywhere | New (code review) | ❌ OPEN | Entire codebase |
 | L-3 | Massive file sizes: OdbcConvert.cpp (4562 lines), OdbcStatement.cpp (3719 lines) | New (code review) | ❌ OPEN | Multiple files |
 | L-4 | Mixed coding styles (tabs vs spaces, brace placement) from 20+ years of contributors | New (code review) | ❌ OPEN | Entire codebase |
-| L-5 | Thread safety is compile-time configurable and easily misconfigured (`DRIVER_LOCKED_LEVEL`) | New (code review) | ❌ OPEN | SafeEnvThread.h |
+| L-5 | ~~Thread safety is compile-time configurable and easily misconfigured (`DRIVER_LOCKED_LEVEL`)~~ — Removed `DRIVER_LOCKED_LEVEL_NONE` (level 0); thread safety always enabled | New (code review) | ✅ RESOLVED | OdbcJdbc.h, Main.h |
 | L-6 | Intrusive linked lists for object management (fragile, limits objects to one list) | New (code review) | ❌ OPEN | OdbcObject.h |
 | L-7 | Duplicated logic in `OdbcObject::setString` (two overloads with identical bodies) | New (code review) | ❌ OPEN | OdbcObject.cpp |
 | L-8 | Static initialization order issues in `EnvShare` | New (code review) | ❌ OPEN | IscDbc/EnvShare.cpp |
@@ -274,17 +274,17 @@ psqlodbc wraps every ODBC entry point with a consistent 5-step pattern (lock →
 
 **Deliverable**: All SQLSTATE-related tests pass; error mapping is comprehensive.
 
-### Phase 2: Entry Point Hardening
+### Phase 2: Entry Point Hardening ✅ (Completed — February 7, 2026)
 **Priority**: High  
 **Duration**: 1–2 weeks  
 **Goal**: Consistent, safe behavior at every ODBC API boundary
 
 | Task | Issues Addressed | Effort |
 |------|-----------------|--------|
-| 2.1 Implement consistent entry-point wrapper pattern (inspired by psqlodbc) | C-3, L-5 | 3 days |
-| 2.2 Add error-clearing at every entry point (currently inconsistent) | — | 1 day |
-| 2.3 Add statement-level savepoint/rollback isolation | M-1 | 3 days |
-| 2.4 Ensure thread-safety macros are always compiled in (remove level 0 option) | L-5 | 1 day |
+| ✅ 2.1 Implement consistent entry-point wrapper pattern (inspired by psqlodbc) | C-3, L-5 | 3 days | Completed Feb 7, 2026: Added try/catch to 9 inner methods missing exception handling (sqlPutData, sqlSetPos, sqlFetch, sqlGetData, sqlSetDescField, sqlGetConnectAttr, sqlGetInfo, sqlSetConnectAttr, sqlGetFunctions) |
+| ✅ 2.2 Add error-clearing at every entry point (currently inconsistent) | — | 1 day | Completed Feb 7, 2026: Added clearErrors() to sqlPutData, sqlSetPos; verified all other entry points already had it |
+| 2.3 Add statement-level savepoint/rollback isolation | M-1 | 3 days | Deferred — requires Firebird server for testing; tracked as M-1 |
+| ✅ 2.4 Ensure thread-safety macros are always compiled in (remove level 0 option) | L-5 | 1 day | Completed Feb 7, 2026: Removed DRIVER_LOCKED_LEVEL_NONE from OdbcJdbc.h, removed no-locking fallback from Main.h, added compile-time #error guard |
 
 **Entry point pattern to adopt** (adapted from psqlodbc):
 ```cpp
@@ -667,5 +667,5 @@ Quick reference for which files need changes in each phase.
 
 ---
 
-*Document version: 1.4 — February 7, 2026*  
+*Document version: 1.5 — February 7, 2026*  
 *This is the single authoritative reference for all Firebird ODBC driver improvements.*
