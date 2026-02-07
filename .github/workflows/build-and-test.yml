@@ -15,7 +15,7 @@ jobs:
     - uses: actions/checkout@v4
     
     - name: Setup Firebird Environment
-      shell: powershell
+      shell: pwsh
       run: |
         Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
         Install-Module -Name PowerShellGet -Force -AllowClobber -Scope CurrentUser
@@ -27,7 +27,7 @@ jobs:
         Install-Module -Name PSFirebird -Force -AllowClobber -Scope CurrentUser -Repository PSGallery
         
     - name: Create Firebird Test Database
-      shell: powershell
+      shell: pwsh
       run: |
         $fbVersion = '5.0.2'
         $envPath = 'C:\fbodbc-tests\fb502'
@@ -49,13 +49,13 @@ jobs:
       run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
       
     - name: Setup Test Environment
-      shell: powershell
+      shell: pwsh
       run: |
         $env:FIREBIRD_ODBC_CONNECTION='Driver={Firebird ODBC Driver};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=/fbodbc-tests/fb502/fbclient.dll'
         echo "FIREBIRD_ODBC_CONNECTION=$env:FIREBIRD_ODBC_CONNECTION" >> $env:GITHUB_ENV
         
     - name: Install ODBC Driver
-      shell: powershell
+      shell: pwsh
       run: |
         # Copy built driver to system directory for registration
         $driverPath = "${{github.workspace}}\build\${{env.BUILD_TYPE}}\FirebirdODBC.dll"
@@ -132,16 +132,28 @@ jobs:
         # Change SYSDBA password
         sudo gsec -user SYSDBA -password masterkey -modify SYSDBA -pw masterkey || true
         
-        # Create test database directory
-        sudo mkdir -p /fbodbc-tests
-        sudo chmod 777 /fbodbc-tests
+        # Create test database directory in Firebird's home
+        sudo mkdir -p /var/lib/firebird/data
+        sudo chown firebird:firebird /var/lib/firebird/data
+        sudo chmod 770 /var/lib/firebird/data
         
-        # Create test database
-        echo "CREATE DATABASE '/fbodbc-tests/TEST.FB50.FDB' USER 'SYSDBA' PASSWORD 'masterkey';" > /tmp/create_db.sql
-        /usr/bin/isql-fb -user SYSDBA -password masterkey -i /tmp/create_db.sql
+        # Create database as firebird user
+        echo "CREATE DATABASE '/var/lib/firebird/data/TEST.FB50.FDB' USER 'SYSDBA' PASSWORD 'masterkey';" > /tmp/create_db.sql
+        sudo -u firebird /usr/bin/isql-fb -user SYSDBA -password masterkey -i /tmp/create_db.sql || {
+          echo "Failed to create database, trying alternative method..."
+          sudo chmod 777 /var/lib/firebird/data
+          /usr/bin/isql-fb -user SYSDBA -password masterkey -i /tmp/create_db.sql
+        }
         
         # Verify database exists
-        ls -la /fbodbc-tests/
+        if [ -f "/var/lib/firebird/data/TEST.FB50.FDB" ]; then
+          echo "✓ Test database created successfully"
+          ls -la /var/lib/firebird/data/
+        else
+          echo "✗ Failed to create test database"
+          ls -la /var/lib/firebird/data/
+          exit 1
+        fi
         
         # Get Firebird client library path
         FB_CLIENT=$(find /usr/lib -name "libfbclient.so*" | head -n 1)
@@ -174,7 +186,7 @@ jobs:
       working-directory: ${{github.workspace}}/build
       run: ctest -C ${{env.BUILD_TYPE}} --output-on-failure --verbose
       env:
-        FIREBIRD_ODBC_CONNECTION: Driver={Firebird ODBC Driver};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=${{env.FB_CLIENT}}
+        FIREBIRD_ODBC_CONNECTION: Driver={Firebird ODBC Driver};Database=/var/lib/firebird/data/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=${{env.FB_CLIENT}}
         
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4
