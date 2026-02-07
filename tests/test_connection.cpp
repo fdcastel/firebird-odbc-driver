@@ -90,7 +90,9 @@ protected:
 // Test: Check if connection string is provided
 TEST_F(FirebirdODBCTest, ConnectionStringProvided) {
     std::string connStr = GetConnectionString();
-    ASSERT_FALSE(connStr.empty()) << "FIREBIRD_ODBC_CONNECTION environment variable must be set";
+    if (connStr.empty()) {
+        GTEST_SKIP() << "FIREBIRD_ODBC_CONNECTION environment variable not set";
+    }
 }
 
 // Test: Allocate ODBC handles
@@ -101,7 +103,9 @@ TEST_F(FirebirdODBCTest, AllocateODBCHandles) {
 // Test: Connect to Firebird database
 TEST_F(FirebirdODBCTest, ConnectToDatabase) {
     std::string connStr = GetConnectionString();
-    ASSERT_FALSE(connStr.empty()) << "FIREBIRD_ODBC_CONNECTION environment variable must be set";
+    if (connStr.empty()) {
+        GTEST_SKIP() << "FIREBIRD_ODBC_CONNECTION environment variable not set";
+    }
     
     ASSERT_TRUE(AllocateHandles()) << "Failed to allocate ODBC handles";
     
@@ -125,7 +129,9 @@ TEST_F(FirebirdODBCTest, ConnectToDatabase) {
 // Test: Execute a simple query
 TEST_F(FirebirdODBCTest, ExecuteSimpleQuery) {
     std::string connStr = GetConnectionString();
-    ASSERT_FALSE(connStr.empty()) << "FIREBIRD_ODBC_CONNECTION environment variable must be set";
+    if (connStr.empty()) {
+        GTEST_SKIP() << "FIREBIRD_ODBC_CONNECTION environment variable not set";
+    }
     
     ASSERT_TRUE(AllocateHandles()) << "Failed to allocate ODBC handles";
     
@@ -161,7 +167,9 @@ TEST_F(FirebirdODBCTest, ExecuteSimpleQuery) {
 // Test: Create and drop a test table
 TEST_F(FirebirdODBCTest, CreateAndDropTable) {
     std::string connStr = GetConnectionString();
-    ASSERT_FALSE(connStr.empty()) << "FIREBIRD_ODBC_CONNECTION environment variable must be set";
+    if (connStr.empty()) {
+        GTEST_SKIP() << "FIREBIRD_ODBC_CONNECTION environment variable not set";
+    }
     
     ASSERT_TRUE(AllocateHandles()) << "Failed to allocate ODBC handles";
     
@@ -217,7 +225,9 @@ TEST_F(FirebirdODBCTest, CreateAndDropTable) {
 // Test: Insert and retrieve data
 TEST_F(FirebirdODBCTest, InsertAndRetrieveData) {
     std::string connStr = GetConnectionString();
-    ASSERT_FALSE(connStr.empty()) << "FIREBIRD_ODBC_CONNECTION environment variable must be set";
+    if (connStr.empty()) {
+        GTEST_SKIP() << "FIREBIRD_ODBC_CONNECTION environment variable not set";
+    }
     
     ASSERT_TRUE(AllocateHandles()) << "Failed to allocate ODBC handles";
     

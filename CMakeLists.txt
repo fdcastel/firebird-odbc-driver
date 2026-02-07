@@ -136,11 +136,13 @@ target_link_libraries(OdbcFb PRIVATE IscDbc)
 # Platform-specific linking
 if(WIN32)
     target_link_libraries(OdbcFb PRIVATE 
-        odbc32 
         odbccp32 
         legacy_stdio_definitions
         Version
     )
+    
+    # Don't link against odbc32.dll - the driver provides its own
+    # ODBC entry points and should not import them from the Driver Manager
     
     # Set the .def file for exports
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)

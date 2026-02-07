@@ -54,3 +54,19 @@ endif()
 
 # Use simple add_test instead of gtest_discover_tests to avoid build-time test discovery
 add_test(NAME firebird_odbc_tests COMMAND firebird_odbc_tests)
+
+# Ensure the test can find DLLs (GTest, driver) at runtime
+if(WIN32)
+    # Add the GTest DLL directory and the driver DLL directory to PATH for CTest
+    set_tests_properties(firebird_odbc_tests PROPERTIES
+        ENVIRONMENT "PATH=$<TARGET_FILE_DIR:gtest>;$<TARGET_FILE_DIR:OdbcFb>;$ENV{PATH}"
+    )
+endif()
+
+# Copy the driver DLL next to the test executable so LoadLibrary finds it
+add_custom_command(TARGET firebird_odbc_tests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:OdbcFb>
+        $<TARGET_FILE_DIR:firebird_odbc_tests>
+    COMMENT "Copying driver DLL next to test executable"
+)
