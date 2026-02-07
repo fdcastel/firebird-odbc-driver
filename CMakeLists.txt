@@ -70,6 +70,7 @@ set(ODBCJDBC_SOURCES
     OdbcError.cpp
     OdbcObject.cpp
     OdbcStatement.cpp
+    Utf16Convert.cpp
 )
 
 # Add Windows-specific transaction support files if ATL is available
@@ -114,6 +115,7 @@ set(ODBCJDBC_HEADERS
     SetupAttributes.h
     TemplateConvert.h
     TransactionResourceAsync.h
+    Utf16Convert.h
     WriteBuildNo.h
     resource.h
 )
