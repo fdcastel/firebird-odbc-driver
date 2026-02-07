@@ -1,0 +1,188 @@
+name: Build and Test
+
+on:
+  push:
+    branches: [ "main", "master", "develop" ]
+  pull_request:
+    branches: [ "main", "master", "develop" ]
+
+env:
+  BUILD_TYPE: Release
+
+jobs:
+  build-and-test-windows:
+    runs-on: windows-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Setup Firebird Environment
+      shell: powershell
+      run: |
+        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+        Install-Module -Name PowerShellGet -Force -AllowClobber -Scope CurrentUser
+        try {
+          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser -ForceBootstrap -ErrorAction Stop
+        } catch {
+          Write-Host "NuGet provider install failed, continuing: $($_.Exception.Message)"
+        }
+        Install-Module -Name PSFirebird -Force -AllowClobber -Scope CurrentUser -Repository PSGallery
+        
+    - name: Create Firebird Test Database
+      shell: powershell
+      run: |
+        $fbVersion = '5.0.2'
+        $envPath = 'C:\fbodbc-tests\fb502'
+        $dbPath = '/fbodbc-tests/TEST.FB50.FDB'
+        
+        New-Item -ItemType Directory -Path 'C:\fbodbc-tests' -Force | Out-Null
+        
+        Import-Module PSFirebird
+        $fb = New-FirebirdEnvironment -Version $fbVersion -Path $envPath -Force
+        $db = New-FirebirdDatabase -Database $dbPath -Environment $fb -Force
+        
+        Write-Host "Firebird environment created at: $envPath"
+        Write-Host "Test database created at: $dbPath"
+        
+    - name: Configure CMake
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DBUILD_TESTING=ON
+      
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
+      
+    - name: Setup Test Environment
+      shell: powershell
+      run: |
+        $env:FIREBIRD_ODBC_CONNECTION='Driver={Firebird ODBC Driver};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=/fbodbc-tests/fb502/fbclient.dll'
+        echo "FIREBIRD_ODBC_CONNECTION=$env:FIREBIRD_ODBC_CONNECTION" >> $env:GITHUB_ENV
+        
+    - name: Install ODBC Driver
+      shell: powershell
+      run: |
+        # Copy built driver to system directory for registration
+        $driverPath = "${{github.workspace}}\build\${{env.BUILD_TYPE}}\FirebirdODBC.dll"
+        
+        if (Test-Path $driverPath) {
+          Write-Host "Driver built at: $driverPath"
+          
+          # Register the driver (for testing purposes)
+          # Note: In a real scenario, you'd use a proper installer
+          $regPath = "HKLM:\SOFTWARE\ODBC\ODBCINST.INI\Firebird ODBC Driver"
+          if (!(Test-Path $regPath)) {
+            New-Item -Path "HKLM:\SOFTWARE\ODBC\ODBCINST.INI" -Name "Firebird ODBC Driver" -Force
+          }
+          
+          Set-ItemProperty -Path $regPath -Name "Driver" -Value $driverPath -Type String -Force
+          Set-ItemProperty -Path $regPath -Name "Setup" -Value $driverPath -Type String -Force
+          Set-ItemProperty -Path $regPath -Name "APILevel" -Value "1" -Type String -Force
+          Set-ItemProperty -Path $regPath -Name "ConnectFunctions" -Value "YYY" -Type String -Force
+          Set-ItemProperty -Path $regPath -Name "DriverODBCVer" -Value "03.51" -Type String -Force
+          Set-ItemProperty -Path $regPath -Name "FileUsage" -Value "0" -Type String -Force
+          Set-ItemProperty -Path $regPath -Name "SQLLevel" -Value "1" -Type String -Force
+          
+          # Add to drivers list
+          $driversPath = "HKLM:\SOFTWARE\ODBC\ODBCINST.INI\ODBC Drivers"
+          if (!(Test-Path $driversPath)) {
+            New-Item -Path "HKLM:\SOFTWARE\ODBC\ODBCINST.INI" -Name "ODBC Drivers" -Force
+          }
+          Set-ItemProperty -Path $driversPath -Name "Firebird ODBC Driver" -Value "Installed" -Type String -Force
+          
+          Write-Host "ODBC Driver registered successfully"
+        } else {
+          Write-Host "Driver not found at: $driverPath"
+          Get-ChildItem -Path "${{github.workspace}}\build" -Recurse -Filter "*.dll" | ForEach-Object { Write-Host $_.FullName }
+        }
+        
+    - name: Run Tests
+      working-directory: ${{github.workspace}}/build
+      run: ctest -C ${{env.BUILD_TYPE}} --output-on-failure --verbose
+      env:
+        FIREBIRD_ODBC_CONNECTION: Driver={Firebird ODBC Driver};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=C:/fbodbc-tests/fb502/fbclient.dll
+        
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      if: success()
+      with:
+        name: windows-x64-binaries
+        path: |
+          ${{github.workspace}}/build/${{env.BUILD_TYPE}}/*.dll
+          ${{github.workspace}}/build/${{env.BUILD_TYPE}}/*.lib
+          ${{github.workspace}}/build/${{env.BUILD_TYPE}}/*.pdb
+
+  build-and-test-linux:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Install Dependencies
+      run: |
+        sudo apt-get update
+        sudo apt-get install -y unixodbc unixodbc-dev wget
+        
+    - name: Setup Firebird and Create Test Database
+      run: |
+        # Install Firebird
+        sudo apt-get install -y firebird3.0-server firebird3.0-common firebird-dev
+        
+        # Start Firebird service
+        sudo systemctl start firebird3.0
+        
+        # Wait for Firebird to be ready
+        sleep 5
+        
+        # Change SYSDBA password
+        sudo gsec -user SYSDBA -password masterkey -modify SYSDBA -pw masterkey || true
+        
+        # Create test database directory
+        sudo mkdir -p /fbodbc-tests
+        sudo chmod 777 /fbodbc-tests
+        
+        # Create test database
+        echo "CREATE DATABASE '/fbodbc-tests/TEST.FB50.FDB' USER 'SYSDBA' PASSWORD 'masterkey';" > /tmp/create_db.sql
+        /usr/bin/isql-fb -user SYSDBA -password masterkey -i /tmp/create_db.sql
+        
+        # Verify database exists
+        ls -la /fbodbc-tests/
+        
+        # Get Firebird client library path
+        FB_CLIENT=$(find /usr/lib -name "libfbclient.so*" | head -n 1)
+        echo "Firebird client library: $FB_CLIENT"
+        echo "FB_CLIENT=$FB_CLIENT" >> $GITHUB_ENV
+        
+    - name: Configure CMake
+      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DBUILD_TESTING=ON
+      
+    - name: Build
+      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j$(nproc)
+      
+    - name: Install ODBC Driver
+      run: |
+        # Copy driver to a known location
+        sudo mkdir -p /usr/local/lib/odbc
+        sudo cp ${{github.workspace}}/build/libOdbcFb.so /usr/local/lib/odbc/
+        
+        # Register the driver in odbcinst.ini
+        echo "[Firebird ODBC Driver]" | sudo tee /etc/odbcinst.ini
+        echo "Description = Firebird ODBC Driver" | sudo tee -a /etc/odbcinst.ini
+        echo "Driver = /usr/local/lib/odbc/libOdbcFb.so" | sudo tee -a /etc/odbcinst.ini
+        echo "Setup = /usr/local/lib/odbc/libOdbcFb.so" | sudo tee -a /etc/odbcinst.ini
+        echo "FileUsage = 1" | sudo tee -a /etc/odbcinst.ini
+        
+        # Verify registration
+        odbcinst -q -d
+        
+    - name: Run Tests
+      working-directory: ${{github.workspace}}/build
+      run: ctest -C ${{env.BUILD_TYPE}} --output-on-failure --verbose
+      env:
+        FIREBIRD_ODBC_CONNECTION: Driver={Firebird ODBC Driver};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=${{env.FB_CLIENT}}
+        
+    - name: Upload Build Artifacts
+      uses: actions/upload-artifact@v4
+      if: success()
+      with:
+        name: linux-x64-binaries
+        path: |
+          ${{github.workspace}}/build/*.so
+          ${{github.workspace}}/build/**/*.so
