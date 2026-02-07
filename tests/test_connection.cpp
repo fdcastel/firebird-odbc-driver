@@ -1,24 +1,4 @@
-#include <gtest/gtest.h>
-#include <cstdlib>
-#include <string>
-
-#ifdef _WIN32
-#include <windows.h>
-#include <sql.h>
-#include <sqlext.h>
-#else
-#include <sql.h>
-#include <sqlext.h>
-#endif
-
-// Helper function to get connection string from environment
-std::string GetConnectionString() {
-    const char* connStr = std::getenv("FIREBIRD_ODBC_CONNECTION");
-    if (connStr == nullptr) {
-        return "";
-    }
-    return std::string(connStr);
-}
+#include "test_helpers.h"
 
 // Test fixture for ODBC connection tests
 class FirebirdODBCTest : public ::testing::Test {

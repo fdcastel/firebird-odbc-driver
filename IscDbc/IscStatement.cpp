@@ -650,11 +650,19 @@ bool IscStatement::execute()
 	if ( isActiveSelect() && connection->transactionInfo.autoCommit && resultSets.isEmpty() )
 		clearSelect();
 
+	// Use savepoints for statement-level error isolation when auto-commit is OFF
+	const bool useSavepoint = !connection->transactionInfo.autoCommit
+	                          && connection->transactionInfo.transactionHandle;
+	const char* svpName = "FBODBC_SVP";
+
 	ThrowStatusWrapper status( connection->GDS->_status );
 	try
 	{
 		// Make sure there is a transaction
 		ITransaction* transHandle = startTransaction();
+
+		if ( useSavepoint )
+			connection->setSavepoint(svpName);
 
 		inputSqlda.checkAndRebuild();
 		auto* _imeta = inputSqlda.useExecBufferMeta ? inputSqlda.execMeta   : inputSqlda.meta;
@@ -670,10 +678,15 @@ bool IscStatement::execute()
 			                                           _imeta, _ibuf.data(),
 			                                           outputSqlda.meta, 0 );
 		}
+
+		if ( useSavepoint )
+			connection->releaseSavepoint(svpName);
 	}
 	catch( const FbException& error )
 	{
-		if ( connection->transactionInfo.autoCommit )
+		if ( useSavepoint )
+			connection->rollbackSavepoint(svpName);
+		else if ( connection->transactionInfo.autoCommit )
 			connection->rollbackAuto();
 		clearSelect();
 		THROW_ISC_EXCEPTION ( connection, error.getStatus() );
@@ -733,11 +746,19 @@ bool IscStatement::execute()
 
 bool IscStatement::executeProcedure()
 {
+	// Use savepoints for statement-level error isolation when auto-commit is OFF
+	const bool useSavepoint = !connection->transactionInfo.autoCommit
+	                          && connection->transactionInfo.transactionHandle;
+	const char* svpName = "FBODBC_SVP";
+
 	ThrowStatusWrapper status( connection->GDS->_status );
 	try
 	{
 		// Make sure there is a transaction
 		ITransaction* transHandle = startTransaction();
+
+		if ( useSavepoint )
+			connection->setSavepoint(svpName);
 
 		inputSqlda.checkAndRebuild();
 		auto* _imeta = inputSqlda.useExecBufferMeta ? inputSqlda.execMeta   : inputSqlda.meta;
@@ -746,10 +767,15 @@ bool IscStatement::executeProcedure()
 		statementHandle->execute( &status, transHandle,
 		                          _imeta, _ibuf.data(),
 		                          outputSqlda.meta, outputSqlda.buffer.data() );
+
+		if ( useSavepoint )
+			connection->releaseSavepoint(svpName);
 	}
 	catch( const FbException& error )
 	{
-		if ( connection->transactionInfo.autoCommit )
+		if ( useSavepoint )
+			connection->rollbackSavepoint(svpName);
+		else if ( connection->transactionInfo.autoCommit )
 			connection->rollbackAuto();
 		THROW_ISC_EXCEPTION ( connection, error.getStatus() );
 	}

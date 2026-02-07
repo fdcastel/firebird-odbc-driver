@@ -225,6 +225,11 @@ public:
 	virtual void		commitAuto() = 0;
 	virtual void		rollbackAuto() = 0;
 
+	// Savepoint support for statement-level error isolation
+	virtual void		setSavepoint(const char* name) = 0;
+	virtual void		releaseSavepoint(const char* name) = 0;
+	virtual void		rollbackSavepoint(const char* name) = 0;
+
 	virtual Blob*		genHTML (Properties *context, int genHeaders) = 0;
 	virtual int			getNativeSql (const char * inStatementText, int textLength1,
 										char * outStatementText, int bufferLength,

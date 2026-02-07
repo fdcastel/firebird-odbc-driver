@@ -99,7 +99,10 @@ public:
 	virtual int release();
 	virtual void addRef();
 	virtual void setExtInitTransaction (int optTpb);
-	EnvironmentShare* getEnvironmentShare();
+	// Savepoint support
+	virtual void setSavepoint(const char* name);
+	virtual void releaseSavepoint(const char* name);
+	virtual void rollbackSavepoint(const char* name);	EnvironmentShare* getEnvironmentShare();
 	virtual void connectionToEnvShare();
 	virtual void connectionFromEnvShare();
 	int	getUseAppOdbcVersion () { return useAppOdbcVersion; }

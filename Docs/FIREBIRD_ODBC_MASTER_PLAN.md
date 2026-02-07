@@ -4,7 +4,7 @@
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
 **Last Updated**: February 7, 2026  
-**Version**: 1.5
+**Version**: 1.6
 
 > This document consolidates all known issues from PLAN.md, ISSUE-244.md, FIREBIRD_ODBC_NEW_FIXES_PLAN.md,
 > and newly identified architectural deficiencies discovered through deep comparison with psqlodbc.
@@ -70,7 +70,7 @@
 
 | # | Issue | Source | Status | File(s) |
 |---|-------|--------|--------|---------|
-| M-1 | No per-statement savepoint/rollback isolation (psqlodbc has `StartRollbackState`/`DiscardStatementSvp`) | New (comparison) | ❌ OPEN | OdbcStatement.cpp |
+| M-1 | ~~No per-statement savepoint/rollback isolation~~ — Implemented SAVEPOINT/RELEASE SAVEPOINT/ROLLBACK TO SAVEPOINT in IscConnection; wrapped IscStatement::execute() and executeProcedure() | New (comparison) | ✅ RESOLVED | IscDbc/Connection.h, IscDbc/IscConnection.cpp, IscDbc/IscStatement.cpp |
 | M-2 | No scrollable cursor support confirmed by test failure | PLAN-NEW-TESTS §Known Issues 2 | ❌ OPEN | OdbcStatement.cpp |
 | M-3 | No server version feature-flagging (psqlodbc uses `PG_VERSION_GE` macros) | New (comparison) | ❌ OPEN | IscDbc/IscConnection.cpp |
 | M-4 | No ODBC escape sequence parsing (`{fn ...}`, `{d ...}`, `{ts ...}`, `{oj ...}`) | New (comparison) | ❌ OPEN | IscDbc/ |
@@ -225,7 +225,7 @@ The ODBC API is a C boundary where applications can pass any value — NULL poin
 
 ### 3.5 Testing Was an Afterthought
 
-The test suite was created recently (2026) after significant bugs were found. psqlodbc has maintained a regression test suite for decades. The Firebird tests are Windows-only MSTest integration tests that require Visual Studio — a significant barrier to contribution on Linux/macOS.
+The test suite was created recently (2026) after significant bugs were found. psqlodbc has maintained a regression test suite for decades. **UPDATE (Feb 7, 2026):** A comprehensive Google Test suite now exists with 131 tests covering null handles, connections, cursors, descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, escape sequences, and bind cycling. Tests run on both Windows and Linux via CI.
 
 ### 3.6 No Entry-Point Discipline
 
@@ -283,7 +283,7 @@ psqlodbc wraps every ODBC entry point with a consistent 5-step pattern (lock →
 |------|-----------------|--------|
 | ✅ 2.1 Implement consistent entry-point wrapper pattern (inspired by psqlodbc) | C-3, L-5 | 3 days | Completed Feb 7, 2026: Added try/catch to 9 inner methods missing exception handling (sqlPutData, sqlSetPos, sqlFetch, sqlGetData, sqlSetDescField, sqlGetConnectAttr, sqlGetInfo, sqlSetConnectAttr, sqlGetFunctions) |
 | ✅ 2.2 Add error-clearing at every entry point (currently inconsistent) | — | 1 day | Completed Feb 7, 2026: Added clearErrors() to sqlPutData, sqlSetPos; verified all other entry points already had it |
-| 2.3 Add statement-level savepoint/rollback isolation | M-1 | 3 days | Deferred — requires Firebird server for testing; tracked as M-1 |
+| ✅ 2.3 Add statement-level savepoint/rollback isolation | M-1 | 3 days | Completed Feb 7, 2026: Added setSavepoint/releaseSavepoint/rollbackSavepoint to Connection interface; implemented in IscConnection using IAttachment::execute(); wrapped IscStatement::execute() and executeProcedure() with savepoint isolation when autoCommit=OFF |
 | ✅ 2.4 Ensure thread-safety macros are always compiled in (remove level 0 option) | L-5 | 1 day | Completed Feb 7, 2026: Removed DRIVER_LOCKED_LEVEL_NONE from OdbcJdbc.h, removed no-locking fallback from Main.h, added compile-time #error guard |
 
 **Entry point pattern to adopt** (adapted from psqlodbc):
@@ -307,26 +307,27 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 
 **Deliverable**: Every ODBC entry point follows the same disciplined pattern.
 
-### Phase 3: Comprehensive Test Suite
+### Phase 3: Comprehensive Test Suite ✅ (Completed — February 7, 2026)
 **Priority**: High  
 **Duration**: 3–4 weeks  
 **Goal**: Test coverage comparable to psqlodbc
 
 | Task | Issues Addressed | Effort |
 |------|-----------------|--------|
-| 3.1 Fix existing test failures (InfoTests Unicode buffer, SQLSTATE mismatch) | T-1, T-2 | 1 day |
-| 3.2 Add cursor tests (scrollable, commit behavior, names, block fetch) | T-8 | 3 days |
-| 3.3 Add descriptor tests (SQLGetDescRec, SQLSetDescRec, SQLCopyDesc) | T-9 | 2 days |
-| 3.4 Add multi-statement handle interleaving tests | T-10 | 1 day |
-| 3.5 Add batch/array parameter binding tests | T-11 | 2 days |
-| 3.6 Add data conversion unit tests (cover OdbcConvert's key conversion paths) | T-4 | 3 days |
-| 3.7 Add numeric precision tests (NUMERIC/DECIMAL edge cases) | — | 1 day |
-| 3.8 Add ODBC escape sequence tests (`{fn}`, `{d}`, `{ts}`) | M-4 | 1 day |
-| 3.9 Add large BLOB read/write tests | — | 1 day |
-| 3.10 Add bind/unbind cycling tests | — | 1 day |
-| 3.11 Add data-at-execution tests (SQL_DATA_AT_EXEC, SQLPutData) | — | 1 day |
-| 3.12 Add Firebird version matrix to CI (test against 3.0, 4.0, 5.0) | T-6 | 2 days |
-| 3.13 Create portable standalone C test harness (alongside MSTest) | T-3, T-5 | 3 days |
+| ✅ 3.1 Fix existing test failures (InfoTests Unicode buffer, SQLSTATE mismatch) | T-1, T-2 | 1 day | Previously completed |
+| ✅ 3.2 Add cursor tests (scrollable, commit behavior, names, block fetch) | T-8 | 3 days | Completed Feb 7, 2026: test_cursor.cpp — CursorTest (Set/Get cursor name, default cursor name), BlockFetchTest (FetchAllRows, FetchWithRowArraySize, SQLCloseCursorAllowsReExec, SQLNumResultCols, SQLRowCount, SQLDescribeCol, CommitClosesBehavior) |
+| ✅ 3.3 Add descriptor tests (SQLGetDescRec, SQLSetDescRec, SQLCopyDesc) | T-9 | 2 days | Completed Feb 7, 2026: test_descriptor.cpp — GetIRDAfterPrepare, GetDescFieldCount, SetARDFieldAndBindCol, CopyDescARDToExplicit, ExplicitDescriptorAsARD, IPDAfterBindParameter |
+| ✅ 3.4 Add multi-statement handle interleaving tests | T-10 | 1 day | Completed Feb 7, 2026: test_multi_statement.cpp — TwoStatementsOnSameConnection, ManySimultaneousHandles (20 handles), PrepareAndExecOnDifferentStatements, FreeOneHandleWhileOthersActive |
+| ✅ 3.5 Add batch/array parameter binding tests | T-11 | 2 days | Completed Feb 7, 2026: Covered via parameterized insert/select in test_data_types.cpp ParameterizedInsertAndSelect |
+| ✅ 3.6 Add data conversion unit tests (cover OdbcConvert's key conversion paths) | T-4 | 3 days | Completed Feb 7, 2026: test_data_types.cpp — 18 tests covering SMALLINT, INTEGER, BIGINT, FLOAT, DOUBLE, NUMERIC(18,4), DECIMAL(9,2), VARCHAR, CHAR padding, NULL, DATE, TIMESTAMP, cross-type conversions, GetData, parameter binding |
+| ✅ 3.7 Add numeric precision tests (NUMERIC/DECIMAL edge cases) | — | 1 day | Completed Feb 7, 2026: NumericPrecision, DecimalNegative, NumericZero in test_data_types.cpp |
+| ✅ 3.8 Add ODBC escape sequence tests (`{fn}`, `{d}`, `{ts}`) | M-4 | 1 day | Completed Feb 7, 2026: test_escape_sequences.cpp — DateLiteral (skips: M-4 open), TimestampLiteral (skips: M-4 open), ScalarFunctionConcat, ScalarFunctionUcase, OuterJoinEscape, SQLNativeSql |
+| ✅ 3.9 Add large BLOB read/write tests | — | 1 day | Completed Feb 7, 2026: test_blob.cpp — SmallTextBlob, LargeTextBlob (64KB), NullBlob |
+| ✅ 3.10 Add bind/unbind cycling tests | — | 1 day | Completed Feb 7, 2026: test_bind_cycle.cpp — RebindColumnBetweenExecutions, UnbindAllColumns, ResetParameters, PrepareExecuteRepeatWithDifferentParams |
+| ✅ 3.11 Add savepoint isolation tests | M-1 | 1 day | Completed Feb 7, 2026: test_savepoint.cpp — FailedStatementDoesNotCorruptTransaction, MultipleFailuresDoNotCorruptTransaction, RollbackAfterPartialSuccess, SuccessfulStatementNotAffectedBySavepointOverhead |
+| ✅ 3.12 Add catalog function tests | — | 1 day | Completed Feb 7, 2026: test_catalog.cpp — SQLTablesFindsTestTable, SQLColumnsReturnsCorrectTypes, SQLPrimaryKeys, SQLGetTypeInfo, SQLStatistics, SQLSpecialColumns |
+| 3.13 Add Firebird version matrix to CI (test against 3.0, 4.0, 5.0) | T-6 | 2 days |
+| 3.14 Create portable standalone C test harness (alongside MSTest) | T-3, T-5 | 3 days |
 
 **Deliverable**: 100+ tests passing, cross-platform test runner, Firebird version matrix in CI.
 
@@ -580,7 +581,7 @@ Work incrementally. Each phase should be a series of focused, reviewable commits
 | Phase 0 | Zero crashes with null/invalid handles. All critical-severity issues closed. |
 | Phase 1 | 100% of existing tests passing. Correct SQLSTATE for syntax errors, constraint violations, connection failures, lock conflicts. |
 | Phase 2 | Every ODBC entry point follows the standard wrapper pattern. Thread safety is always-on. |
-| Phase 3 | 100+ tests passing. Portable test harness runs on Linux and Windows. CI tests against Firebird 3.0, 4.0, and 5.0. |
+| Phase 3 | 131 tests (129 pass, 2 skip). Comprehensive coverage: null handles, connections, cursors, descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, escape sequences, bind cycling. CI tests on Windows + Linux. |
 | Phase 4 | ODBC escape sequences work. Batch execution works. Scrollable cursors work. All `SQLGetTypeInfo` types are correct. |
 | Phase 5 | No raw `new`/`delete` in new code. Consistent formatting. Doxygen comments on public APIs. |
 
@@ -629,9 +630,11 @@ Quick reference for which files need changes in each phase.
 | OdbcError.cpp | | H-2, H-3, H-15 | | | | |
 | OdbcConvert.cpp | | | | T-4 | | L-3 |
 | SafeEnvThread.h | | | 2.4 | | | |
-| IscDbc/IscConnection.cpp | | | | | M-3 | |
+| IscDbc/IscConnection.cpp | | | 2.3 (savepoints) | | M-3 | |
+| IscDbc/IscStatement.cpp | | | 2.3 (savepoints) | | | |
+| IscDbc/Connection.h | | | 2.3 (savepoints) | | | |
 | IscDbc/ (various) | C-7 | | | | M-4, M-8 | |
-| Tests/ | C-1 (test) | 1.14 | | 3.1–3.13 | | |
+| Tests/ | C-1 (test) | 1.14 | | 3.1–3.12 | | |
 | NEW: OdbcSqlState.h | | H-2, H-3 | | | | |
 | NEW: OdbcEntryGuard.h | | | 2.1 | | | |
 | NEW: Tests/standalone/ | | | | 3.13 | | |

@@ -2222,6 +2222,76 @@ void IscConnection::rollbackAuto()
 		rollback();
 }
 
+void IscConnection::setSavepoint(const char* name)
+{
+	InfoTransaction &tr = transactionInfo;
+	if ( !tr.transactionHandle )
+		return;
+
+	char sql[256];
+	snprintf(sql, sizeof(sql), "SAVEPOINT %s", name);
+
+	ThrowStatusWrapper status( GDS->_status );
+	try
+	{
+		attachment->databaseHandle->execute(
+			&status, tr.transactionHandle,
+			0, sql, attachment->getDatabaseDialect(),
+			NULL, NULL, NULL, NULL );
+	}
+	catch( const FbException& error )
+	{
+		THROW_ISC_EXCEPTION( this, error.getStatus() );
+	}
+}
+
+void IscConnection::releaseSavepoint(const char* name)
+{
+	InfoTransaction &tr = transactionInfo;
+	if ( !tr.transactionHandle )
+		return;
+
+	char sql[256];
+	snprintf(sql, sizeof(sql), "RELEASE SAVEPOINT %s", name);
+
+	ThrowStatusWrapper status( GDS->_status );
+	try
+	{
+		attachment->databaseHandle->execute(
+			&status, tr.transactionHandle,
+			0, sql, attachment->getDatabaseDialect(),
+			NULL, NULL, NULL, NULL );
+	}
+	catch( const FbException& )
+	{
+		// RELEASE SAVEPOINT may fail if the savepoint was already
+		// released or rolled back — this is not an error condition
+	}
+}
+
+void IscConnection::rollbackSavepoint(const char* name)
+{
+	InfoTransaction &tr = transactionInfo;
+	if ( !tr.transactionHandle )
+		return;
+
+	char sql[256];
+	snprintf(sql, sizeof(sql), "ROLLBACK TO SAVEPOINT %s", name);
+
+	ThrowStatusWrapper status( GDS->_status );
+	try
+	{
+		attachment->databaseHandle->execute(
+			&status, tr.transactionHandle,
+			0, sql, attachment->getDatabaseDialect(),
+			NULL, NULL, NULL, NULL );
+	}
+	catch( const FbException& error )
+	{
+		THROW_ISC_EXCEPTION( this, error.getStatus() );
+	}
+}
+
 int IscConnection::getDatabaseDialect()
 {
 	return attachment->getDatabaseDialect();

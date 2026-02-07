@@ -21,6 +21,23 @@ Whenever you’re asked to do something, follow this process after completing th
     - Avoid `gh` commands that require interactive input; provide all required information via CLI flags.
   - If the workflow fails, fix the issue and repeat this step until the workflow completes successfully.
 
+## ⚠️ CRITICAL: Test Database is Available
+
+**RULE #0.1**: Both the local development machine AND the CI environment have a working Firebird 5.0 database. **Do NOT skip or defer work that requires a database connection.** Use this connection string:
+
+```
+Driver={Firebird ODBC Driver};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=/fbodbc-tests/fb502/fbclient.dll
+```
+
+Set it as the `FIREBIRD_ODBC_CONNECTION` environment variable before running tests:
+```powershell
+# PowerShell
+$env:FIREBIRD_ODBC_CONNECTION='Driver={Firebird ODBC Driver};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=/fbodbc-tests/fb502/fbclient.dll'
+```
+```bash
+# Linux/macOS  
+export FIREBIRD_ODBC_CONNECTION='Driver={Firebird ODBC Driver};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=/fbodbc-tests/fb502/fbclient.dll'
+```
 
 ## 📋 MANDATORY: Update Docs\FIREBIRD_ODBC_MASTER_PLAN.md
 
