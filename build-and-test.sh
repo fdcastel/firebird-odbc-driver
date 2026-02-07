@@ -65,23 +65,35 @@ if [ "$SKIP_TESTS" = false ]; then
     echo ""
     echo "Setting up test environment..."
     
-    # Start Firebird
-    echo "Starting Firebird service..."
-    sudo systemctl start firebird3.0 || sudo service firebird3.0 start
-    sleep 3
-    echo "✓ Firebird started"
+    # Install PowerShell if not present
+    if ! command -v pwsh &> /dev/null; then
+        echo "Installing PowerShell..."
+        wget -q https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb
+        sudo dpkg -i packages-microsoft-prod.deb
+        sudo apt-get update
+        sudo apt-get install -y powershell
+        echo "✓ PowerShell installed"
+    fi
     
-    # Create test database
-    echo "Creating test database..."
-    sudo mkdir -p /fbodbc-tests
-    sudo chmod 777 /fbodbc-tests
-    
-    # Create database
-    cat > /tmp/create_db.sql << EOF
-CREATE DATABASE '/fbodbc-tests/TEST.FB50.FDB' USER 'SYSDBA' PASSWORD 'masterkey';
-EOF
-    
-    /usr/bin/isql-fb -user SYSDBA -password masterkey -i /tmp/create_db.sql 2>/dev/null || true
+    # Setup Firebird using PSFirebird
+    echo "Setting up Firebird environment with PSFirebird..."
+    pwsh -Command "
+        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+        Install-Module -Name PSFirebird -Force -Scope CurrentUser
+        
+        \$fbVersion = '5.0.2'
+        \$envPath = '/fbodbc-tests/fb502'
+        \$dbPath = '/fbodbc-tests/TEST.FB50.FDB'
+        
+        New-Item -ItemType Directory -Path '/fbodbc-tests' -Force | Out-Null
+        
+        Import-Module PSFirebird
+        \$fb = New-FirebirdEnvironment -Version \$fbVersion -Path \$envPath -Force
+        Write-Host '✓ Firebird environment created at:' \$envPath
+        
+        \$db = New-FirebirdDatabase -Database \$dbPath -Environment \$fb -Force
+        Write-Host '✓ Test database created at:' \$dbPath
+    "
     
     if [ -f "/fbodbc-tests/TEST.FB50.FDB" ]; then
         echo "✓ Test database created"
@@ -90,10 +102,11 @@ EOF
         exit 1
     fi
     
-    # Find Firebird client library
-    FB_CLIENT=$(find /usr/lib -name "libfbclient.so*" 2>/dev/null | head -n 1)
+    # Find Firebird client library from PSFirebird environment
+    FB_CLIENT=$(find /fbodbc-tests/fb502 -name "libfbclient.so*" 2>/dev/null | head -n 1)
     if [ -z "$FB_CLIENT" ]; then
-        FB_CLIENT="/usr/lib/x86_64-linux-gnu/libfbclient.so"
+        echo "✗ Could not find fbclient library in PSFirebird environment"
+        exit 1
     fi
     echo "✓ Firebird client library: $FB_CLIENT"
     

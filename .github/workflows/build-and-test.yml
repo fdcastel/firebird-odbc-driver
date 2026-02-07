@@ -30,10 +30,10 @@ jobs:
       shell: pwsh
       run: |
         $fbVersion = '5.0.2'
-        $envPath = 'C:\fbodbc-tests\fb502'
+        $envPath = '/fbodbc-tests/fb502'
         $dbPath = '/fbodbc-tests/TEST.FB50.FDB'
         
-        New-Item -ItemType Directory -Path 'C:\fbodbc-tests' -Force | Out-Null
+        New-Item -ItemType Directory -Path '/fbodbc-tests' -Force | Out-Null
         
         Import-Module PSFirebird
         $fb = New-FirebirdEnvironment -Version $fbVersion -Path $envPath -Force
@@ -118,46 +118,44 @@ jobs:
         sudo apt-get update
         sudo apt-get install -y unixodbc unixodbc-dev wget
         
-    - name: Setup Firebird and Create Test Database
+    - name: Install PowerShell
       run: |
-        # Install Firebird
-        sudo apt-get install -y firebird3.0-server firebird3.0-common firebird-dev
+        # Install PowerShell 7
+        wget -q https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb
+        sudo dpkg -i packages-microsoft-prod.deb
+        sudo apt-get update
+        sudo apt-get install -y powershell
         
-        # Start Firebird service
-        sudo systemctl start firebird3.0
+    - name: Setup Firebird Environment with PSFirebird
+      shell: pwsh
+      run: |
+        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+        Install-Module -Name PSFirebird -Force -Scope CurrentUser
         
-        # Wait for Firebird to be ready
-        sleep 5
+        $fbVersion = '5.0.2'
+        $envPath = '/fbodbc-tests/fb502'
+        $dbPath = '/fbodbc-tests/TEST.FB50.FDB'
         
-        # Change SYSDBA password
-        sudo gsec -user SYSDBA -password masterkey -modify SYSDBA -pw masterkey || true
+        New-Item -ItemType Directory -Path '/fbodbc-tests' -Force | Out-Null
         
-        # Create test database directory in Firebird's home
-        sudo mkdir -p /var/lib/firebird/data
-        sudo chown firebird:firebird /var/lib/firebird/data
-        sudo chmod 770 /var/lib/firebird/data
+        Import-Module PSFirebird
+        $fb = New-FirebirdEnvironment -Version $fbVersion -Path $envPath -Force
+        Write-Host "✓ Firebird environment created at: $envPath"
         
-        # Create database as firebird user
-        echo "CREATE DATABASE '/var/lib/firebird/data/TEST.FB50.FDB' USER 'SYSDBA' PASSWORD 'masterkey';" > /tmp/create_db.sql
-        sudo -u firebird /usr/bin/isql-fb -user SYSDBA -password masterkey -i /tmp/create_db.sql || {
-          echo "Failed to create database, trying alternative method..."
-          sudo chmod 777 /var/lib/firebird/data
-          /usr/bin/isql-fb -user SYSDBA -password masterkey -i /tmp/create_db.sql
+        $db = New-FirebirdDatabase -Database $dbPath -Environment $fb -Force
+        Write-Host "✓ Test database created at: $dbPath"
+        
+        # Get Firebird client library path (PSFirebird extracts it)
+        $fbClient = "$envPath/lib/libfbclient.so"
+        if (Test-Path $fbClient) {
+          Write-Host "✓ Firebird client library: $fbClient"
+          echo "FB_CLIENT=$fbClient" >> $env:GITHUB_ENV
+        } else {
+          Write-Host "Looking for fbclient library..."
+          $fbClient = (Get-ChildItem -Path $envPath -Recurse -Filter "libfbclient.so*" | Select-Object -First 1).FullName
+          Write-Host "✓ Found Firebird client library: $fbClient"
+          echo "FB_CLIENT=$fbClient" >> $env:GITHUB_ENV
         }
-        
-        # Verify database exists
-        if [ -f "/var/lib/firebird/data/TEST.FB50.FDB" ]; then
-          echo "✓ Test database created successfully"
-          ls -la /var/lib/firebird/data/
-        else
-          echo "✗ Failed to create test database"
-          ls -la /var/lib/firebird/data/
-          exit 1
-        fi
-        
-        # Get Firebird client library path
-        FB_CLIENT=$(find /usr/lib -name "libfbclient.so*" | head -n 1)
-        echo "Firebird client library: $FB_CLIENT"
         echo "FB_CLIENT=$FB_CLIENT" >> $GITHUB_ENV
         
     - name: Configure CMake
@@ -186,7 +184,7 @@ jobs:
       working-directory: ${{github.workspace}}/build
       run: ctest -C ${{env.BUILD_TYPE}} --output-on-failure --verbose
       env:
-        FIREBIRD_ODBC_CONNECTION: Driver={Firebird ODBC Driver};Database=/var/lib/firebird/data/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=${{env.FB_CLIENT}}
+        FIREBIRD_ODBC_CONNECTION: Driver={Firebird ODBC Driver};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=${{env.FB_CLIENT}}
         
     - name: Upload Build Artifacts
       uses: actions/upload-artifact@v4

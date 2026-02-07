@@ -32,7 +32,7 @@ Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
 Install-Module -Name PSFirebird -Force -Scope CurrentUser
 
 # Create test database
-$fb = New-FirebirdEnvironment -Version '5.0.2' -Path 'C:\fbodbc-tests\fb502' -Force
+$fb = New-FirebirdEnvironment -Version '5.0.2' -Path '/fbodbc-tests/fb502' -Force
 $db = New-FirebirdDatabase -Database '/fbodbc-tests/TEST.FB50.FDB' -Environment $fb -Force
 
 # Set connection string
@@ -48,17 +48,27 @@ ctest -C Release --output-on-failure
 
 ### Linux
 ```bash
-# Install and start Firebird
-sudo apt-get install -y firebird3.0-server
-sudo systemctl start firebird3.0
+# Install PowerShell (if not already installed)
+wget -q https://packages.microsoft.com/config/ubuntu/$(lsb_release -rs)/packages-microsoft-prod.deb
+sudo dpkg -i packages-microsoft-prod.deb
+sudo apt-get update
+sudo apt-get install -y powershell
 
-# Create test database
-mkdir -p /tmp/fbodbc-tests
-echo "CREATE DATABASE '/tmp/fbodbc-tests/TEST.FB.FDB' USER 'SYSDBA' PASSWORD 'masterkey';" > /tmp/create_db.sql
-/usr/bin/isql-fb -user SYSDBA -password masterkey -i /tmp/create_db.sql
+# Setup Firebird using PSFirebird (embedded mode - no server needed)
+pwsh -Command "
+  Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
+  Install-Module -Name PSFirebird -Force -Scope CurrentUser
+  Import-Module PSFirebird
+  
+  \$fb = New-FirebirdEnvironment -Version '5.0.2' -Path '/fbodbc-tests/fb502' -Force
+  \$db = New-FirebirdDatabase -Database '/fbodbc-tests/TEST.FB50.FDB' -Environment \$fb -Force
+"
 
-# Set connection string
-export FIREBIRD_ODBC_CONNECTION='Driver={Firebird ODBC Driver};Database=/tmp/fbodbc-tests/TEST.FB.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=/usr/lib/x86_64-linux-gnu/libfbclient.so'
+# Find the client library from PSFirebird
+FB_CLIENT=$(find /fbodbc-tests/fb502 -name "libfbclient.so*" | head -n 1)
+
+# Set connection string (using embedded Firebird)
+export FIREBIRD_ODBC_CONNECTION="Driver={Firebird ODBC Driver};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=$FB_CLIENT"
 
 # Register driver
 sudo mkdir -p /usr/local/lib/odbc
