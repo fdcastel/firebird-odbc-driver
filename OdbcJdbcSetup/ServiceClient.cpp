@@ -84,9 +84,8 @@ bool CServiceClient::initServices( const char *sharedLibrary )
 		if ( !properties )
 			return false;
 	}
-	catch ( std::exception &ex )
+	catch ( SQLException &exception )
 	{
-		SQLException &exception = (SQLException&)ex;
 		JString text = exception.getText();
 
 		if ( services )
@@ -143,9 +142,8 @@ bool CServiceClient::createDatabase()
 								    properties );
 		connection->close();
 	}
-	catch ( std::exception &ex )
+	catch ( SQLException &exception )
 	{
-		SQLException &exception = (SQLException&)ex;
 		JString text = exception.getText();
 
 		if ( connection )
@@ -187,9 +185,8 @@ bool CServiceClient::dropDatabase()
 								  properties );
 		connection->close();
 	}
-	catch ( std::exception &ex )
+	catch ( SQLException &exception )
 	{
-		SQLException &exception = (SQLException&)ex;
 		JString text = exception.getText();
 
 		if ( connection )

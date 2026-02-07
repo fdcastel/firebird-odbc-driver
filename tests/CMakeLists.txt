@@ -21,6 +21,7 @@ include(GoogleTest)
 add_executable(firebird_odbc_tests
     test_connection.cpp
     test_main.cpp
+    test_null_handles.cpp
 )
 
 # Link with Google Test and the ODBC library

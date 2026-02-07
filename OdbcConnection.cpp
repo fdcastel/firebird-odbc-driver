@@ -1029,9 +1029,8 @@ SQLRETURN OdbcConnection::sqlNativeSql( SQLCHAR * inStatementText, SQLINTEGER te
 			outText = (const char *)tempNative;
 
 	}
-	catch ( std::exception &ex )
+	catch ( SQLException &exception )
 	{
-		SQLException &exception = (SQLException&)ex;
 		postError( "HY000", exception );
 		return SQL_ERROR;
 	}
@@ -1135,9 +1134,8 @@ SQLRETURN OdbcConnection::sqlDisconnect()
 		connection = NULL;
 		connected = false;
 	}
-	catch ( std::exception &ex )
+	catch ( SQLException &exception )
 	{
-		SQLException &exception = (SQLException&)ex;
 		postError ("01002", exception);
 		connection = NULL;
 		connected = false;
@@ -1152,7 +1150,7 @@ SQLRETURN OdbcConnection::sqlGetInfo( SQLUSMALLINT type, SQLPOINTER ptr, SQLSMAL
 	clearErrors();
 
 #ifdef DEBUG
-	char temp [256];
+	char temp [512];
 #endif
 	int slot = INFO_SLOT (type);
 	InfoItem *item = infoItems + slot;
@@ -1510,7 +1508,7 @@ SQLRETURN OdbcConnection::sqlGetInfo( SQLUSMALLINT type, SQLPOINTER ptr, SQLSMAL
 	{
 	case infoString:
 #ifdef DEBUG
-		sprintf (temp, "  %s (string) %.128s\n", item->name, string);
+		snprintf (temp, sizeof(temp), "  %s (string) %.128s\n", item->name, string);
 		OutputDebugString (temp);
 #endif
 		return (setString (string, (SQLCHAR*) ptr, maxLength, actualLength)) ?
@@ -1518,7 +1516,7 @@ SQLRETURN OdbcConnection::sqlGetInfo( SQLUSMALLINT type, SQLPOINTER ptr, SQLSMAL
 
 	case infoShort:
 #ifdef DEBUG
-		sprintf (temp, "  %s (short) %d\n", item->name, value);
+		snprintf (temp, sizeof(temp), "  %s (short) %d\n", item->name, value);
 		OutputDebugString (temp);
 #endif
 		if (ptr)
@@ -1529,7 +1527,7 @@ SQLRETURN OdbcConnection::sqlGetInfo( SQLUSMALLINT type, SQLPOINTER ptr, SQLSMAL
 
 	case infoLong:
 #ifdef DEBUG
-		sprintf (temp, "  %s (int) %d\n", item->name, value);
+		snprintf (temp, sizeof(temp), "  %s (int) %d\n", item->name, value);
 		OutputDebugString (temp);
 #endif
 		if (ptr)
@@ -1540,7 +1538,7 @@ SQLRETURN OdbcConnection::sqlGetInfo( SQLUSMALLINT type, SQLPOINTER ptr, SQLSMAL
 
 	case infoUnsupported:
 #ifdef DEBUG
-		sprintf (temp, "  %s (string) %s\n", item->name, "*unsupported*");
+		snprintf (temp, sizeof(temp), "  %s (string) %s\n", item->name, "*unsupported*");
 		OutputDebugString (temp);
 #endif
 		if (ptr)
@@ -1706,9 +1704,8 @@ SQLRETURN OdbcConnection::connect(const char *sharedLibrary, const char * databa
 		WcsToMbs = connection->getConnectionWcsToMbs();
 		MbsToWcs = connection->getConnectionMbsToWcs();
 	}
-	catch ( std::exception &ex )
+	catch ( SQLException &exception )
 	{
-		SQLException &exception = (SQLException&)ex;
 		if ( env->envShare )
 			env->envShare = NULL;
 
@@ -1743,9 +1740,8 @@ SQLRETURN OdbcConnection::sqlEndTran(int operation)
 				connection->rollbackAuto();
 			}
 		}
-		catch ( std::exception &ex )
-		{
-			SQLException &exception = (SQLException&)ex;
+		catch ( SQLException &exception )
+	{
 			postError ("S1000", exception);
 			return SQL_ERROR;
 		}
@@ -1761,9 +1757,8 @@ SQLRETURN OdbcConnection::sqlExecuteCreateDatabase(const char * sqlString)
 	{
 		connection->sqlExecuteCreateDatabase( sqlString );
 	}
-	catch ( std::exception &ex )
+	catch ( SQLException &exception )
 	{
-		SQLException &exception = (SQLException&)ex;
 		postError( "HY000", exception );
 		return SQL_ERROR;
 	}
@@ -2173,9 +2168,8 @@ void OdbcConnection::initUserEvents( PODBC_EVENTS_BLOCK_INFO infoEvents )
 		userEventsInterfase->events = infoEvents->events;
 		userEventsInterfase->count = infoEvents->count;
 	}
-	catch ( std::exception &ex )
+	catch ( SQLException &exception )
 	{
-		SQLException &exception = (SQLException&)ex;
 		postError( "HY000", exception );
 	}
 }
@@ -2194,9 +2188,8 @@ void OdbcConnection::updateResultEvents( char *updated )
 			nextNameEvent->changed = userEvents->isChanged( i );
 		}
 	}
-	catch ( std::exception &ex )
+	catch ( SQLException &exception )
 	{
-		SQLException &exception = (SQLException&)ex;
 		postError( "HY000", exception );
 	}
 }
@@ -2207,9 +2200,8 @@ void OdbcConnection::requeueEvents()
 	{
 		userEvents->queEvents( userEventsInterfase );
 	}
-	catch ( std::exception &ex )
+	catch ( SQLException &exception )
 	{
-		SQLException &exception = (SQLException&)ex;
 		postError( "HY000", exception );
 	}
 }

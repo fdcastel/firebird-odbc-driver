@@ -210,6 +210,7 @@ SQLRETURN SQL_API SQLBindCol( SQLHSTMT hStmt, SQLUSMALLINT columnNumber,
 SQLRETURN SQL_API SQLCancel( SQLHSTMT hStmt )
 {
 	TRACE ("SQLCancel");
+	if (!hStmt) return SQL_INVALID_HANDLE;
 
 	return ((OdbcStatement*) hStmt)->sqlCancel();
 }
@@ -278,6 +279,7 @@ SQLRETURN SQL_API SQLDescribeCol( SQLHSTMT hStmt, SQLUSMALLINT columnNumber,
 SQLRETURN SQL_API SQLDisconnect( SQLHDBC hDbc )
 {
 	TRACE ("SQLDisconnect");
+	if (!hDbc) return SQL_INVALID_HANDLE;
 	GUARD_ENV( ((OdbcConnection*) hDbc)->env );
 
 	return ((OdbcConnection*) hDbc)->sqlDisconnect();
@@ -358,6 +360,7 @@ SQLRETURN SQL_API SQLFreeConnect( SQLHDBC hDbc )
 SQLRETURN SQL_API SQLFreeEnv( SQLHENV hEnv )
 {
 	TRACE ("SQLFreeEnv");
+	if (!hEnv) return SQL_INVALID_HANDLE;
 
 	delete (OdbcEnv*) hEnv;
 	return SQL_SUCCESS;
@@ -951,6 +954,9 @@ SQLRETURN SQL_API SQLAllocHandle( SQLSMALLINT fHandleType, SQLHANDLE hInput, SQL
 {
 	TRACE ("SQLAllocHandle");
 
+	if ( !phOutput )
+		return SQL_ERROR;
+
 	switch( fHandleType )
 	{
 	case SQL_HANDLE_ENV:
@@ -961,18 +967,21 @@ SQLRETURN SQL_API SQLAllocHandle( SQLSMALLINT fHandleType, SQLHANDLE hInput, SQL
 
 	case SQL_HANDLE_DBC:
 		{
+			if ( !hInput ) return SQL_INVALID_HANDLE;
 			GUARD_ENV( hInput );
 			return __SQLAllocHandle( fHandleType, hInput, phOutput );
 		}
 
 	case SQL_HANDLE_STMT:
 		{
+			if ( !hInput ) return SQL_INVALID_HANDLE;
 			GUARD_HDBC( hInput );
 			return __SQLAllocHandle( fHandleType, hInput, phOutput );
 		}
 
 	case SQL_HANDLE_DESC:
 		{
+			if ( !hInput ) return SQL_INVALID_HANDLE;
 			GUARD_HDBC( hInput );
 			return __SQLAllocHandle( fHandleType, hInput, phOutput );
 		}
@@ -1030,10 +1039,11 @@ SQLRETURN SQL_API SQLColAttribute( SQLHSTMT hStmt, SQLUSMALLINT columnNumber,
 SQLRETURN SQL_API SQLCopyDesc( SQLHDESC sourceDescHandle, SQLHDESC targetDescHandle )
 {
 	TRACE ("SQLCopyDesc");
-	GUARD_HDESC( sourceDescHandle );
 
 	if( sourceDescHandle == NULL || targetDescHandle == NULL )
-		return SQL_ERROR;
+		return SQL_INVALID_HANDLE;
+
+	GUARD_HDESC( sourceDescHandle );
 
 	return *(OdbcDesc*)targetDescHandle = *(OdbcDesc*)sourceDescHandle;
 }
@@ -1079,6 +1089,9 @@ SQLRETURN SQL_API SQLFetchScroll( SQLHSTMT hStmt,
 SQLRETURN SQL_API SQLFreeHandle( SQLSMALLINT handleType, SQLHANDLE handle )
 {
 	TRACE ("SQLFreeHandle\n");
+
+	if ( !handle )
+		return SQL_INVALID_HANDLE;
 
 	switch ( handleType )
 	{
@@ -1197,6 +1210,7 @@ SQLRETURN SQL_API SQLGetEnvAttr( SQLHENV hEnv,
 							   SQLINTEGER bufferLength, SQLINTEGER *stringLength )
 {
 	TRACE ("SQLGetEnvAttr");
+	if (!hEnv) return SQL_INVALID_HANDLE;
 
 	return ((OdbcEnv*) hEnv)->sqlGetEnvAttr( attribute, value,
 											bufferLength, stringLength );
@@ -1269,6 +1283,7 @@ SQLRETURN SQL_API SQLSetEnvAttr( SQLHENV hEnv,
 							   SQLINTEGER stringLength )
 {
 	TRACE ("SQLSetEnvAttr");
+	if (!hEnv) return SQL_INVALID_HANDLE;
 
 	return ((OdbcEnv*) hEnv)->sqlSetEnvAttr( attribute, value, stringLength );
 }
