@@ -274,9 +274,8 @@ void IscResultSet::close()
 
 void IscResultSet::deleteBlobs()
 {
-	FOR_OBJECTS (Blob*, blob, &blobs)
+	for (auto* blob : blobs)
 		blob->release();
-	END_FOR;
 
 	blobs.clear();
 }
@@ -454,7 +453,7 @@ char IscResultSet::getByte(const char * columnName)
 Blob* IscResultSet::getBlob(int index)
 {
 	Blob *blob = getValue (index)->getBlob();
-	blobs.append (blob);
+	blobs.push_back (blob);
 
 	return blob;
 }
@@ -462,7 +461,7 @@ Blob* IscResultSet::getBlob(int index)
 Blob* IscResultSet::getBlob(const char * columnName)
 {
 	Blob *blob = getValue (columnName)->getBlob();
-	blobs.append (blob);
+	blobs.push_back (blob);
 
 	return blob;
 }

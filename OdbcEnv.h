@@ -36,6 +36,13 @@ using namespace IscDbcLibrary;
 
 class OdbcConnection;
 
+/// @brief ODBC Environment handle (SQLHENV).
+///
+/// Manages the ODBC environment, including the ODBC version setting,
+/// connection list, data source enumeration, and the shared Firebird
+/// client library handle. There is typically one OdbcEnv per application.
+///
+/// Connections are allocated from this environment via allocHandle().
 class OdbcEnv : public OdbcObject  
 {
 public:
@@ -54,9 +61,16 @@ public:
 	void UnLockEnv();
 	virtual OdbcConnection* getConnection();
 	virtual OdbcObjectType getType();
+	const char* getOdbcIniFileName() const { return odbcIniFileName; }
 	OdbcEnv();
 	~OdbcEnv();
 
+	/// Externally accessible members (used by OdbcConnection, OdbcStatement, etc.)
+	EnvironmentShare *envShare;
+	OdbcConnection	*connections;
+	int				useAppOdbcVersion;
+
+private:
 #ifdef _WINDOWS
 	HINSTANCE		libraryHandle;
 #else
@@ -64,11 +78,8 @@ public:
 #endif
 
 	Mutex			mutex;
-	EnvironmentShare *envShare;
-	OdbcConnection	*connections;
 	const char		*odbcIniFileName;
 	const char		*odbcInctFileName;
-	int				useAppOdbcVersion;
 
 #ifdef _WINDOWS
 	char			listDSN[1024];

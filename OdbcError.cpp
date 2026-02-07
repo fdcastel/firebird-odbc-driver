@@ -508,7 +508,6 @@ OdbcError::OdbcError(int code, const char *state, JString errorMsg)
 		memcpy(sqlState, "HY000", 6);
 
 	msg += errorMsg;
-	next = NULL;
 	rowNumber = 0;
 	columnNumber = 0;
 }
@@ -544,7 +543,6 @@ OdbcError::OdbcError(int code, int fbcode, const char *state, JString errorMsg)
 		memcpy(sqlState, "HY000", 6);
 
 	msg += errorMsg;
-	next = NULL;
 	rowNumber = 0;
 	columnNumber = 0;
 }

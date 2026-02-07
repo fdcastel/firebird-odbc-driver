@@ -81,6 +81,7 @@
 
 #include <stdlib.h>
 #include <time.h>
+#include <algorithm>
 #include "IscDbc.h"
 #include "ListParamTransaction.h"
 #include "IscStatement.h"
@@ -127,9 +128,9 @@ IscStatement::IscStatement(IscConnection *connect) :
 
 IscStatement::~IscStatement()
 {
-	FOR_OBJECTS (IscResultSet*, resultSet, &resultSets)
+	for (auto* resultSet : resultSets)
 		resultSet->close();
-	END_FOR;
+	resultSets.clear();
 
 	try
 	{
@@ -405,16 +406,16 @@ ITransaction* IscStatement::startTransaction()
 IscResultSet* IscStatement::createResultSet()
 {
 	IscResultSet *resultSet = new IscResultSet (this);
-	resultSets.append (resultSet);
+	resultSets.push_back (resultSet);
 
 	return resultSet;
 }
 
 void IscStatement::close()
 {
-	FOR_OBJECTS (IscResultSet*, resultSet, &resultSets)
+	for (auto* resultSet : resultSets)
 		resultSet->close();
-	END_FOR;
+	resultSets.clear();
 
 	if ( isActiveSelect() )
 	{
@@ -566,8 +567,8 @@ int IscStatement::getUpdateCount()
 
 void IscStatement::deleteResultSet(IscResultSet * resultSet)
 {
-	resultSets.deleteItem (resultSet);
-	if (resultSets.isEmpty())
+	resultSets.erase(std::remove(resultSets.begin(), resultSets.end(), resultSet), resultSets.end());
+	if (resultSets.empty())
 	{
 		bool isActiveCursor = this->isActiveCursor();
 		typeStmt = stmtNone;
@@ -647,7 +648,7 @@ void IscStatement::prepareStatement(const char * sqlString)
 
 bool IscStatement::execute()
 {
-	if ( isActiveSelect() && connection->transactionInfo.autoCommit && resultSets.isEmpty() )
+	if ( isActiveSelect() && connection->transactionInfo.autoCommit && resultSets.empty() )
 		clearSelect();
 
 	// Use savepoints for statement-level error isolation when auto-commit is OFF

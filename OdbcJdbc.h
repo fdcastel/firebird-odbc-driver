@@ -33,8 +33,11 @@
 #define strncasecmp		strnicmp
 #endif // _MSC_VER >= 1400
 
+// snprintf is standard since C99/C++11; only define for very old compilers
+#if defined(_MSC_VER) && _MSC_VER < 1900
 #define snprintf		_snprintf
 #define swprintf		_snwprintf
+#endif
 
 #else
 #define OutputDebugString(string)	fputs (string, stdout)

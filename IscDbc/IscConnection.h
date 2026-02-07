@@ -25,8 +25,8 @@
 #if !defined(_ISCCONNECTION_H_)
 #define _ISCCONNECTION_H_
 
+#include <vector>
 #include "Connection.h"
-#include "LinkedList.h"
 #include "JString.h"	// Added by ClassView
 
 namespace IscDbcLibrary {
@@ -161,7 +161,7 @@ public:
 	CFbDll			*GDS;
 	Firebird::IAttachment* databaseHandle;
 	InfoTransaction	transactionInfo;
-	LinkedList		statements;
+	std::vector<IscStatement*>	statements;
 	IscDatabaseMetaData	*metaData;
 	IscUserEvents	*userEvents;
 	bool			shareConnected;

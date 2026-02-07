@@ -38,7 +38,14 @@ using namespace Firebird;
 
 namespace IscDbcLibrary {
 
-EnvShare environmentShare;
+// Construct-on-first-use idiom to avoid static initialization order fiasco.
+// Returns a reference to the singleton EnvShare instance, which is created
+// the first time this function is called (thread-safe in C++11+).
+EnvShare& getEnvironmentShareInstance()
+{
+	static EnvShare instance;
+	return instance;
+}
 
 EnvShare::EnvShare()
 {

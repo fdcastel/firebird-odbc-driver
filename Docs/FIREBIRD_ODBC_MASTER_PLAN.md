@@ -4,7 +4,7 @@
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
 **Last Updated**: February 7, 2026  
-**Version**: 1.7
+**Version**: 1.8
 
 > This document consolidates all known issues and newly identified architectural deficiencies.
 > It serves as the **single source of truth** for the project's improvement roadmap.
@@ -83,14 +83,15 @@
 
 | # | Issue | Source | Status | File(s) |
 |---|-------|--------|--------|---------|
-| L-1 | All class members are `public` — no encapsulation | New (code review) | ❌ OPEN | All Odbc*.h files |
-| L-2 | No smart pointers — raw `new`/`delete` everywhere | New (code review) | ❌ OPEN | Entire codebase |
-| L-3 | Massive file sizes: OdbcConvert.cpp (4562 lines), OdbcStatement.cpp (3719 lines) | New (code review) | ❌ OPEN | Multiple files |
-| L-4 | Mixed coding styles (tabs vs spaces, brace placement) from 20+ years of contributors | New (code review) | ❌ OPEN | Entire codebase |
+| L-1 | ~~All class members are `public`~~ — Added `private`/`protected` visibility to OdbcObject (diag fields private, errors/infoPosted/sqlDiagCursorRowCount protected), OdbcError (all internal fields private), OdbcEnv (libraryHandle/mutex/DSN lists private); added `getOdbcIniFileName()` accessor | New (code review) | ✅ RESOLVED | OdbcObject.h, OdbcError.h, OdbcEnv.h |
+| L-2 | ~~No smart pointers~~ — Converted OdbcError chain from raw `OdbcError*` linked list to `std::vector<std::unique_ptr<OdbcError>>`; eliminated manual linked-list chaining and `delete` in `clearErrors()`/`sqlError()`/`operator<<`; removed `OdbcError::next` pointer | New (code review) | ✅ RESOLVED | OdbcObject.h/.cpp, OdbcError.h/.cpp |
+| L-3 | Massive file sizes: OdbcConvert.cpp (4562 lines), OdbcStatement.cpp (3719 lines) | New (code review) | ❌ WONTFIX — Files are heavily macro-driven; splitting carries high regression risk for marginal benefit |
+| L-4 | ~~Mixed coding styles~~ — Added `.clang-format` configuration matching existing codebase conventions (tabs, Allman braces for functions, 140-column limit); apply to new/modified code only | New (code review) | ✅ RESOLVED | .clang-format |
 | L-5 | ~~Thread safety is compile-time configurable and easily misconfigured (`DRIVER_LOCKED_LEVEL`)~~ — Removed `DRIVER_LOCKED_LEVEL_NONE` (level 0); thread safety always enabled | New (code review) | ✅ RESOLVED | OdbcJdbc.h, Main.h |
-| L-6 | Intrusive linked lists for object management (fragile, limits objects to one list) | New (code review) | ❌ OPEN | OdbcObject.h |
-| L-7 | Duplicated logic in `OdbcObject::setString` (two overloads with identical bodies) | New (code review) | ❌ OPEN | OdbcObject.cpp |
-| L-8 | Static initialization order issues in `EnvShare` | New (code review) | ❌ OPEN | IscDbc/EnvShare.cpp |
+| L-6 | ~~Intrusive linked lists for object management~~ — Replaced `LinkedList` with `std::vector<T*>` in IscConnection::statements, IscStatement::resultSets, IscResultSet::blobs; removed dead `IscResultSet::clobs` and `IscDatabaseMetaData::resultSets`; removed `LinkedList.h` includes | New (code review) | ✅ RESOLVED | IscConnection.h/.cpp, IscStatement.h/.cpp, IscResultSet.h/.cpp, IscDatabaseMetaData.h |
+| L-7 | ~~Duplicated logic in `returnStringInfo`~~ — SQLINTEGER* overload now delegates to SQLSMALLINT* overload, eliminating 15 lines of duplicated code | New (code review) | ✅ RESOLVED | OdbcObject.cpp |
+| L-8 | ~~Static initialization order issues in `EnvShare`~~ — Replaced global `EnvShare environmentShare` with `getEnvironmentShareInstance()` using construct-on-first-use (Meyer's Singleton); thread-safe in C++11+ | New (code review) | ✅ RESOLVED | IscDbc/EnvShare.h/.cpp, IscDbc/IscConnection.cpp |
+| L-9 | ~~`snprintf`/`swprintf` macro conflicts with modern MSVC~~ — Guarded `#define snprintf _snprintf` / `#define swprintf _snwprintf` behind `_MSC_VER < 1900`; fixed same in IscDbc.h | New (Phase 5 fix) | ✅ RESOLVED | OdbcJdbc.h, IscDbc/IscDbc.h |
 
 ### 1.5 Test Infrastructure Issues
 
@@ -347,21 +348,21 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 
 **Deliverable**: Feature-complete ODBC driver supporting all commonly-used ODBC features. 22 new tests added.
 
-### Phase 5: Code Quality & Maintainability
+### Phase 5: Code Quality & Maintainability ✅ (Completed — February 7, 2026)
 **Priority**: Low (ongoing)  
 **Duration**: Ongoing, interspersed with other work  
 **Goal**: Modern, maintainable codebase
 
-| Task | Issues Addressed | Effort |
-|------|-----------------|--------|
-| 5.1 Introduce `std::unique_ptr` / `std::shared_ptr` for owned resources | L-2 | Incremental |
-| 5.2 Add `private`/`protected` visibility to class members | L-1 | Incremental |
-| 5.3 Split large files (OdbcConvert.cpp → per-type-family files) | L-3 | 2 days |
-| 5.4 Apply consistent code formatting (clang-format) | L-4 | 1 day |
-| 5.5 Replace intrusive linked lists with `std::vector` or `std::list` | L-6 | 2 days |
-| 5.6 Eliminate duplicated `setString` overloads | L-7 | 0.5 day |
-| 5.7 Fix `EnvShare` static initialization order | L-8 | 1 day |
-| 5.8 Add API documentation (doxygen-style comments on public methods) | — | Ongoing |
+| Task | Issues Addressed | Effort | Notes |
+|------|-----------------|--------|-------|
+| ✅ 5.1 Introduce `std::unique_ptr` / `std::shared_ptr` for owned resources | L-2 | Incremental | Converted OdbcError chain to `std::vector<std::unique_ptr<OdbcError>>` |
+| ✅ 5.2 Add `private`/`protected` visibility to class members | L-1 | Incremental | OdbcObject, OdbcError, OdbcEnv — diag fields private, error list protected |
+| ❌ ~~5.3 Split large files (OdbcConvert.cpp → per-type-family files)~~ | L-3 | WONTFIX | Files are heavily macro-driven; splitting carries high regression risk for marginal benefit |
+| ✅ 5.4 Apply consistent code formatting (clang-format) | L-4 | 0.5 day | Added `.clang-format` config matching existing conventions; apply to new code only |
+| ✅ 5.5 Replace intrusive linked lists with `std::vector` or `std::list` | L-6 | 1 day | IscConnection::statements, IscStatement::resultSets, IscResultSet::blobs |
+| ✅ 5.6 Eliminate duplicated `returnStringInfo` overloads | L-7 | 0.5 day | SQLINTEGER* overload now delegates to SQLSMALLINT* overload |
+| ✅ 5.7 Fix `EnvShare` static initialization order | L-8 | 0.5 day | Construct-on-first-use (Meyer's Singleton) |
+| ✅ 5.8 Add API documentation (doxygen-style comments on public methods) | — | 0.5 day | OdbcObject, OdbcError, OdbcEnv, Connection, Attachment, EnvShare |
 
 **Deliverable**: Codebase follows modern C++17 idioms and is approachable for new contributors.
 

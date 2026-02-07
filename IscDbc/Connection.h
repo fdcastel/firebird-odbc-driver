@@ -195,6 +195,16 @@ public:
 	virtual void		sqlEndTran(int operation) = 0;
 };
 
+/// @brief Abstract interface for a database connection.
+///
+/// This is the core IscDbc interface that OdbcConnection delegates to.
+/// Implemented by IscConnection, which wraps the Firebird OO API.
+///
+/// Key responsibilities:
+///   - Transaction management (commit, rollback, savepoints, auto-commit)
+///   - Statement creation (createStatement, prepareStatement, prepareCall)
+///   - Metadata access (getMetaData)
+///   - Server version detection for feature-flagging
 class Connection  
 {
 public:
@@ -207,7 +217,6 @@ public:
 	virtual const char*	getCatalog() = 0;
 	virtual DatabaseMetaData* getMetaData() = 0;
 	virtual int			getTransactionIsolation() = 0;
-//	virtual void		getWarnings() = 0;
 	virtual bool		isClosed() = 0;
 	virtual bool		isReadOnly() = 0;
 	virtual const char*	nativeSQL(const char* sqlString) = 0;
@@ -225,14 +234,18 @@ public:
 	virtual void		commitAuto() = 0;
 	virtual void		rollbackAuto() = 0;
 
-	// Savepoint support for statement-level error isolation
+	/// @name Savepoint support for statement-level error isolation
+	/// @{
 	virtual void		setSavepoint(const char* name) = 0;
 	virtual void		releaseSavepoint(const char* name) = 0;
 	virtual void		rollbackSavepoint(const char* name) = 0;
+	/// @}
 
-	// Server version detection for feature-flagging (Firebird 3.0/4.0/5.0)
+	/// @name Server version detection for feature-flagging (Firebird 3.0/4.0/5.0)
+	/// @{
 	virtual int			getServerMajorVersion() = 0;
 	virtual int			getServerMinorVersion() = 0;
+	/// @}
 
 	virtual Blob*		genHTML (Properties *context, int genHeaders) = 0;
 	virtual int			getNativeSql (const char * inStatementText, int textLength1,

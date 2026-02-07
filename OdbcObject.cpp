@@ -41,7 +41,6 @@ namespace OdbcJdbcLibrary {
 OdbcObject::OdbcObject()
 {
 	next = NULL; // NOMEY
-	errors = NULL;
 	infoPosted = false;
 	sqlDiagCursorRowCount = 0;			// SQL_DIAG_CURSOR_ROW_COUNT 
 	sqlDiagDynamicFunction = NULL;		// SQL_DIAG_DYNAMIC_FUNCTION 
@@ -80,24 +79,11 @@ SQLRETURN OdbcObject::returnStringInfo(SQLPOINTER ptr, SQLSMALLINT maxLength, SQ
 
 SQLRETURN OdbcObject::returnStringInfo(SQLPOINTER ptr, SQLSMALLINT maxLength, SQLINTEGER *returnLength, const char *value)
 {
-	int count = (int)strlen (value);
-	*returnLength = count;
-
-	if ( ptr && maxLength > 0 )
-	{
-		--maxLength;
-		if (count <= maxLength)
-		{
-			strcpy ((char*) ptr, value);
-			return sqlSuccess();
-		}
-
-		memcpy (ptr, value, maxLength);
-		((char*) ptr) [maxLength] = 0;
-		*returnLength = maxLength;
-	}
-
-	return sqlReturn (SQL_SUCCESS_WITH_INFO, "01004", "String data, right truncated");
+	// Delegate to the SQLSMALLINT* overload and widen the result
+	SQLSMALLINT shortLength = 0;
+	SQLRETURN ret = returnStringInfo(ptr, maxLength, &shortLength, value);
+	*returnLength = shortLength;
+	return ret;
 }
 
 int OdbcObject::sqlReturn(int code, const char * state, const char *text, int nativeCode)
@@ -192,15 +178,12 @@ bool OdbcObject::appendString(const char * string, int stringLength, SQLCHAR * t
 
 SQLRETURN OdbcObject::sqlError(UCHAR * stateBuffer, SQLINTEGER * nativeCode, UCHAR * msgBuffer, int msgBufferLength, SWORD * msgLength)
 {
-	OdbcError *error = errors;
-
-	if (error)
-		{
-		errors = error->next;
-		SQLRETURN ret = error->sqlGetDiagRec (stateBuffer, nativeCode, msgBuffer, msgBufferLength, msgLength);
-		delete error;
-		return ret;
-		}
+	if (!errors.empty())
+	{
+		auto error = std::move(errors.front());
+		errors.erase(errors.begin());
+		return error->sqlGetDiagRec (stateBuffer, nativeCode, msgBuffer, msgBufferLength, msgLength);
+	}
 
 	strcpy ((char*) stateBuffer, "00000");
 	msgBuffer [0] = 0;
@@ -212,22 +195,19 @@ SQLRETURN OdbcObject::sqlError(UCHAR * stateBuffer, SQLINTEGER * nativeCode, UCH
 OdbcError* OdbcObject::postError(OdbcError * error)
 {
 	infoPosted = true;
-	OdbcError **ptr;
-
-	for (ptr = &errors; *ptr; ptr = &(*ptr)->next)
-		;
-
-	error->next = NULL;
-	*ptr = error;
 	error->connection = getConnection();
+	errors.push_back(std::unique_ptr<OdbcError>(error));
 
 	return error;
 }
 
 void OdbcObject::operator <<(OdbcObject * obj)
 {
-	for (OdbcError *error = obj->errors; error; error = error->next)
-		postError(error);
+	for (auto& error : obj->errors)
+	{
+		error->connection = getConnection();
+		errors.push_back(std::move(error));
+	}
 
 	infoPosted = obj->infoPosted;
 	sqlDiagCursorRowCount = obj->sqlDiagCursorRowCount;
@@ -237,17 +217,13 @@ void OdbcObject::operator <<(OdbcObject * obj)
 	sqlDiagReturnCode = obj->sqlDiagReturnCode;
 	sqlDiagRowCount = obj->sqlDiagRowCount;
 
-	obj->errors = NULL;
+	obj->errors.clear();
 	obj->clearErrors();
 }
 
 void OdbcObject::clearErrors()
 {
-	for (OdbcError *error; (error = errors);)
-		{
-		errors = error->next;
-		delete error;
-		}
+	errors.clear();
 
 	infoPosted = false;
 	sqlDiagDynamicFunction = NULL;		// SQL_DIAG_DYNAMIC_FUNCTION 
@@ -286,11 +262,8 @@ OdbcError* OdbcObject::postError(const char * state, JString msg)
 
 SQLRETURN OdbcObject::sqlGetDiagRec(int handleType, int recNumber, SQLCHAR * stateBuffer, SQLINTEGER * nativeCode, SQLCHAR * msgBuffer, int msgBufferLength, SQLSMALLINT * msgLength)
 {
-	int n = 1;
-
-	for (OdbcError *error = errors; error; error = error->next, ++n)
-		if (n == recNumber)
-			return error->sqlGetDiagRec (stateBuffer, nativeCode, msgBuffer, msgBufferLength, msgLength);
+	if (recNumber >= 1 && recNumber <= (int)errors.size())
+		return errors[recNumber - 1]->sqlGetDiagRec (stateBuffer, nativeCode, msgBuffer, msgBufferLength, msgLength);
 
 	if (stateBuffer)
 		strcpy ((char*) stateBuffer, "00000");
@@ -327,9 +300,7 @@ SQLRETURN OdbcObject::sqlGetDiagField(int recNumber, int diagId, SQLPOINTER ptr,
 	case SQL_DIAG_NUMBER:
 		if (ptr)
 		{
-			int n = 0;
-			for (OdbcError *error = errors; error; error = error->next, ++n);
-			*(SQLINTEGER*)ptr = n;
+			*(SQLINTEGER*)ptr = (SQLINTEGER)errors.size();
 		}
 		return SQL_SUCCESS;
 
@@ -348,10 +319,8 @@ SQLRETURN OdbcObject::sqlGetDiagField(int recNumber, int diagId, SQLPOINTER ptr,
 	if (ptr)
 		*(char*)ptr = '\0';
 
-	int n = 1;
-	for (OdbcError *error = errors; error; error = error->next, ++n)
-		if (n == recNumber)
-			return error->sqlGetDiagField (diagId, ptr, bufferLength, stringLength);
+	if (recNumber >= 1 && recNumber <= (int)errors.size())
+		return errors[recNumber - 1]->sqlGetDiagField (diagId, ptr, bufferLength, stringLength);
 
 	return SQL_NO_DATA;
 }

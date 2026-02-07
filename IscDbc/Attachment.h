@@ -33,6 +33,11 @@ using namespace classMutex;
 
 class Properties;
 
+/// @brief Manages a Firebird database attachment (connection to a Firebird server).
+///
+/// Wraps the Firebird OO API IAttachment handle and tracks server version,
+/// character set, page size, and other connection-level metadata.
+/// Reference-counted via addRef()/release().
 class Attachment  
 {
 public:
@@ -48,8 +53,11 @@ public:
 	void addRef();
 	void loadClientLiblary( Properties *properties );
 	bool isFirebirdVer2_0(){ return majorFb == 2; }
+	/// Return the server major version (e.g. 5 for Firebird 5.0).
 	int getMajorVersion() const { return majorFb; }
+	/// Return the server minor version (e.g. 0 for Firebird 5.0).
 	int getMinorVersion() const { return minorFb; }
+	/// Check if the server is at least the given version (e.g. isVersionAtLeast(4, 0) for FB4+).
 	bool isVersionAtLeast(int major, int minor = 0) const { return (majorFb > major) || (majorFb == major && minorFb >= minor); }
 	void createDatabase(const char *dbName, Properties *properties);
 	void openDatabase(const char * dbName, Properties * properties);

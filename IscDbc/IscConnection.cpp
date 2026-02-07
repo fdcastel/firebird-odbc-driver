@@ -53,6 +53,7 @@
 #include "IscProceduresResultSet.h"
 #include "IscTablePrivilegesResultSet.h"
 #include "SQLError.h"
+#include <algorithm>
 #include "IscOdbcStatement.h"
 #include "IscUserEvents.h"
 #include "IscCallableStatement.h"
@@ -76,8 +77,6 @@ extern char charTable [];
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
-
-extern EnvShare environmentShare;
 
 extern "C" Connection* createConnection()
 {
@@ -144,11 +143,13 @@ bool IscConnection::isConnected()
 
 void IscConnection::close()
 {
-	FOR_OBJECTS (IscStatement*, statement, &statements)
+	for (auto* statement : statements)
+	{
 		statement->close();
 		statement->freeStatementHandle();
 		statement->connection = NULL; // NOMEY
-	END_FOR;
+	}
+	statements.clear();
 
 	if ( shareConnected )
 		connectionFromEnvShare();
@@ -172,7 +173,7 @@ PreparedStatement* IscConnection::prepareStatement(const char * sqlString)
 		throw;
 	}
 
-	statements.append (statement);
+	statements.push_back (statement);
 
 	return statement;
 }
@@ -279,7 +280,7 @@ Firebird::ITransaction* IscConnection::startTransaction()
 	{
 		if ( !attachment->transactionHandle )
 		{
-			environmentShare.startTransaction();
+			getEnvironmentShareInstance().startTransaction();
 			// ASSERT (!autoCommit)
 			tr.transactionPending = true;
 		}
@@ -355,7 +356,7 @@ Firebird::ITransaction* IscConnection::startTransaction()
 Statement* IscConnection::createStatement()
 {
 	IscStatement *statement = new IscStatement (this);
-	statements.append (statement);
+	statements.push_back (statement);
 
 	return statement;
 }
@@ -363,7 +364,7 @@ Statement* IscConnection::createStatement()
 InternalStatement* IscConnection::createInternalStatement()
 {
 	IscOdbcStatement *statement = new IscOdbcStatement (this);
-	statements.append (statement);
+	statements.push_back (statement);
 
 	return statement;
 }
@@ -788,7 +789,7 @@ int IscConnection::buildParamTransaction( char *& string, char boolDeclare )
 			// find ParamTransaction from Environment
 			if ( node.lengthNameTransaction )
 			{
-				if ( environmentShare.findParamTransactionFromList( node ) )
+				if ( getEnvironmentShareInstance().findParamTransactionFromList( node ) )
 				{
 					if ( localParamTransaction )
 					{
@@ -963,7 +964,7 @@ int IscConnection::buildParamTransaction( char *& string, char boolDeclare )
 
 			if ( node.lengthNameTransaction )
 			{
-				environmentShare.addParamTransactionToList( node );
+				getEnvironmentShareInstance().addParamTransactionToList( node );
 				ret = -6; // for all connections  = -6 it's named param Transaction
 			}
 		}
@@ -986,7 +987,7 @@ int IscConnection::buildParamTransaction( char *& string, char boolDeclare )
 
 			if ( node.lengthNameTransaction )
 			{
-				environmentShare.addParamTransactionToList( node );
+				getEnvironmentShareInstance().addParamTransactionToList( node );
 				ret = -6; // for all connections  = -6 it's named param Transaction
 			}
 		}
@@ -1977,7 +1978,7 @@ void IscConnection::openDatabase(const char * dbName, Properties * properties)
 void IscConnection::deleteStatement(IscStatement * statement)
 {
 //From R. Milharcic
- 	statements.deleteItem (statement);
+	statements.erase(std::remove(statements.begin(), statements.end(), statement), statements.end());
 }
 
 
@@ -2125,24 +2126,24 @@ void IscConnection::setExtInitTransaction(int optTpb)
 
 EnvironmentShare* IscConnection::getEnvironmentShare()
 {
-	return (EnvironmentShare*)&environmentShare;
+	return (EnvironmentShare*)&getEnvironmentShareInstance();
 }
 
 void IscConnection::connectionToEnvShare()
 {
-	shareConnected = environmentShare.addConnection (this);
+	shareConnected = getEnvironmentShareInstance().addConnection (this);
 }
 
 void IscConnection::connectionFromEnvShare()
 {
-	environmentShare.removeConnection (this);
+	getEnvironmentShareInstance().removeConnection (this);
 	shareConnected = false;
 }
 
 JString IscConnection::getDatabaseServerName()
 {
 	if ( attachment->databaseServerName.IsEmpty() )
-		return environmentShare.getDatabaseServerName();
+		return getEnvironmentShareInstance().getDatabaseServerName();
 
 	return attachment->databaseServerName;
 }
@@ -2184,7 +2185,7 @@ CallableStatement* IscConnection::prepareCall(const char * sqlString)
 		throw;
 		}
 
-	statements.append (statement);
+	statements.push_back (statement);
 	return statement;
 }
 
@@ -2192,12 +2193,13 @@ void IscConnection::commitAuto()
 {
 	bool callRetaining = false;
 
-	FOR_OBJECTS (IscStatement*, statement, &statements)
+	for (auto* statement : statements)
+	{
 		if ( statement->isActiveCursor() )
 			callRetaining = true;
 		else if ( statement->isActiveLocalTransaction() )
 			statement->commitLocal();
-	END_FOR;
+	}
 
 	if ( callRetaining )
 		commitRetaining();
@@ -2209,12 +2211,13 @@ void IscConnection::rollbackAuto()
 {
 	bool callRetaining = false;
 
-	FOR_OBJECTS (IscStatement*, statement, &statements)
+	for (auto* statement : statements)
+	{
 		if ( statement->isActiveCursor() )
 			callRetaining = true;
 		else if ( statement->isActiveLocalTransaction() )
 			statement->rollbackLocal();
-	END_FOR;
+	}
 
 	if ( callRetaining )
 		rollbackRetaining();

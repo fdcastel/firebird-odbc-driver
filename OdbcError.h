@@ -33,6 +33,14 @@ using namespace classJString;
 
 class OdbcConnection;
 
+/// @brief Represents a single ODBC diagnostic record.
+///
+/// Each OdbcError holds a SQLSTATE, native error code, and message text.
+/// Errors are stored in OdbcObject's error vector and retrieved via
+/// SQLGetDiagRec, SQLGetDiagField, or the legacy SQLError function.
+///
+/// The SQLSTATE is automatically mapped from Firebird ISC error codes
+/// and SQL codes via the centralized mapping in OdbcSqlState.h.
 class OdbcError  
 {
 public:
@@ -45,8 +53,10 @@ public:
 	OdbcError(int code, int fbcode, const char *state, JString errorMsg);
 	~OdbcError();
 
+	/// Set by OdbcObject::postError() — needed externally for error context.
 	OdbcConnection	*connection;
-	OdbcError		*next;
+
+private:
 	char			sqlState[6];
 	int				sqlStateIndex;
 	JString			msg;

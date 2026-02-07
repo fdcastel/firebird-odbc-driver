@@ -25,8 +25,8 @@
 #if !defined(_ISCRESULTSET_H_)
 #define _ISCRESULTSET_H_
 
+#include <vector>
 #include "Connection.h"
-#include "LinkedList.h"
 #include "Values.h"
 #include "DateTime.h"	// Added by ClassView
 #include "SqlTime.h"
@@ -194,8 +194,7 @@ public:
 	char			**columnNames;
 	bool			valueWasNull;
 	bool			nextSimulateForProcedure;
-	LinkedList		blobs;
-	LinkedList		clobs;
+	std::vector<Blob*>	blobs;
 	int				activePosRowInSet;
 	size_t			sqldataOffsetPtr;
 	enStatysActivePositionRow statysPositionRow;

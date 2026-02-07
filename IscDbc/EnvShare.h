@@ -34,6 +34,11 @@ namespace IscDbcLibrary {
 
 class IscConnection;
 
+/// @brief Shared environment state for distributed (multi-connection) transactions.
+///
+/// Manages a pool of IscConnection instances that participate in a shared
+/// transaction via the Firebird DTC (Distributed Transaction Coordinator).
+/// Accessed via the singleton getEnvironmentShareInstance().
 class EnvShare : public EnvironmentShare
 {
 public:
@@ -63,6 +68,9 @@ public:
 	ListParamTransaction *listTransaction;
 	JString			databaseServerName;
 };
+
+/// Returns the singleton EnvShare instance (construct-on-first-use).
+EnvShare& getEnvironmentShareInstance();
 
 }; // end namespace IscDbcLibrary
 

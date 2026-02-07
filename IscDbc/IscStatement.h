@@ -25,8 +25,8 @@
 #if !defined(_ISCSTATEMENT_H_)
 #define _ISCSTATEMENT_H_
 
+#include <vector>
 #include "Connection.h"
-#include "LinkedList.h"
 #include "Sqlda.h"
 
 namespace IscDbcLibrary {
@@ -110,7 +110,7 @@ public:
 	virtual void		switchTransaction( bool local );
 
 	IscResultSet*	createResultSet();
-	LinkedList		resultSets;
+	std::vector<IscResultSet*>	resultSets;
 	IscConnection	*connection;
 	JString			sql;
 	int				useCount;

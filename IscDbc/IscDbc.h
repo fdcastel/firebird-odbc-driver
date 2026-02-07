@@ -111,7 +111,7 @@ throw SQLEXCEPTION ( connection->GDS->getSqlCode( statusVector ), statusVector [
 #define strncasecmp		strnicmp
 #endif // _MSC_VER >= 1400
 
-#if _MSC_VER < 1700
+#if defined(_MSC_VER) && _MSC_VER < 1900
 #define snprintf		_snprintf
 #endif
 
