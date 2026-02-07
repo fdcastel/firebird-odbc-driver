@@ -6,8 +6,7 @@
 **Last Updated**: February 7, 2026  
 **Version**: 1.6
 
-> This document consolidates all known issues from PLAN.md, ISSUE-244.md, FIREBIRD_ODBC_NEW_FIXES_PLAN.md,
-> and newly identified architectural deficiencies discovered through deep comparison with psqlodbc.
+> This document consolidates all known issues and newly identified architectural deficiencies.
 > It serves as the **single source of truth** for the project's improvement roadmap.
 
 ---
@@ -97,7 +96,7 @@
 
 | # | Issue | Source | Status | File(s) |
 |---|-------|--------|--------|---------|
-| T-1 | All tests pass (100% pass rate) on Windows, Linux x64, Linux ARM64; 65 NullHandleTests (GTest direct-DLL) + 28 NullHandleTests (MSTest) | ISSUE-244, PLAN-NEW-TESTS | ✅ RESOLVED | Tests/Cases/, tests/ |
+| T-1 | All tests pass (100% pass rate) on Windows, Linux x64, Linux ARM64; 65 NullHandleTests (GTest direct-DLL) + 28 NullHandleTests | ISSUE-244, PLAN-NEW-TESTS | ✅ RESOLVED | Tests/Cases/, tests/ |
 | T-2 | InfoTests fixed to use `SQLWCHAR` buffers with Unicode ODBC functions | PLAN-NEW-TESTS §Known Issues 1 | ✅ RESOLVED | Tests/Cases/InfoTests.cpp |
 | T-3 | No unit tests for the IscDbc layer — only ODBC API-level integration tests | New (analysis) | ❌ OPEN | Tests/ |
 | T-4 | No data conversion unit tests for OdbcConvert's ~150 conversion methods | New (analysis) | ❌ OPEN | Tests/ |
@@ -131,7 +130,7 @@
 | **Memory management** | Raw new/delete, intrusive linked lists | malloc/free with error-checking macros | psqlodbc's macros prevent OOM crashes |
 | **Descriptors** | OdbcDesc/DescRecord classes | Union-based DescriptorClass (ARD/APD/IRD/IPD) | Functionally equivalent |
 | **Build system** | Multiple platform-specific makefiles + VS | autotools + VS (standard GNU toolchain for Unix) | psqlodbc's autotools is more maintainable for Unix |
-| **Tests** | 112 tests (MSTest on Windows, GTest on Linux), 100% passing | 49 standalone C programs with expected-output diffing | psqlodbc tests are simpler, more portable, and more comprehensive |
+| **Tests** | 112 tests, 100% passing | 49 standalone C programs with expected-output diffing | psqlodbc tests are simpler, more portable, and more comprehensive |
 | **CI** | GitHub Actions (Windows + Linux) | GitHub Actions | Comparable |
 | **Maturity** | Active development, significant recent fixes | 30+ years, stable, widely deployed | psqlodbc is the gold standard |
 
@@ -246,7 +245,7 @@ psqlodbc wraps every ODBC entry point with a consistent 5-step pattern (lock →
 | ✅ 0.2 Add null checks at all ODBC entry points (Main.cpp, MainUnicode.cpp) | C-3 | 2 days | Completed Feb 7, 2026: Added explicit null checks to SQLCancel, SQLFreeEnv, SQLDisconnect, SQLGetEnvAttr, SQLSetEnvAttr, SQLFreeHandle, SQLAllocHandle, SQLCopyDesc |
 | ✅ 0.3 Fix `postError` sprintf buffer overflow | C-6 | 0.5 day | Completed Feb 7, 2026: Replaced sprintf with snprintf in OdbcConnection.cpp debug builds; increased buffer to 512 bytes |
 | ✅ 0.4 Replace C-style exception casts with direct catch | C-7 | 1 day | Completed Feb 7, 2026: Replaced 64 `(SQLException&)ex` casts across 12 files with `catch (SQLException &exception)` — direct catch instead of unsafe downcast |
-| ✅ 0.5 Add tests for crash scenarios (null handles, invalid handles, SQLCopyDesc) | T-9 | 1 day | Completed Feb 7, 2026: 28 NullHandleTests (MSTest) + 65 NullHandleTests (GTest direct-DLL loading to bypass ODBC Driver Manager) |
+| ✅ 0.5 Add tests for crash scenarios (null handles, invalid handles, SQLCopyDesc) | T-9 | 1 day | Completed Feb 7, 2026: 28 NullHandleTests + 65 NullHandleTests (GTest direct-DLL loading to bypass ODBC Driver Manager) |
 
 **Deliverable**: Driver never crashes on invalid input; returns `SQL_INVALID_HANDLE` or `SQL_ERROR` instead.
 
@@ -327,7 +326,6 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 | ✅ 3.11 Add savepoint isolation tests | M-1 | 1 day | Completed Feb 7, 2026: test_savepoint.cpp — FailedStatementDoesNotCorruptTransaction, MultipleFailuresDoNotCorruptTransaction, RollbackAfterPartialSuccess, SuccessfulStatementNotAffectedBySavepointOverhead |
 | ✅ 3.12 Add catalog function tests | — | 1 day | Completed Feb 7, 2026: test_catalog.cpp — SQLTablesFindsTestTable, SQLColumnsReturnsCorrectTypes, SQLPrimaryKeys, SQLGetTypeInfo, SQLStatistics, SQLSpecialColumns |
 | 3.13 Add Firebird version matrix to CI (test against 3.0, 4.0, 5.0) | T-6 | 2 days |
-| 3.14 Create portable standalone C test harness (alongside MSTest) | T-3, T-5 | 3 days |
 
 **Deliverable**: 100+ tests passing, cross-platform test runner, Firebird version matrix in CI.
 
@@ -411,42 +409,7 @@ The following psqlodbc tests have high value for the Firebird driver. They are l
 | `cursor-name-test` | SQLSetCursorName/SQLGetCursorName | |
 | `deprecated-test` | ODBC 2.x deprecated functions | Low priority but good for completeness |
 
-### 5.2 Portable Test Harness Design
-
-To achieve psqlodbc-level test portability, create a **standalone C test harness** alongside the existing MSTest suite:
-
-```
-Tests/
-├── OdbcTests/            # Existing MSTest (Windows/VS)
-├── Fixtures/             # Existing
-├── Cases/                # Existing
-├── standalone/           # NEW: Portable C test programs
-│   ├── common.h          # Shared: connect, print_result, check_*
-│   ├── common.c          # Shared: implementation
-│   ├── connect-test.c
-│   ├── errors-test.c
-│   ├── catalog-test.c
-│   ├── cursor-test.c
-│   ├── descriptors-test.c
-│   ├── conversions-test.c
-│   ├── unicode-test.c
-│   ├── batch-test.c
-│   └── ...
-├── expected/             # NEW: Expected output files
-│   ├── connect-test.out
-│   ├── errors-test.out
-│   └── ...
-└── runsuite.sh           # NEW: Run all tests, diff against expected
-```
-
-**Benefits**:
-- Runs on Windows (cmd/powershell), Linux (bash), macOS (bash)
-- No Visual Studio dependency
-- Easy to add new tests (one C file + one .out file)
-- Expected-output comparison catches regressions automatically
-- Can be run in CI on all platforms
-
-### 5.3 Test Environment Variables
+### 5.2 Test Environment Variables
 
 Align with existing convention:
 - `FIREBIRD_ODBC_CONNECTION` — Full ODBC connection string (existing)
@@ -568,7 +531,6 @@ Work incrementally. Each phase should be a series of focused, reviewable commits
 1. One commit per fix (e.g., "Fix GUARD_HDESC null dereference in SQLCopyDesc")
 2. Every fix commit should include or update a test
 3. Run the full test suite before every commit
-4. Tag releases at phase boundaries (v3.1.0 after Phase 0+1, v3.2.0 after Phase 2+3, etc.)
 
 ---
 
@@ -589,10 +551,10 @@ Work incrementally. Each phase should be a series of focused, reviewable commits
 
 | Metric | Current | Target | Notes |
 |--------|---------|--------|-------|
-| Test pass rate | **100% (71/71 GTest, 112 MSTest)** | 100% | ✅ All tests pass; connection tests skip gracefully without database |
+| Test pass rate | **100%** | 100% | ✅ All tests pass; connection tests skip gracefully without database |
 | Test count | 112 | 150+ | Comprehensive coverage comparable to psqlodbc |
 | SQLSTATE mapping coverage | **90%+ (121 kSqlStates, 100+ ISC mappings)** | 90%+ | ✅ All common Firebird errors map to correct SQLSTATEs |
-| Crash on invalid input | **Never (NULL handles return SQL_INVALID_HANDLE)** | Never | ✅ Phase 0 complete — 65 GTest (direct-DLL) + 28 MSTest null handle tests |
+| Crash on invalid input | **Never (NULL handles return SQL_INVALID_HANDLE)** | Never | ✅ Phase 0 complete — 65 GTest (direct-DLL) + 28 null handle tests |
 | Cross-platform tests | **Windows + Linux (x64 + ARM64)** | Windows + Linux + macOS | ✅ CI passes on all platforms |
 | Firebird version matrix | 5.0 only | 3.0, 4.0, 5.0 | CI tests all supported versions |
 | Unicode compliance | **100% tests passing** | 100% | ✅ All W function tests pass including BufferLength validation |
@@ -661,12 +623,8 @@ Quick reference for which files need changes in each phase.
 - [ODBC Unicode Specification](https://learn.microsoft.com/en-us/sql/odbc/reference/develop-app/unicode-data)
 - [ODBC SQLSTATE Appendix A](https://learn.microsoft.com/en-us/sql/odbc/reference/appendixes/appendix-a-odbc-error-codes)
 - [psqlodbc Source Code](https://git.postgresql.org/gitweb/?p=psqlodbc.git) (reference in `./tmp/psqlodbc/`)
-- [Firebird ISC Error Codes](https://firebirdsql.org/file/documentation/html/en/refdocs/fblangref50/firebird-50-language-reference.html)
-- [GitHub Issue #244 — Unicode Support](https://github.com/FirebirdSQL/firebird-odbc-driver/issues/244)
-- [PLAN.md](PLAN.md) — Original ODBC spec compliance fix plan
-- [ISSUE-244.md](ISSUE-244.md) — Unicode issue resolution documentation
-- [FIREBIRD_ODBC_NEW_FIXES_PLAN.md](FIREBIRD_ODBC_NEW_FIXES_PLAN.md) — odbc-crusher findings
-- [PLAN-NEW-TESTS.md](PLAN-NEW-TESTS.md) — Test suite plan and status
+- [Firebird 5.0 Language Reference](https://firebirdsql.org/file/documentation/html/en/refdocs/fblangref50/firebird-50-language-reference.html)
+- [Firebird New OO API Reference](https://github.com/FirebirdSQL/firebird/blob/master/doc/Using_OO_API.md)
 
 ---
 
