@@ -40,6 +40,7 @@
 #include "IscDbc/SQLException.h"
 
 #include "TemplateConvert.h"
+#include "Utf16Convert.h"
 
 #ifndef _WINDOWS
 // for Linux
@@ -62,8 +63,11 @@
 #define HI_LONG(l)          ((int)(((UQUAD)(l) >> 32) & 0xFFFFFFFF))
 #endif
 
-size_t wcscch(const wchar_t* s, size_t len)
+size_t wcscch(const SQLWCHAR* s, size_t len)
 {
+  if (!s || len == 0)
+    return 0;
+    
   size_t ret = len;
   while (len--)
   {
@@ -1119,12 +1123,12 @@ SQLLEN * OdbcConvert::getAdressBindIndTo(char * pointer)
 	if ( octetLengthPtr )					\
 	{										\
 		if ( *octetLengthPtr == SQL_NTS )	\
-			len = (int)wcslen ( pointerFrom );	\
+			len = (int)Utf16Length ( (const SQLWCHAR*)pointerFrom );	\
 		else								\
-			len = *octetLengthPtr / 2;		\
+			len = *octetLengthPtr / sizeof(SQLWCHAR);	\
 	}										\
 	else									\
-		len = (int)wcslen( pointerFrom );	\
+		len = (int)Utf16Length( (const SQLWCHAR*)pointerFrom );	\
 
 #define ODBCCONVERT_CONV(TYPE_FROM,C_TYPE_FROM,TYPE_TO,C_TYPE_TO)								\
 int OdbcConvert::conv##TYPE_FROM##To##TYPE_TO(DescRecord * from, DescRecord * to)				\
@@ -3745,15 +3749,34 @@ int OdbcConvert::transferStringWToAllowedType(DescRecord * from, DescRecord * to
 	ODBCCONVERT_CHECKNULL_SQLDA;
 
 	SQLLEN * octetLengthPtr = getAdressBindIndFrom((char*)from->octetLengthPtr);
-	wchar_t * pointerFrom = (wchar_t *)getAdressBindDataFrom((char*)from->dataPtr);
+	SQLWCHAR * pointerFrom = (SQLWCHAR *)getAdressBindDataFrom((char*)from->dataPtr);
 
 	SQLINTEGER len;
 	SQLINTEGER cch;
 	SQLINTEGER lenMbs;
 	SQLRETURN ret = SQL_SUCCESS;
 
+	// NULL pointer safety check
+	if (!pointerFrom)
+	{
+		if (indicatorTo)
+			setIndicatorPtr(indicatorTo, SQL_NULL_DATA, to);
+		return SQL_SUCCESS;
+	}
+
 	GET_WLEN_FROM_OCTETLENGTHPTR;
-	cch = wcscch(pointerFrom, len);
+	
+	// Validate length is reasonable
+	if (len < 0 || len > 1000000) // 1M characters max
+	{
+		len = 0;
+		cch = 0;
+		lenMbs = 0;
+	}
+	else
+	{
+		cch = wcscch(pointerFrom, len);
+	}
 
 	if ( !to->isLocalDataPtr )
 	{
@@ -3768,12 +3791,12 @@ int OdbcConvert::transferStringWToAllowedType(DescRecord * from, DescRecord * to
 	{
   		OdbcError *error = parentStmt->postError (new OdbcError (0, "01004", "Data truncated"));
 		ret = SQL_SUCCESS_WITH_INFO;
-		do
+		while (len > 0 && cch + from->dataOffset > to->octetLength)
 		{
 			len--;
-			if (!IS_LOW_SURROGATE(pointerFrom[len-1]))
+			if (len > 0 && !IS_LOW_SURROGATE(pointerFrom[len]))
 				cch--;
-		} while (cch + from->dataOffset > to->octetLength);
+		}
 	}
 
 	if ( len < 0 )
@@ -3781,14 +3804,23 @@ int OdbcConvert::transferStringWToAllowedType(DescRecord * from, DescRecord * to
 		cch = len = 0;
 		lenMbs = 0;
 	}
+	else if (pointerFrom == NULL || len == 0)
+	{
+		cch = len = 0;
+		lenMbs = 0;
+	}
 	else
 	{
-		wchar_t &wcEnd = *(pointerFrom + len);
-		wchar_t saveEnd = wcEnd;
-		wcEnd = L'\0';	// We guarantee the end L'\0'
+		// Sanity check: if we got this far, len should be valid and pointerFrom should be accessible
+		// The string should be null-terminated (since we used SQL_NTS or calculated the length)
+		// Temporarily modify the end to ensure null termination for the conversion
+		SQLWCHAR *endPtr = pointerFrom + len;
+		SQLWCHAR saveEnd = *endPtr;
+		*endPtr = 0;	// We guarantee the end null terminator
+		// Convert UTF-16 to UTF-8 for Firebird
 		SQLUINTEGER spaceLeft = (to->octetLength - from->dataOffset) * to->headSqlVarPtr->getSqlMultiple();
-		lenMbs = (SQLUINTEGER)to->WcsToMbs( to->localDataPtr + to->dataOffset, pointerFrom, spaceLeft);
-		wcEnd = saveEnd;
+		lenMbs = (SQLUINTEGER)Utf16ToUtf8( pointerFrom, to->localDataPtr + to->dataOffset, spaceLeft);
+		*endPtr = saveEnd;
 	}
 
 	if ( from->data_at_exec )

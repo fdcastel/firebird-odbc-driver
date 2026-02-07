@@ -122,6 +122,24 @@ jobs:
       run: |
         sudo apt-get update
         sudo apt-get install -y unixodbc unixodbc-dev cmake g++
+        # Firebird requires libncurses5/libtinfo5 which may not be in newer Ubuntu
+        sudo apt-get install -y libncurses5 libtinfo5 || {
+          # On Ubuntu 24.04+, create compatibility symlinks from ncurses6
+          sudo apt-get install -y libncurses6 libtinfo6
+          if [ ! -f /lib/x86_64-linux-gnu/libncurses.so.5 ] && [ -f /lib/x86_64-linux-gnu/libncurses.so.6 ]; then
+            sudo ln -sf /lib/x86_64-linux-gnu/libncurses.so.6 /lib/x86_64-linux-gnu/libncurses.so.5
+          fi
+          if [ ! -f /lib/x86_64-linux-gnu/libtinfo.so.5 ] && [ -f /lib/x86_64-linux-gnu/libtinfo.so.6 ]; then
+            sudo ln -sf /lib/x86_64-linux-gnu/libtinfo.so.6 /lib/x86_64-linux-gnu/libtinfo.so.5
+          fi
+          # Also check aarch64 paths
+          if [ ! -f /lib/aarch64-linux-gnu/libncurses.so.5 ] && [ -f /lib/aarch64-linux-gnu/libncurses.so.6 ]; then
+            sudo ln -sf /lib/aarch64-linux-gnu/libncurses.so.6 /lib/aarch64-linux-gnu/libncurses.so.5
+          fi
+          if [ ! -f /lib/aarch64-linux-gnu/libtinfo.so.5 ] && [ -f /lib/aarch64-linux-gnu/libtinfo.so.6 ]; then
+            sudo ln -sf /lib/aarch64-linux-gnu/libtinfo.so.6 /lib/aarch64-linux-gnu/libtinfo.so.5
+          fi
+        }
         
     - name: Setup Firebird Environment
       shell: pwsh
