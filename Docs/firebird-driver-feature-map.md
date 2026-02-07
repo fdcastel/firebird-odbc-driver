@@ -152,7 +152,67 @@ SELECT UUID_TO_CHAR(id) AS id_text, ... FROM t;
 
 `CHAR_TO_UUID` expects the standard 36-character UUID form (`8-4-4-4-12` with hyphens), so drivers should validate input length/format before binding when possible.
 
-## 6. Recommended driver capability flags
+## 6. ODBC SQL data type coverage map (quick reference)
+
+ODBC SQL type source list:
+- [SQL Data Types (ODBC API Reference)](https://learn.microsoft.com/en-us/sql/odbc/reference/appendixes/sql-data-types?view=sql-server-ver16)
+
+Legend for the table below:
+- `Native`: direct Firebird type support for this ODBC type class.
+- `Mapped`: usable through driver-level mapping/conversion.
+- `No`: no direct Firebird type family to represent that ODBC type.
+
+| ODBC SQL type | 3.0 | 4.0 | 5.0 | Driver mapping notes |
+| --- | --- | --- | --- | --- |
+| `SQL_CHAR` | Native | Native | Native | `CHAR` |
+| `SQL_VARCHAR` | Native | Native | Native | `VARCHAR` |
+| `SQL_LONGVARCHAR` | Mapped | Mapped | Mapped | `BLOB SUB_TYPE TEXT` |
+| `SQL_WCHAR` | Mapped | Mapped | Mapped | Expose as wide char; store as `CHAR`/`NCHAR` with appropriate charset (typically UTF8) |
+| `SQL_WVARCHAR` | Mapped | Mapped | Mapped | Expose as wide varchar; store as `VARCHAR` with appropriate charset (typically UTF8) |
+| `SQL_WLONGVARCHAR` | Mapped | Mapped | Mapped | Wide text via `BLOB SUB_TYPE TEXT` + charset conversion |
+| `SQL_DECIMAL` | Native | Native | Native | `DECIMAL` |
+| `SQL_NUMERIC` | Native | Native | Native | `NUMERIC` |
+| `SQL_SMALLINT` | Native | Native | Native | `SMALLINT` |
+| `SQL_INTEGER` | Native | Native | Native | `INTEGER` |
+| `SQL_REAL` | Mapped | Native | Native | 3.0 maps to single-precision `FLOAT`; 4.0+ has explicit `REAL` |
+| `SQL_FLOAT` | Mapped | Mapped | Mapped | Map by precision to `FLOAT` or `DOUBLE PRECISION` |
+| `SQL_DOUBLE` | Native | Native | Native | `DOUBLE PRECISION` |
+| `SQL_BIT` | Native | Native | Native | `BOOLEAN` |
+| `SQL_TINYINT` | No | No | No | No dedicated 8-bit integer type in Firebird; emulate with `SMALLINT` + constraints if needed |
+| `SQL_BIGINT` | Native | Native | Native | `BIGINT` |
+| `SQL_BINARY` | Mapped | Native | Native | 3.0: `CHAR(n) CHARACTER SET OCTETS`; 4.0+: `BINARY(n)` |
+| `SQL_VARBINARY` | Mapped | Native | Native | 3.0: `VARCHAR(n) CHARACTER SET OCTETS`; 4.0+: `VARBINARY(n)` |
+| `SQL_LONGVARBINARY` | Mapped | Mapped | Mapped | `BLOB SUB_TYPE BINARY` |
+| `SQL_TYPE_DATE` | Native | Native | Native | `DATE` |
+| `SQL_TYPE_TIME` | Native | Native | Native | `TIME` / `TIME WITHOUT TIME ZONE` |
+| `SQL_TYPE_TIMESTAMP` | Native | Native | Native | `TIMESTAMP` / `TIMESTAMP WITHOUT TIME ZONE` |
+| `SQL_TYPE_UTCTIME` | No | Mapped | Mapped | Map to `TIME WITH TIME ZONE` on 4.0+; no dedicated UTC-only type |
+| `SQL_TYPE_UTCDATETIME` | No | Mapped | Mapped | Map to `TIMESTAMP WITH TIME ZONE` on 4.0+; no dedicated UTC-only type |
+| `SQL_INTERVAL_MONTH` | No | No | No | No `INTERVAL` data type family |
+| `SQL_INTERVAL_YEAR` | No | No | No | No `INTERVAL` data type family |
+| `SQL_INTERVAL_YEAR_TO_MONTH` | No | No | No | No `INTERVAL` data type family |
+| `SQL_INTERVAL_DAY` | No | No | No | No `INTERVAL` data type family |
+| `SQL_INTERVAL_HOUR` | No | No | No | No `INTERVAL` data type family |
+| `SQL_INTERVAL_MINUTE` | No | No | No | No `INTERVAL` data type family |
+| `SQL_INTERVAL_SECOND` | No | No | No | No `INTERVAL` data type family |
+| `SQL_INTERVAL_DAY_TO_HOUR` | No | No | No | No `INTERVAL` data type family |
+| `SQL_INTERVAL_DAY_TO_MINUTE` | No | No | No | No `INTERVAL` data type family |
+| `SQL_INTERVAL_DAY_TO_SECOND` | No | No | No | No `INTERVAL` data type family |
+| `SQL_INTERVAL_HOUR_TO_MINUTE` | No | No | No | No `INTERVAL` data type family |
+| `SQL_INTERVAL_HOUR_TO_SECOND` | No | No | No | No `INTERVAL` data type family |
+| `SQL_INTERVAL_MINUTE_TO_SECOND` | No | No | No | No `INTERVAL` data type family |
+| `SQL_GUID` | Mapped | Mapped | Mapped | No native `UUID` type; map to 16-byte binary (`OCTETS`/`BINARY`) + UUID functions |
+
+Reference pointers for the mappings above:
+- Character and text types: [3.0 Character Types](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref30/firebird-30-language-reference.html#fblangref30-datatypes-chartypes), [4.0 Character Types](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref40/firebird-40-language-reference.html#fblangref40-datatypes-chartypes), [5.0 Character Types](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref50/firebird-50-language-reference.html#fblangref50-datatypes-chartypes)
+- Numeric types: [3.0 Integer/Floating/Fixed](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref30/firebird-30-language-reference.html#fblangref30-datatypes-inttypes), [4.0 Integer/Floating/Fixed](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref40/firebird-40-language-reference.html#fblangref40-datatypes-inttypes), [5.0 Integer/Floating/Fixed](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref50/firebird-50-language-reference.html#fblangref50-datatypes-inttypes)
+- Boolean: [3.0 BOOLEAN](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref30/firebird-30-language-reference.html#fblangref30-datatypes-boolean), [4.0 BOOLEAN](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref40/firebird-40-language-reference.html#fblangref40-datatypes-boolean), [5.0 BOOLEAN](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref50/firebird-50-language-reference.html#fblangref50-datatypes-boolean)
+- Binary and BLOB: [3.0 Binary Data Types](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref30/firebird-30-language-reference.html#fblangref30-datatypes-bnrytypes), [4.0 BINARY/VARBINARY](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref40/firebird-40-language-reference.html#fblangref40-datatypes-chartypes-binary), [5.0 BINARY/VARBINARY](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref50/firebird-50-language-reference.html#fblangref50-datatypes-chartypes-binary)
+- Date/time and timezone: [3.0 Date and Time Types](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref30/firebird-30-language-reference.html#fblangref30-datatypes-datetime), [4.0 Date and Time Types](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref40/firebird-40-language-reference.html#fblangref40-datatypes-datetime), [5.0 Date and Time Types](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref50/firebird-50-language-reference.html#fblangref50-datatypes-datetime)
+- No INTERVAL SQL type family in Firebird (all versions): use date/time arithmetic functions instead, e.g. [3.0 Date and Time Operations](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref30/firebird-30-language-reference.html#fblangref30-datatypes-datetimeops), [4.0 Date and Time Operations](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref40/firebird-40-language-reference.html#fblangref40-datatypes-datetimeops), [5.0 Date and Time Operations](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref50/firebird-50-language-reference.html#fblangref50-datatypes-datetimeops)
+- UUID/GUID mapping details: [3.0 UUID Functions](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref30/firebird-30-language-reference.html#fblangref30-functions-uuid), [4.0 UUID Functions](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref40/firebird-40-language-reference.html#fblangref40-functions-uuid), [5.0 UUID Functions](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref50/firebird-50-language-reference.html#fblangref50-functions-uuid)
+
+## 7. Recommended driver capability flags
 
 At connect time, derive a capability profile from server major version, then gate SQL generation and type mapping with flags similar to:
 
