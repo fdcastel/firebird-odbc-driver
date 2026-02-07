@@ -172,7 +172,7 @@ SQLRETURN OdbcEnv::sqlGetEnvAttr(int attribute, SQLPOINTER ptr, int bufferLength
 				break;
 
 			case SQL_ATTR_ODBC_VERSION:
-				value = SQL_OV_ODBC3;
+				value = useAppOdbcVersion;
 				break;
 
 			case SQL_ATTR_OUTPUT_NTS:

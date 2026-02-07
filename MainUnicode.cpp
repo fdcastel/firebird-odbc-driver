@@ -321,10 +321,29 @@ SQLRETURN SQL_API SQLDescribeColW( SQLHSTMT hStmt, SQLUSMALLINT columnNumber,
 	ConvertingString<> ColumnName( bufferLength, columnName, nameLength, false );
 	ColumnName.setConnection( GETCONNECT_STMT( hStmt ) );
 
-	return ((OdbcStatement*) hStmt)->sqlDescribeCol( columnNumber,
+	SQLRETURN ret = ((OdbcStatement*) hStmt)->sqlDescribeCol( columnNumber,
 													ColumnName, ColumnName.getLength(),
 													nameLength, dataType, columnSize,
 													decimalDigits, nullable );
+
+	// Per ODBC spec, W API should report character types as their Unicode equivalents
+	if (SQL_SUCCEEDED(ret) && dataType)
+	{
+		switch (*dataType)
+		{
+		case SQL_CHAR:
+			*dataType = SQL_WCHAR;
+			break;
+		case SQL_VARCHAR:
+			*dataType = SQL_WVARCHAR;
+			break;
+		case SQL_LONGVARCHAR:
+			*dataType = SQL_WLONGVARCHAR;
+			break;
+		}
+	}
+
+	return ret;
 }
 
 ///// SQLErrorW /////	ODBC 1.0	///// Deprecated
@@ -547,6 +566,10 @@ SQLRETURN SQL_API SQLGetInfoW( SQLHDBC hDbc, SQLUSMALLINT infoType, SQLPOINTER i
 	case SQL_TABLE_TERM:
 	case SQL_USER_NAME:
 	case SQL_XOPEN_CLI_YEAR:
+
+		// Per ODBC spec, BufferLength for string InfoTypes in W functions must be even
+		if ( bufferLength > 0 && (bufferLength & 1) )
+			return ((OdbcConnection*) hDbc)->sqlReturn (SQL_ERROR, "HY090", "Invalid string or buffer length");
 
 		if ( bufferLength > 0 )
 		{

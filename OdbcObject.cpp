@@ -292,7 +292,8 @@ SQLRETURN OdbcObject::sqlGetDiagRec(int handleType, int recNumber, SQLCHAR * sta
 		if (n == recNumber)
 			return error->sqlGetDiagRec (stateBuffer, nativeCode, msgBuffer, msgBufferLength, msgLength);
 
-	strcpy ((char*) stateBuffer, "00000");
+	if (stateBuffer)
+		strcpy ((char*) stateBuffer, "00000");
 
 	if (msgBuffer)
 		msgBuffer [0] = 0;
@@ -300,69 +301,59 @@ SQLRETURN OdbcObject::sqlGetDiagRec(int handleType, int recNumber, SQLCHAR * sta
     if ( msgLength )
         *msgLength = 0;
 
-	return SQL_NO_DATA_FOUND;
+	return SQL_NO_DATA;
 }
 
 SQLRETURN OdbcObject::sqlGetDiagField(int recNumber, int diagId, SQLPOINTER ptr, int bufferLength, SQLSMALLINT *stringLength)
 {
-	int n = 1;
-
+	// Header fields (recNumber == 0)
 	switch( diagId )
 	{
 	case SQL_DIAG_CURSOR_ROW_COUNT:
-		*(SQLINTEGER*)ptr = sqlDiagCursorRowCount;
+		if (ptr)
+			*(SQLINTEGER*)ptr = sqlDiagCursorRowCount;
 		return SQL_SUCCESS;
 
 	case SQL_DIAG_DYNAMIC_FUNCTION:
-		*(SQLCHAR *)ptr = 0; // sqlDiagDynamicFunction
+		if (ptr)
+			*(SQLCHAR *)ptr = 0; // sqlDiagDynamicFunction
 		return SQL_SUCCESS;
 
 	case SQL_DIAG_DYNAMIC_FUNCTION_CODE:
-		*(SQLINTEGER*)ptr = sqlDiagDynamicFunctionCode;
+		if (ptr)
+			*(SQLINTEGER*)ptr = sqlDiagDynamicFunctionCode;
 		return SQL_SUCCESS;
 
 	case SQL_DIAG_NUMBER:
-		*(SQLINTEGER*)ptr = sqlDiagNumber;
-		if( ptr )
+		if (ptr)
 		{
-			SQLSMALLINT &nCount = *stringLength;
-			n = 0;
+			int n = 0;
 			for (OdbcError *error = errors; error; error = error->next, ++n);
-			*(SDWORD*)ptr = n;
+			*(SQLINTEGER*)ptr = n;
 		}
 		return SQL_SUCCESS;
 
 	case SQL_DIAG_RETURNCODE:
-		*(SQLRETURN*)ptr = sqlDiagReturnCode;
+		if (ptr)
+			*(SQLRETURN*)ptr = sqlDiagReturnCode;
 		return SQL_SUCCESS;
 
 	case SQL_DIAG_ROW_COUNT:
-		*(SQLINTEGER*)ptr = sqlDiagRowCount;
+		if (ptr)
+			*(SQLINTEGER*)ptr = sqlDiagRowCount;
 		return SQL_SUCCESS;
 	}
 
-	if ( diagId == SQL_DIAG_NUMBER )
-	{
-		if( ptr )
-		{
-			SQLSMALLINT &nCount = *stringLength;
-			n = 0;
-			for (OdbcError *error = errors; error; error = error->next, ++n);
-			*(SDWORD*)ptr = n;
-		}
-		return SQL_SUCCESS;
-	}
-
-	if ( bufferLength && ptr )
-	{
+	// Record-level fields (recNumber >= 1)
+	if (ptr)
 		*(char*)ptr = '\0';
 
-		for (OdbcError *error = errors; error; error = error->next, ++n)
-			if (n == recNumber)
-				return error->sqlGetDiagField (diagId, ptr, bufferLength, stringLength);
-	}
+	int n = 1;
+	for (OdbcError *error = errors; error; error = error->next, ++n)
+		if (n == recNumber)
+			return error->sqlGetDiagField (diagId, ptr, bufferLength, stringLength);
 
-	return SQL_NO_DATA_FOUND;
+	return SQL_NO_DATA;
 }
 
 void OdbcObject::setCursorRowCount(int count)

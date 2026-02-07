@@ -482,6 +482,9 @@ SQLRETURN OdbcConnection::sqlSetConnectAttr( SQLINTEGER attribute, SQLPOINTER va
 
 		requeueEvents();
 		break;
+
+	default:
+		return sqlReturn (SQL_ERROR, "HY092", "Invalid attribute/option identifier");
 	}
 
 	return sqlSuccess();
@@ -1261,7 +1264,7 @@ SQLRETURN OdbcConnection::sqlGetInfo( SQLUSMALLINT type, SQLPOINTER ptr, SQLSMAL
 			value |= SQL_SU_PROCEDURE_INVOCATION;
 		if (metaData->supportsSchemasInTableDefinitions())
 			value |= SQL_SU_TABLE_DEFINITION;
-		if (metaData->supportsCatalogsInIndexDefinitions())
+		if (metaData->supportsSchemasInIndexDefinitions())
 			value |= SQL_SU_INDEX_DEFINITION;
 		if (metaData->supportsSchemasInPrivilegeDefinitions())
 			value |= SQL_SU_PRIVILEGE_DEFINITION;
@@ -1518,7 +1521,8 @@ SQLRETURN OdbcConnection::sqlGetInfo( SQLUSMALLINT type, SQLPOINTER ptr, SQLSMAL
 		sprintf (temp, "  %s (short) %d\n", item->name, value);
 		OutputDebugString (temp);
 #endif
-		*((SQLUSMALLINT*) ptr) = (SQLUSMALLINT) value;
+		if (ptr)
+			*((SQLUSMALLINT*) ptr) = (SQLUSMALLINT) value;
 		if (actualLength)
 			*actualLength = sizeof (SQLUSMALLINT);
 		break;
@@ -1528,18 +1532,10 @@ SQLRETURN OdbcConnection::sqlGetInfo( SQLUSMALLINT type, SQLPOINTER ptr, SQLSMAL
 		sprintf (temp, "  %s (int) %d\n", item->name, value);
 		OutputDebugString (temp);
 #endif
-		if ( maxLength == sizeof (SQLUSMALLINT) )
-		{
-			*((SQLUSMALLINT*) ptr) = (SQLUSMALLINT)value;
-			if (actualLength)
-				*actualLength = sizeof (SQLUSMALLINT);
-		}
-		else
-		{
-			*((SQLUINTEGER*) ptr) = value;
-			if (actualLength)
-				*actualLength = sizeof (SQLUINTEGER);
-		}
+		if (ptr)
+			*((SQLUINTEGER*) ptr) = (SQLUINTEGER) value;
+		if (actualLength)
+			*actualLength = sizeof (SQLUINTEGER);
 		break;
 
 	case infoUnsupported:
@@ -1547,7 +1543,8 @@ SQLRETURN OdbcConnection::sqlGetInfo( SQLUSMALLINT type, SQLPOINTER ptr, SQLSMAL
 		sprintf (temp, "  %s (string) %s\n", item->name, "*unsupported*");
 		OutputDebugString (temp);
 #endif
-		*((SQLUINTEGER*) ptr) = value;
+		if (ptr)
+			*((SQLUINTEGER*) ptr) = value;
 		break;
 	}
 
@@ -2141,8 +2138,6 @@ SQLRETURN OdbcConnection::sqlGetConnectAttr(int attribute, SQLPOINTER ptr, int b
 		return sqlReturn (SQL_ERROR, "HYC00", "Optional feature not implemented");
 	}
 
-	SQLINTEGER len = bufferLength;
-	lengthPtr = &len;
 	if (string)
 		return returnStringInfo (ptr, bufferLength, lengthPtr, string);
 

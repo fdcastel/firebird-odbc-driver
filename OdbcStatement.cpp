@@ -158,8 +158,8 @@ void TraceOutput(char * msg, intptr_t val)
 	OutputDebugString(buf);
 }
 
-//	Bound Address + Binding Offset + ((Row Number – 1) x Element Size)
-//	*ptr = binding->pointer + bindOffsetPtr + ((1 – 1) * rowBindType); // <-- for single row
+//	Bound Address + Binding Offset + ((Row Number ï¿½ 1) x Element Size)
+//	*ptr = binding->pointer + bindOffsetPtr + ((1 ï¿½ 1) * rowBindType); // <-- for single row
 #define GETBOUNDADDRESS(binding)	( (uintptr_t)binding->dataPtr + ( applicationParamDescriptor->headBindType ? (uintptr_t)bindOffsetPtr : 0 ) );
 
 //////////////////////////////////////////////////////////////////////
@@ -2398,6 +2398,10 @@ SQLRETURN OdbcStatement::sqlCloseCursor()
 {
 	clearErrors();
 
+	// Per ODBC spec, SQLCloseCursor returns 24000 if no cursor is open
+	if (!resultSet)
+		return sqlReturn (SQL_ERROR, "24000", "Invalid cursor state");
+
 	try
 	{
 		setPreCursorName = false;
@@ -2521,6 +2525,11 @@ SQLRETURN OdbcStatement::sqlGetStmtAttr(int attribute, SQLPOINTER ptr, int buffe
 			value = useBookmarks;
 			TRACE02(SQL_ATTR_USE_BOOKMARKS,value);
 		    break;
+
+		case SQL_ATTR_CURSOR_SCROLLABLE:
+			value = cursorScrollable;
+			TRACE02(SQL_ATTR_CURSOR_SCROLLABLE,value);
+			break;
 
 		case SQL_ATTR_CURSOR_SENSITIVITY:
 			value = cursorSensitivity;
@@ -3260,6 +3269,20 @@ SQLRETURN OdbcStatement::returnDataFromExtendedFetch()
 SQLRETURN OdbcStatement::sqlSetStmtAttr(int attribute, SQLPOINTER ptr, int length)
 {
 	clearErrors();
+
+	// Per ODBC spec: certain attributes cannot be set while a cursor is open (24000)
+	if (resultSet)
+	{
+		switch (attribute)
+		{
+		case SQL_ATTR_CONCURRENCY:
+		case SQL_ATTR_CURSOR_TYPE:
+		case SQL_ATTR_CURSOR_SCROLLABLE:
+		case SQL_ATTR_CURSOR_SENSITIVITY:
+		case SQL_ATTR_USE_BOOKMARKS:
+			return sqlReturn (SQL_ERROR, "24000", "Invalid cursor state");
+		}
+	}
 
 	try
 	{
