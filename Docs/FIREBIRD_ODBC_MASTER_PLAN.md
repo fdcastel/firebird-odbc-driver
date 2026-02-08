@@ -270,24 +270,6 @@ psqlodbc wraps every ODBC entry point with a consistent 5-step pattern (lock →
 | ✅ 2.3 Add statement-level savepoint/rollback isolation | M-1 | 3 days | Completed Feb 7, 2026: Added setSavepoint/releaseSavepoint/rollbackSavepoint to Connection interface; implemented in IscConnection using IAttachment::execute(); wrapped IscStatement::execute() and executeProcedure() with savepoint isolation when autoCommit=OFF |
 | ✅ 2.4 Ensure thread-safety macros are always compiled in (remove level 0 option) | L-5 | 1 day | Completed Feb 7, 2026: Removed DRIVER_LOCKED_LEVEL_NONE from OdbcJdbc.h, removed no-locking fallback from Main.h, added compile-time #error guard |
 
-**Entry point pattern to adopt** (adapted from psqlodbc):
-```cpp
-SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
-    if (!hStmt) return SQL_INVALID_HANDLE;
-    auto* stmt = static_cast<OdbcStatement*>(hStmt);
-    GUARD_HSTMT(hStmt);        // Lock (after null check)
-    stmt->clearErrors();       // Clear previous diagnostics
-    try {
-        return stmt->sqlXxx(...);
-    } catch (SQLException& e) {
-        stmt->postError(e);
-        return SQL_ERROR;
-    } catch (...) {
-        stmt->postError("HY000", "Internal driver error");
-        return SQL_ERROR;
-    }
-}
-```
 
 **Deliverable**: Every ODBC entry point follows the same disciplined pattern.
 
@@ -328,7 +310,7 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 | ✅ 4.5 Confirm declare/fetch mode for large result sets | M-9 | 0.5 day | Completed Feb 7, 2026: Confirmed Firebird OO API already uses streaming fetch natively for forward-only cursors; no additional work needed |
 | ✅ 4.6 Add `ConnSettings` support (SQL to execute on connect) | M-5 | 1 day | Completed Feb 7, 2026: ConnSettings connection string parameter parsed and executed via PreparedStatement after connect; 3 tests added |
 | ✅ 4.7 Verify and test scrollable cursor support (forward-only + static) | M-2 | 1 day | Completed Feb 7, 2026: Static scrollable cursors confirmed working with all fetch orientations; 9 tests added |
-| ~~4.8 Evaluate DTC/XA distributed transaction support feasibility~~ | M-6 | WONTFIX — ATL/DTC removed entirely |
+| ~~4.8 Evaluate DTC/XA distributed transaction support feasibility~~ | M-6 | ❌ WONTFIX — ATL/DTC removed entirely |
 
 **Deliverable**: Feature-complete ODBC driver supporting all commonly-used ODBC features. 22 new tests added.
 
@@ -341,7 +323,7 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 |------|-----------------|--------|-------|
 | ✅ 5.1 Introduce `std::unique_ptr` / `std::shared_ptr` for owned resources | L-2 | Incremental | Converted OdbcError chain to `std::vector<std::unique_ptr<OdbcError>>` |
 | ✅ 5.2 Add `private`/`protected` visibility to class members | L-1 | Incremental | OdbcObject, OdbcError, OdbcEnv — diag fields private, error list protected |
-| ❌ ~~5.3 Split large files (OdbcConvert.cpp → per-type-family files)~~ | L-3 | WONTFIX | Files are heavily macro-driven; splitting carries high regression risk for marginal benefit |
+| ❌ ~~5.3 Split large files (OdbcConvert.cpp → per-type-family files)~~ | L-3 | ❌ WONTFIX | Files are heavily macro-driven; splitting carries high regression risk for marginal benefit |
 | ✅ 5.4 Apply consistent code formatting (clang-format) | L-4 | 0.5 day | Added `.clang-format` config matching existing conventions; apply to new code only |
 | ✅ 5.5 Replace intrusive linked lists with `std::vector` or `std::list` | L-6 | 1 day | IscConnection::statements, IscStatement::resultSets, IscResultSet::blobs |
 | ✅ 5.6 Eliminate duplicated `returnStringInfo` overloads | L-7 | 0.5 day | SQLINTEGER* overload now delegates to SQLSMALLINT* overload |
@@ -384,16 +366,13 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 
 **Current Status**: 8 of 8 ✅ (all done)
 
-#### 6.3 Tier 3: Nice to Have Tests (Port Later)
+#### 6.3 Tier 3: Nice to Have Tests
 
 | psqlodbc Test | What It Tests | Firebird Adaptation | Priority |
 |---------------|---------------|-------------------|----------|
 | `wchar-char-test` | Wide character handling in multiple encodings |   | LOW  |
 | `params-batch-exec-test` | Array of Parameter Values (batch re-execute, status arrays) | Ported to tests/test_array_binding.cpp (ReExecuteWithDifferentData, status verification) | ✅ DONE |
-| `cursor-name-test` | SQLSetCursorName/SQLGetCursorName | Part of CursorTests in Phase 3 | LOW (covered) |
-
-(1) See https://learn.microsoft.com/en-us/sql/odbc/reference/develop-app/using-arrays-of-parameters
-(2) See `\tmp\firebird_doc\Using_OO_API.html`
+| `cursor-name-test` | SQLSetCursorName/SQLGetCursorName | Part of CursorTests in Phase 3 | LOW  |
 
 **Current Status**: 2 of 6 fully covered; others deferred or partially covered.
 
@@ -688,137 +667,7 @@ Optimized path (N rows, columnar):
 
 ---
 
-## 5. Implementation Guidelines
-
-### 5.1 SQLSTATE Mapping Table Design
-
-Model on psqlodbc's approach. Create a centralized, table-driven mapping:
-
-```cpp
-// OdbcSqlState.h (NEW)
-struct SqlStateMapping {
-    int         fbErrorCode;    // Firebird ISC error code or SQL code
-    const char* ver3State;      // ODBC 3.x SQLSTATE
-    const char* ver2State;      // ODBC 2.x SQLSTATE
-    const char* description;    // Human-readable description
-};
-
-// Comprehensive mapping table covering ALL common Firebird errors
-static const SqlStateMapping iscToSqlState[] = {
-    // Syntax/DDL errors
-    { 335544569, "42000", "37000", "DSQL error" },                    // isc_dsql_error
-    { 335544652, "42000", "37000", "DSQL command error" },            // isc_dsql_command_err
-    { 335544573, "42000", "37000", "DSQL syntax error" },             // isc_dsql_syntax_err
-    
-    // Object not found
-    { 335544580, "42S02", "S0002", "Table not found" },               // isc_dsql_relation_err
-    { 335544578, "42S22", "S0022", "Column not found" },              // isc_dsql_field_err
-    { 335544581, "42S01", "S0001", "Table already exists" },          // isc_dsql_table_err (on CREATE)
-    
-    // Constraint violations
-    { 335544347, "23000", "23000", "Validation error" },              // isc_not_valid
-    { 335544349, "23000", "23000", "Unique constraint violation" },   // isc_no_dup
-    { 335544466, "23000", "23000", "Foreign key violation" },         // isc_foreign_key
-    { 335544558, "23000", "23000", "Check constraint violation" },    // isc_check_constraint
-    { 335544665, "23000", "23000", "Unique key violation" },          // isc_unique_key_violation
-    
-    // Connection errors
-    { 335544375, "08001", "08001", "Database unavailable" },          // isc_unavailable
-    { 335544421, "08004", "08004", "Connection rejected" },           // isc_connect_reject
-    { 335544648, "08S01", "08S01", "Connection lost" },               // isc_conn_lost
-    { 335544721, "08001", "08001", "Network error" },                 // isc_network_error
-    { 335544726, "08S01", "08S01", "Network read error" },            // isc_net_read_err
-    { 335544727, "08S01", "08S01", "Network write error" },           // isc_net_write_err
-    { 335544741, "08S01", "08S01", "Lost database connection" },      // isc_lost_db_connection
-    { 335544744, "08004", "08004", "Max attachments exceeded" },      // isc_max_att_exceeded
-    
-    // Authentication
-    { 335544472, "28000", "28000", "Login failed" },                  // isc_login
-    
-    // Lock/deadlock
-    { 335544336, "40001", "40001", "Deadlock" },                      // isc_deadlock
-    { 335544345, "40001", "40001", "Lock conflict" },                 // isc_lock_conflict
-    
-    // Cancellation
-    { 335544794, "HY008", "S1008", "Operation cancelled" },          // isc_cancelled
-    
-    // Numeric overflow
-    { 335544779, "22003", "22003", "Numeric value out of range" },    // isc_arith_except
-    
-    // String data truncation
-    { 335544914, "22001", "22001", "String data, right truncation" }, // isc_string_truncation
-    
-    // Division by zero
-    { 335544778, "22012", "22012", "Division by zero" },              // isc_exception_integer_divide
-    
-    // Permission denied
-    { 335544352, "42000", "37000", "No permission" },                 // isc_no_priv
-    
-    // ... (extend to cover ALL common ISC error codes)
-    { 0, NULL, NULL, NULL }  // Sentinel
-};
-```
-
-### 5.2 Entry Point Wrapper Template
-
-Create a macro or template that enforces the standard entry pattern:
-
-```cpp
-// In OdbcEntryGuard.h (NEW)
-#define ODBC_ENTRY_STMT(hStmt, method_call)                          \
-    do {                                                              \
-        if (!(hStmt)) return SQL_INVALID_HANDLE;                     \
-        OdbcStatement* _stmt = static_cast<OdbcStatement*>(hStmt);   \
-        GUARD_HSTMT(hStmt);                                          \
-        _stmt->clearErrors();                                        \
-        try {                                                         \
-            return _stmt->method_call;                                \
-        } catch (const SQLException& e) {                            \
-            _stmt->postError(&e);                                    \
-            return SQL_ERROR;                                         \
-        } catch (...) {                                               \
-            _stmt->postError("HY000", "Internal driver error");      \
-            return SQL_ERROR;                                         \
-        }                                                             \
-    } while(0)
-```
-
-### 5.3 Safe Guard Macro
-
-Replace the current `GUARD_HDESC` with a safe variant:
-
-```cpp
-#define GUARD_HDESC_SAFE(h)                         \
-    if ((h) == NULL) return SQL_INVALID_HANDLE;     \
-    GUARD_HDESC(h)
-```
-
-Apply the same pattern to `GUARD_HSTMT`, `GUARD_ENV`, `GUARD_HDBC`.
-
-### 5.4 Commit Strategy
-
-Work incrementally. Each phase should be a series of focused, reviewable commits:
-
-1. One commit per fix (e.g., "Fix GUARD_HDESC null dereference in SQLCopyDesc")
-2. Every fix commit should include or update a test
-3. Run the full test suite before every commit
-
----
-
 ## 6. Success Criteria
-
-### 6.1 Phase Completion Gates
-
-| Phase | Gate Criteria |
-|-------|--------------|
-| Phase 0 | Zero crashes with null/invalid handles. All critical-severity issues closed. |
-| Phase 1 | 100% of existing tests passing. Correct SQLSTATE for syntax errors, constraint violations, connection failures, lock conflicts. |
-| Phase 2 | Every ODBC entry point follows the standard wrapper pattern. Thread safety is always-on. |
-| Phase 3 | 318 tests (318 pass). Comprehensive coverage: null handles, connections, cursors, descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape passthrough, server versions, batch params, array binding (column-wise + row-wise), ConnSettings, scrollable cursors, connect options, errors, result/param conversions, prepared statements, cursor-commit, data-at-execution, ODBC 3.8 compliance, GUID/binary types. CI tests on Windows + Linux. |
-| Phase 4 | 270 tests (270 pass). Batch execution validated (row-wise + column-wise, with operation ptr + error handling). Scrollable cursors verified (all orientations). `SQLGetTypeInfo` extended for FB4+ types. ConnSettings implemented. Server version feature-flagging in place. ODBC escape sequences removed (SQL sent AS IS). |
-| Phase 5 | No raw `new`/`delete` in new code. Consistent formatting. Doxygen comments on public APIs. |
-| Phase 9 | Legacy ISC function pointers reduced from ~50 to ~4 (array + sqlcode only). `IBatch` implemented for PARAMSET_SIZE > 1 on FB4+ (single server roundtrip for N rows) with inline BLOB support via `registerBlob()`. Events migrated to OO API (`IAttachment::queEvents` + `FbEventCallback`). TPB construction migrated to `IXpbBuilder`. Date/time math consolidated into `FbDateConvert.h` shared helpers (dead `OdbcDateTime` removed). Error handling unified — `THROW_ISC_EXCEPTION_LEGACY` now uses `getIscStatusTextFromVector()` via OO API (no `fb_interpret`). `isc_vax_integer` replaced inline. Concrete IscDbc classes marked `final`. Dead commented-out ISC code removed. Sqlda data copy optimized (skip when metadata unchanged). **Phase 9 complete.** All 318 tests pass. |
-| Phase 10 | Micro-benchmark harness with baselines. SQLFetch lock <30ns (SRWLOCK). Zero heap allocs in non-BLOB/non-string fetch path. W API stack buffers for <512-byte strings. LTO enabled. Block-fetch (N=64) implemented. Identity conversion fast path. All 318+ tests pass. Performance regression tests in CI. |
 
 ### 6.2 Overall Quality Targets
 
@@ -851,31 +700,6 @@ A first-class ODBC driver should:
 10. ✅ **Have CI/CD** with automated testing on every commit
 
 ---
-
-## Appendix A: File-Level Issue Map
-
-Quick reference for which files need changes in each phase.
-
-| File | Phase 0 | Phase 1 | Phase 2 | Phase 3 | Phase 4 | Phase 5 |
-|------|---------|---------|---------|---------|---------|---------|
-| Main.cpp | C-3 | | 2.1, 2.2 | | | |
-| MainUnicode.cpp | | H-12 | 2.1 | | | |
-| OdbcObject.cpp | C-6 | H-9, H-10 | | | | L-7 |
-| OdbcConnection.cpp | | H-5, H-6, H-7, H-8, H-13 | 2.1 | | M-5 | |
-| OdbcStatement.cpp | | H-1, H-11, H-14 | 2.1, 2.3 | | M-2, M-7, M-9 | |
-| OdbcDesc.cpp | C-1, C-2 | | 2.1 | | | |
-| OdbcEnv.cpp | | H-4 | 2.1 | | | |
-| OdbcError.cpp | | H-2, H-3, H-15 | | | | |
-| OdbcConvert.cpp | | | | T-4 | | L-3 |
-| SafeEnvThread.h | | | 2.4 | | | |
-| IscDbc/IscConnection.cpp | | | 2.3 (savepoints) | | M-3 | |
-| IscDbc/IscStatement.cpp | | | 2.3 (savepoints) | | | |
-| IscDbc/Connection.h | | | 2.3 (savepoints) | | | |
-| IscDbc/ (various) | C-7 | | | | M-4, M-8 | |
-| Tests/ | C-1 (test) | 1.14 | | 3.1–3.12 | | |
-| NEW: OdbcSqlState.h | | H-2, H-3 | | | | |
-| NEW: OdbcEntryGuard.h | | | 2.1 | | | |
-| NEW: Tests/standalone/ | | | | 3.13 | | |
 
 ## Appendix B: psqlodbc Patterns to Adopt
 
