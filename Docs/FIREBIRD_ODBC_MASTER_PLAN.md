@@ -342,10 +342,10 @@ psqlodbc wraps every ODBC entry point with a consistent 5-step pattern (lock →
 | psqlodbc Test | What It Tests | Firebird Adaptation | Status |
 |---------------|---------------|-------------------|--------|
 | `connect-test` | SQLConnect, SQLDriverConnect, attribute persistence | Change DSN to Firebird; test CHARSET parameter | ✅ DONE — tests/test_connect_options.cpp (7 tests) |
-| `stmthandles-test` | 100+ simultaneous statement handles, interleaving | 20-handle version via test_multi_statement.cpp | ✅ PARTIAL (20-handle test in Phase 3) |
+| `stmthandles-test` | 100+ simultaneous statement handles, interleaving | 100-handle version + interleaved prepare/execute + alloc/free/realloc pattern | ✅ DONE — tests/test_stmthandles.cpp (4 tests) |
 | `errors-test` | Error handling: parse errors, errors with bound params | Map expected SQLSTATEs to Firebird equivalents | ✅ DONE — tests/test_errors.cpp (11 tests) |
 | `diagnostic-test` | SQLGetDiagRec/Field, repeated calls, long messages | Should work as-is | ✅ COVERED (7 DiagnosticsTests in Phase 3) |
-| `catalogfunctions-test` | All catalog functions comprehensively | Adjust for Firebird system table names | ✅ PARTIAL (7 CatalogTests in Phase 3) |
+| `catalogfunctions-test` | All catalog functions comprehensively | All 12 catalog functions: SQLGetTypeInfo, SQLTables, SQLColumns, SQLPrimaryKeys, SQLForeignKeys, SQLSpecialColumns, SQLStatistics, SQLProcedures, SQLProcedureColumns, SQLTablePrivileges, SQLColumnPrivileges, SQLGetInfo | ✅ DONE — tests/test_catalogfunctions.cpp (22 tests) |
 | `result-conversions-test` | Data type conversions in results | Map PostgreSQL types to Firebird equivalents | ✅ DONE — tests/test_result_conversions.cpp (35 tests) |
 | `param-conversions-test` | Parameter type conversion | Same as above | ✅ DONE — tests/test_param_conversions.cpp (18 tests) |
 
@@ -356,10 +356,10 @@ psqlodbc wraps every ODBC entry point with a consistent 5-step pattern (lock →
 | psqlodbc Test | What It Tests | Firebird Adaptation | Status |
 |---------------|---------------|-------------------|--------|
 | `prepare-test` | SQLPrepare/SQLExecute with various parameter types | Replace PostgreSQL-specific types (bytea, interval) | ✅ DONE — tests/test_prepare.cpp (10 tests) |
-| `cursors-test` | Scrollable cursor behavior | Verify Firebird cursor capabilities first | ✅ PARTIAL (9 ScrollableCursorTests in Phase 3) |
+| `cursors-test` | Scrollable cursor behavior, commit/rollback mid-fetch | Commit/rollback behavior, multiple cursors, close/re-execute, SQL_NO_DATA | ✅ DONE — tests/test_cursors.cpp (7 tests) |
 | `cursor-commit-test` | Cursor behavior across commit/rollback | Important for transaction semantics | ✅ DONE — tests/test_cursor_commit.cpp (6 tests) |
-| `descrec-test` | SQLGetDescRec for all column types | Map type codes to Firebird | ✅ PARTIAL (6 DescriptorTests in Phase 3) |
-| `bindcol-test` | Dynamic unbinding/rebinding mid-fetch | Should work as-is | ✅ PARTIAL (4 BindCycleTests in Phase 3) |
+| `descrec-test` | SQLGetDescRec/SQLDescribeCol for all column types | INT, BIGINT, VARCHAR, CHAR, NUMERIC, FLOAT, DOUBLE, DATE, TIME, TIMESTAMP | ✅ DONE — tests/test_descrec.cpp (10 tests) |
+| `bindcol-test` | Dynamic unbinding/rebinding mid-fetch | Unbind/rebind mid-fetch, SQL_UNBIND + GetData, rebind to different type | ✅ DONE — tests/test_bindcol.cpp (5 tests) |
 | `arraybinding-test` | Array/row-wise parameter binding (column-wise, row-wise, NULL, operation ptr, large arrays) | Ported to tests/test_array_binding.cpp with 17 tests | ✅ DONE — tests/test_array_binding.cpp (17 tests) |
 | `dataatexecution-test` | SQL_DATA_AT_EXEC / SQLPutData | Should work as-is | ✅ DONE — tests/test_data_at_execution.cpp (6 tests) |
 | `numeric-test` | NUMERIC/DECIMAL precision and scale | Critical for financial applications | ✅ COVERED (8 numeric tests in test_data_types.cpp) |
@@ -370,13 +370,13 @@ psqlodbc wraps every ODBC entry point with a consistent 5-step pattern (lock →
 
 | psqlodbc Test | What It Tests | Firebird Adaptation | Priority |
 |---------------|---------------|-------------------|----------|
-| `wchar-char-test` | Wide character handling in multiple encodings |   | LOW  |
+| `wchar-char-test` | Wide character handling: SQL_C_WCHAR bind/fetch, truncation, NULL, empty string | Ported as ODBC-level WCHAR tests (not locale-dependent) | ✅ DONE — tests/test_wchar.cpp (8 tests) |
 | `params-batch-exec-test` | Array of Parameter Values (batch re-execute, status arrays) | Ported to tests/test_array_binding.cpp (ReExecuteWithDifferentData, status verification) | ✅ DONE |
-| `cursor-name-test` | SQLSetCursorName/SQLGetCursorName | Part of CursorTests in Phase 3 | LOW  |
+| `cursor-name-test` | SQLSetCursorName/SQLGetCursorName, default names, buffer truncation, duplicate detection | Fully ported with 9 tests | ✅ DONE — tests/test_cursor_name.cpp (9 tests) |
 
-**Current Status**: 2 of 6 fully covered; others deferred or partially covered.
+**Current Status**: 6 of 6 fully covered.
 
-**Deliverable**: 8 new test files; 110 new test cases covering all Tier 1 and Tier 2 psqlodbc areas; 270 total tests passing.
+**Deliverable**: 15 test files; 67 new test cases from Phase 6 porting; 385 total tests passing.
 
 ### Phase 7: ODBC Crusher-Identified Bugs ✅ (Completed — February 8, 2026)
 **Priority**: Medium  
