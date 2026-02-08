@@ -11,51 +11,13 @@ jobs:
     steps:
     - uses: actions/checkout@v4
     
-    - name: Setup Firebird Environment
+    - name: Install Prerequisites
       shell: pwsh
-      run: |
-        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-        Install-Module -Name PowerShellGet -Force -AllowClobber -Scope CurrentUser
-        try {
-          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser -ForceBootstrap -ErrorAction Stop
-        } catch {
-          Write-Host "NuGet provider install failed, continuing: $($_.Exception.Message)"
-        }
-        Install-Module -Name PSFirebird -Force -AllowClobber -Scope CurrentUser -Repository PSGallery
-        Install-Module -Name InvokeBuild -Force -Scope CurrentUser
+      run: ./install-prerequisites.ps1
         
-    - name: Create Firebird Test Database
-      shell: pwsh
-      run: |
-        $fbVersion = '5.0.2'
-        $envPath = '/fbodbc-tests/fb502'
-        $dbPath = '/fbodbc-tests/TEST.FB50.FDB'
-        
-        New-Item -ItemType Directory -Path '/fbodbc-tests' -Force | Out-Null
-        
-        Import-Module PSFirebird
-        $fb = New-FirebirdEnvironment -Version $fbVersion -Path $envPath -Force
-        $db = New-FirebirdDatabase -Database $dbPath -Environment $fb -Force
-        
-        Write-Host "Firebird environment created at: $envPath"
-        Write-Host "Test database created at: $dbPath"
-
     - name: Build
       shell: pwsh
       run: Invoke-Build build -Configuration Release
-      
-    - name: Setup Test Environment
-      shell: pwsh
-      run: |
-        $clientPath = Join-Path '/fbodbc-tests/fb502' 'fbclient.dll'
-        $clientPath = (Resolve-Path $clientPath).Path
-        $connStr = "Driver={Firebird ODBC Driver};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=$clientPath"
-        Write-Host "Connection string: $connStr"
-        echo "FIREBIRD_ODBC_CONNECTION=$connStr" >> $env:GITHUB_ENV
-        
-    - name: Install ODBC Driver
-      shell: pwsh
-      run: Invoke-Build install -Configuration Release
         
     - name: Run Tests
       shell: pwsh
@@ -96,54 +58,13 @@ jobs:
           sudo apt-get update
         fi
         
-    - name: Setup Firebird Environment
+    - name: Install Prerequisites
       shell: pwsh
-      run: |
-        Set-PSRepository -Name PSGallery -InstallationPolicy Trusted
-        Install-Module -Name PowerShellGet -Force -AllowClobber -Scope CurrentUser
-        try {
-          Install-PackageProvider -Name NuGet -MinimumVersion 2.8.5.201 -Force -Scope CurrentUser -ForceBootstrap -ErrorAction Stop
-        } catch {
-          Write-Host "NuGet provider install failed, continuing: $($_.Exception.Message)"
-        }
-        Register-PackageSource -Name 'NuGet' -Location 'https://api.nuget.org/v3/index.json' -ProviderName NuGet -Force
-        Install-Module -Name PSFirebird -Force -AllowClobber -Scope CurrentUser -Repository PSGallery
-        Install-Module -Name InvokeBuild -Force -Scope CurrentUser
-
-    - name: Create Firebird Test Database
-      shell: pwsh
-      run: |
-        $fbVersion = '5.0.2'
-        $envPath = '/fbodbc-tests/fb502'
-        $dbPath = '/fbodbc-tests/TEST.FB50.FDB'
-
-        sudo mkdir -p '/fbodbc-tests'
-        sudo chmod 777 '/fbodbc-tests'
-
-        Import-Module PSFirebird
-        $fb = New-FirebirdEnvironment -Version $fbVersion -Path $envPath -Force
-        $db = New-FirebirdDatabase -Database $dbPath -Environment $fb -Force
-
-        # Find client library
-        $clientLib = Join-Path $fb.Path 'lib' 'libfbclient.so'
-        if (-not (Test-Path $clientLib)) {
-          $clientLib = Get-ChildItem -Path $fb.Path -Recurse -Filter 'libfbclient.so*' | Select-Object -First 1 -ExpandProperty FullName
-        }
-
-        Write-Host "Firebird environment created at: $envPath"
-        Write-Host "Test database created at: $dbPath"
-        Write-Host "Client library: $clientLib"
-
-        $connStr = "Driver={Firebird ODBC Driver};Database=$dbPath;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=$clientLib"
-        echo "FIREBIRD_ODBC_CONNECTION=$connStr" >> $env:GITHUB_ENV
+      run: ./install-prerequisites.ps1
 
     - name: Build
       shell: pwsh
       run: Invoke-Build build -Configuration Release
-      
-    - name: Install ODBC Driver
-      shell: pwsh
-      run: Invoke-Build install -Configuration Release
       
     - name: Run Tests
       shell: pwsh
