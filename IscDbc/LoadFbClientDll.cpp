@@ -56,12 +56,8 @@ bool CFbDll::LoadDll (const char * client, const char * clientDef)
 	__ENTRYPOINT(array_put_slice);
 	__ENTRYPOINT(array_lookup_bounds);
 
-	// Event operations
-	__ENTRYPOINT(que_events);
-
 	// Error handling
 	__ENTRYPOINT(sqlcode);
-	__ENTRYPOINT(interprete);
 
 	// BLR parsing
 	__ENTRYPOINT(print_blr);

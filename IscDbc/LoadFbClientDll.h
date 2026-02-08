@@ -41,19 +41,8 @@ typedef ISC_STATUS ISC_EXPORT array_put_slice(ISC_STATUS ISC_FAR*,
 						void ISC_FAR*,
 						ISC_LONG ISC_FAR*);
 
-// Event operations (still on ISC API)
-typedef ISC_STATUS  ISC_EXPORT que_events (ISC_STATUS ISC_FAR *, 
-				       isc_db_handle ISC_FAR *, 
-				       ISC_LONG ISC_FAR *, 
-				       short, 
-				       char ISC_FAR *, 
-				       isc_callback, 
-				       void ISC_FAR *);
-
 // Error handling (used by THROW_ISC_EXCEPTION macro chain)
 typedef ISC_LONG    ISC_EXPORT sqlcode (ISC_STATUS ISC_FAR *);
-typedef ISC_STATUS  ISC_EXPORT interprete (char ISC_FAR *, 
-				       ISC_STATUS ISC_FAR * ISC_FAR *);
 
 // BLR parsing (used by IscProceduresResultSet)
 typedef void        ISC_EXPORT print_blr(char ISC_FAR*,
@@ -142,10 +131,7 @@ public:
 	array_get_slice*			_array_get_slice;
 	array_put_slice*			_array_put_slice;
 
-	que_events*					_que_events;
-
 	sqlcode*					_sqlcode;
-	interprete*					_interprete;
 
 	print_blr*					_print_blr;
 
@@ -159,10 +145,24 @@ public:
 	Firebird::IProvider*	_prov;
 	Firebird::IStatus*		_status;
 
+	/// Format error text from OO API IStatus (modern path).
 	inline classJString::JString getIscStatusText( Firebird::IStatus* status )
 	{
 		char text [4096];
 		_master->getUtilInterface()->formatStatus( text, sizeof(text), status );
+		return text;
+	}
+
+	/// Format error text from raw ISC_STATUS[] vector (Phase 9.7: unified path).
+	/// Creates a temporary IStatus, populates it from the legacy vector,
+	/// then uses IUtil::formatStatus() — no fb_interpret needed.
+	inline classJString::JString getIscStatusTextFromVector( const ISC_STATUS* statusVector )
+	{
+		Firebird::IStatus* tmpStatus = _master->getStatus();
+		tmpStatus->setErrors( statusVector );
+		char text [4096];
+		_master->getUtilInterface()->formatStatus( text, sizeof(text), tmpStatus );
+		tmpStatus->dispose();
 		return text;
 	}
 

@@ -748,7 +748,6 @@ int IscConnection::buildParamTransaction( char *& string, char boolDeclare )
 {
 	CNodeParamTransaction node;
 	bool localParamTransaction = false;
-	char tpbBuffer[4096]; // Note: Fb(gpre) use 4000
 	char *& ptOut = string;
 	short transFlags = 0;
 	int ret = 0;
@@ -886,108 +885,133 @@ int IscConnection::buildParamTransaction( char *& string, char boolDeclare )
 		break;
 	}
 
-	char* text = tpbBuffer;
-	*text++ = isc_tpb_version3;
-	*text++ = (transFlags & TRA_ro) ? isc_tpb_read : isc_tpb_write;
-	if (transFlags & TRA_con)
-		*text++ = isc_tpb_consistency;
-	else if (transFlags & TRA_read_committed)
-		*text++ = isc_tpb_read_committed;
-	else
-		*text++ = isc_tpb_concurrency;
-
-	if ( transFlags & TRA_nw )
-		*text++ = isc_tpb_nowait;
-	else
+	// Phase 9.5: Build TPB using IXpbBuilder instead of manual byte-stuffing.
+	// IXpbBuilder handles version prefix, endianness for lock_timeout, etc.
+	IUtil* utl = GDS->_master->getUtilInterface();
+	IXpbBuilder* tpb = nullptr;
+	ThrowStatusWrapper status( GDS->_status );
+	try
 	{
-		*text++ = isc_tpb_wait;
+		tpb = utl->getXpbBuilder(&status, IXpbBuilder::TPB, NULL, 0);
 
-		if ( node.lockTimeout && attachment->isFirebirdVer2_0() )
+		tpb->insertTag( &status, (transFlags & TRA_ro) ? isc_tpb_read : isc_tpb_write );
+
+		if (transFlags & TRA_con)
+			tpb->insertTag( &status, isc_tpb_consistency );
+		else if (transFlags & TRA_read_committed)
+			tpb->insertTag( &status, isc_tpb_read_committed );
+		else
+			tpb->insertTag( &status, isc_tpb_concurrency );
+
+		if ( transFlags & TRA_nw )
+			tpb->insertTag( &status, isc_tpb_nowait );
+		else
 		{
-			*text++ = isc_tpb_lock_timeout;
-			*text++ = sizeof ( short );
-			*text++ = (char)node.lockTimeout;
-			*text++ = (char)(node.lockTimeout >> 8);
-		}
-	}
+			tpb->insertTag( &status, isc_tpb_wait );
 
-	if ( transFlags & TRA_read_committed )
-	{
-		*text++ = (transFlags & TRA_no_rec_version) ?
-			isc_tpb_no_rec_version : isc_tpb_rec_version;
-	}
-
-	if (transFlags & TRA_no_auto_undo)
-		*text++ = isc_tpb_no_auto_undo;
-
-	if ( IS_MATCH_EXT( "RESERVING" ) )
-	{
-		transFlags |= TRA_rrl;
-		parseReservingTable( ptOut, text, transFlags );
-	}
-	
-	if ( IS_MATCH_EXT( "USING" ) )
-	{
-		transFlags |= TRA_inc;
-		int &len = node.lengthNameUnique = 0;
-		char *end = node.nameUnique;
-
-		while ( !IS_END_TOKEN( *ptOut ) && len < node.getMaxLengthName() )
-			*end++ = *ptOut++, len++;
-	}
-
-	int tpb_len = text - tpbBuffer;
-
-	if ( tpb_len > 0 )
-	{
-		if ( transFlags & TRA_autocommit )
-			node.autoCommit = true;
-
-		node.setTpbBuffer( tpbBuffer, tpb_len );
-
-		if ( boolDeclare )
-		{
-			if ( !node.lengthNameTransaction )
+			if ( node.lockTimeout && attachment->isFirebirdVer2_0() )
 			{
-				if ( !localParamTransaction )
-					throw SQLEXCEPTION( SYNTAX_ERROR, "bad declare param transaction" );
+				// IXpbBuilder handles endianness for the lock_timeout integer
+				tpb->insertInt( &status, isc_tpb_lock_timeout, node.lockTimeout );
+			}
+		}
 
+		if ( transFlags & TRA_read_committed )
+		{
+			tpb->insertTag( &status, (transFlags & TRA_no_rec_version) ?
+				isc_tpb_no_rec_version : isc_tpb_rec_version );
+		}
+
+		if (transFlags & TRA_no_auto_undo)
+			tpb->insertTag( &status, isc_tpb_no_auto_undo );
+
+		// For RESERVING, extract the IXpbBuilder buffer into tpbBuffer
+		// and let parseReservingTable append raw table-lock entries.
+		char tpbBuffer[4096];
+		unsigned builderLen = tpb->getBufferLength( &status );
+		const unsigned char* builderBuf = tpb->getBuffer( &status );
+		if (builderLen > sizeof(tpbBuffer))
+			throw SQLEXCEPTION( RUNTIME_ERROR, "TPB buffer overflow" );
+		memcpy( tpbBuffer, builderBuf, builderLen );
+		char* text = tpbBuffer + builderLen;
+
+		tpb->dispose();
+		tpb = nullptr;
+
+		if ( IS_MATCH_EXT( "RESERVING" ) )
+		{
+			transFlags |= TRA_rrl;
+			parseReservingTable( ptOut, text, transFlags );
+		}
+	
+		if ( IS_MATCH_EXT( "USING" ) )
+		{
+			transFlags |= TRA_inc;
+			int &len = node.lengthNameUnique = 0;
+			char *end = node.nameUnique;
+
+			while ( !IS_END_TOKEN( *ptOut ) && len < node.getMaxLengthName() )
+				*end++ = *ptOut++, len++;
+		}
+
+		int tpb_len = text - tpbBuffer;
+
+		if ( tpb_len > 0 )
+		{
+			if ( transFlags & TRA_autocommit )
+				node.autoCommit = true;
+
+			node.setTpbBuffer( tpbBuffer, tpb_len );
+
+			if ( boolDeclare )
+			{
+				if ( !node.lengthNameTransaction )
+				{
+					if ( !localParamTransaction )
+						throw SQLEXCEPTION( SYNTAX_ERROR, "bad declare param transaction" );
+
+					if ( !tmpParamTransaction )
+						tmpParamTransaction = new CNodeParamTransaction;
+
+					*tmpParamTransaction = node;
+					ret = -7; // declare for local stmt = -7
+				}
+
+				if ( node.lengthNameTransaction )
+				{
+					getEnvironmentShareInstance().addParamTransactionToList( node );
+					ret = -6; // for all connections  = -6 it's named param Transaction
+				}
+			}
+			else if ( localParamTransaction )
+			{
 				if ( !tmpParamTransaction )
 					tmpParamTransaction = new CNodeParamTransaction;
 
 				*tmpParamTransaction = node;
-				ret = -7; // declare for local stmt = -7
+				ret = -4; // for local stmt = -4
 			}
-
-			if ( node.lengthNameTransaction )
+			else
 			{
-				getEnvironmentShareInstance().addParamTransactionToList( node );
-				ret = -6; // for all connections  = -6 it's named param Transaction
+				ret = -5; // for connection  = -5
+
+				if ( !transactionInfo.nodeParamTransaction )
+					transactionInfo.nodeParamTransaction = new CNodeParamTransaction;
+
+				*transactionInfo.nodeParamTransaction = node;
+
+				if ( node.lengthNameTransaction )
+				{
+					getEnvironmentShareInstance().addParamTransactionToList( node );
+					ret = -6; // for all connections  = -6 it's named param Transaction
+				}
 			}
 		}
-		else if ( localParamTransaction )
-		{
-			if ( !tmpParamTransaction )
-				tmpParamTransaction = new CNodeParamTransaction;
-
-			*tmpParamTransaction = node;
-			ret = -4; // for local stmt = -4
-		}
-		else
-		{
-			ret = -5; // for connection  = -5
-
-			if ( !transactionInfo.nodeParamTransaction )
-				transactionInfo.nodeParamTransaction = new CNodeParamTransaction;
-
-			*transactionInfo.nodeParamTransaction = node;
-
-			if ( node.lengthNameTransaction )
-			{
-				getEnvironmentShareInstance().addParamTransactionToList( node );
-				ret = -6; // for all connections  = -6 it's named param Transaction
-			}
-		}
+	}
+	catch (const FbException& error)
+	{
+		if (tpb) tpb->dispose();
+		THROW_ISC_EXCEPTION(this, error.getStatus());
 	}
 
 	return ret;
@@ -1694,24 +1718,6 @@ void IscConnection::deleteStatement(IscStatement * statement)
 JString IscConnection::getIscStatusText(Firebird::IStatus *status)
 {
 	return attachment->getIscStatusText(status);
-}
-
-JString IscConnection::getIscStatusTextLegacy(ISC_STATUS * statusVector)
-{
-	char text[4096], *p = text;
-
-	while ( GDS->_interprete( p, &statusVector  ) )
-	{
-		while ( *p ) ++p;
-		*p++ = '\n';
-	}
-
-	if ( p > text )
-		--p;
-
-	*p = 0;
-
-	return text;
 }
 
 int IscConnection::getInfoItem(char * buffer, int infoItem, int defaultValue)

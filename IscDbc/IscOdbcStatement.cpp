@@ -318,6 +318,19 @@ void IscOdbcStatement::batchBegin()
 	{
 		startTransaction();
 		batchRowCount_ = 0;
+
+		// Phase 9.2: Detect if any input parameter is a BLOB.
+		// If so, we'll enable BLOB_ID_ENGINE policy in the batch BPB
+		// and use registerBlob() for each BLOB value.
+		batchHasBlobs_ = false;
+		for (const auto& var : inputSqlda.sqlvar)
+		{
+			if ((var.orgSqlProperties.sqltype & ~1) == SQL_BLOB)
+			{
+				batchHasBlobs_ = true;
+				break;
+			}
+		}
 	}
 	catch (const FbException& error)
 	{
@@ -340,6 +353,12 @@ void IscOdbcStatement::batchAdd()
 			bpb->insertTag(&status, IBatch::TAG_RECORD_COUNTS);
 			bpb->insertTag(&status, IBatch::TAG_MULTIERROR);
 			bpb->insertTag(&status, IBatch::TAG_DETAILED_ERRORS);
+
+			// Phase 9.2: Enable inline BLOB support when metadata has BLOB columns.
+			// BLOB_ID_ENGINE lets the batch engine assign internal blob IDs;
+			// we use registerBlob() to map existing server-side blob IDs.
+			if (batchHasBlobs_)
+				bpb->insertInt(&status, IBatch::TAG_BLOB_POLICY, IBatch::BLOB_ID_ENGINE);
 
 			batch_ = statementHandle->createBatch(&status, inputSqlda.meta,
 				bpb->getBufferLength(&status), bpb->getBuffer(&status));
@@ -396,6 +415,34 @@ void IscOdbcStatement::batchAdd()
 				}
 			}
 			// else: sqldata points into buffer already — data is in place
+		}
+
+		// Phase 9.2: Register existing server-side BLOBs with the batch.
+		// For each non-null BLOB column, the conversion functions have already
+		// created a server-side blob and placed its ISC_QUAD blob ID in the buffer.
+		// We call registerBlob() to map that existing blob ID to a batch-internal ID.
+		if (batchHasBlobs_)
+		{
+			for (const auto& var : inputSqlda.sqlvar)
+			{
+				unsigned origType = var.orgSqlProperties.sqltype & ~1;
+				if (origType != SQL_BLOB)
+					continue;
+
+				short* indDest = (short*)&inputSqlda.buffer.at(var.offsetNull);
+				if (*indDest == -1) // null — skip
+					continue;
+
+				ISC_QUAD* blobIdInBuf = (ISC_QUAD*)&inputSqlda.buffer.at(var.offsetData);
+				ISC_QUAD existingId = *blobIdInBuf;
+				ISC_QUAD batchId = {0, 0};
+
+				// registerBlob maps the existing server-side blob to a batch-internal ID
+				batch_->registerBlob(&status, &existingId, &batchId);
+
+				// Replace the blob ID in the message buffer with the batch-internal one
+				*blobIdInBuf = batchId;
+			}
 		}
 
 		batch_->add(&status, 1, inputSqlda.buffer.data());

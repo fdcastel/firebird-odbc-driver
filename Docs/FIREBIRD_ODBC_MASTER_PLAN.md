@@ -4,7 +4,7 @@
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
 **Last Updated**: February 8, 2026  
-**Version**: 2.4
+**Version**: 2.5
 
 > This document consolidates all known issues and newly identified architectural deficiencies.
 > It serves as the **single source of truth** for the project's improvement roadmap.
@@ -115,7 +115,7 @@
 | T-14 | Connection integration tests (FirebirdODBCTest) reported FAILED when `FIREBIRD_ODBC_CONNECTION` not set; changed to `GTEST_SKIP()` so CTest reports 100% pass | New (Feb 7 fix) | ✅ RESOLVED | tests/test_connection.cpp |
 | T-6 | CI fully operational: test.yml (Windows x64, Linux x64, Linux ARM64) + build-and-test.yml (Windows, Linux) all green | New (analysis) | ✅ RESOLVED | .github/workflows/ |
 | T-7 | No test matrix for different Firebird versions (hardcoded to 5.0.2) | New (analysis) | ❌ OPEN | .github/workflows/ |
-| T-8 | No performance/stress tests | New (analysis) | ❌ OPEN | Tests/ |
+| T-8 | No performance/stress tests | New (analysis) | 🔧 IN PROGRESS (Phase 10) | Tests/ |
 | T-9 | ~~No cursor/bookmark/positioned-update tests~~ — 9 scrollable cursor tests (FetchFirstAndLast, FetchPrior, FetchAbsolute, FetchRelative, FetchNextInScrollable, ForwardOnlyRejectsPrior, FetchBeyondEndReturnsNoData, FetchBeforeStartReturnsNoData, RewindAfterEnd) | New (comparison) | ✅ RESOLVED | tests/test_scrollable_cursor.cpp |
 | T-10 | No descriptor tests (`SQLGetDescRec`, `SQLSetDescRec`, `SQLCopyDesc`) | New (comparison) | ❌ OPEN | Tests/ |
 | T-11 | No multi-statement-handle interleaving tests (psqlodbc tests 100 simultaneous handles) | New (comparison) | ❌ OPEN | Tests/ |
@@ -467,29 +467,29 @@ However, several significant opportunities remain:
 | Category | Current API | Status | Remaining Work |
 |----------|-------------|--------|----------------|
 | Connection | `IAttachment`, `IProvider` | ✅ Complete | None |
-| Transaction | `ITransaction`, `IXpbBuilder(TPB)` | ✅ Mostly complete | Manual TPB in `processTransaction()` |
+| Transaction | `ITransaction`, `IXpbBuilder(TPB)` | ✅ Complete | None |
 | Statement | `IStatement` | ✅ Complete | None |
 | Result Set | `IResultSet` | ✅ Complete | None |
 | Blob | `IBlob` | ✅ Complete | None |
 | Metadata | `IMessageMetadata`, `IMetadataBuilder` | ✅ Complete | Optimize rebuild/copy overhead |
-| Batch | `IBatch` | ✅ Complete (FB4+) | Falls back to row-by-row for FB3 |
-| Events | ❌ Legacy ISC API | ❌ Uses `isc_que_events` | Migrate to `IAttachment::queEvents()` |
+| Batch | `IBatch` + inline BLOBs | ✅ Complete (FB4+) | Falls back to row-by-row for FB3 |
+| Events | ✅ OO API (`IAttachment::queEvents`) | ✅ Complete | None |
 | Arrays | ❌ Legacy ISC API | ❌ Uses `isc_array_*` | Blocked — no OO API equivalent |
-| Error handling | Mixed OO + ISC | ⚠️ Dual paths | Unify to OO-only |
-| Date/Time utils | Manual math | ⚠️ Works but redundant | Replace with `IUtil` |
-| LoadFbClientDll | ~5 function ptrs | ✅ Reduced from ~50 | Array functions + bridge only |
+| Error handling | ✅ Unified OO API | ✅ Complete | None |
+| Date/Time utils | ✅ Shared helpers | ✅ Complete | None |
+| LoadFbClientDll | ~4 function ptrs | ✅ Reduced from ~50 | Array functions + bridge only |
 
 #### Tasks
 
 | Task | Description | Complexity | Benefit | Status |
 |------|-------------|------------|---------|--------|
 | **9.1** | **Implement `IBatch` for array parameter execution (PARAMSET_SIZE > 1)** — Replaced the row-by-row loop in `executeStatementParamArray()` with `IBatch::add()` + `IBatch::execute()` for non-BLOB/non-data-at-exec statements. Maps `IBatchCompletionState` to ODBC's `SQL_PARAM_STATUS_PTR`. Feature-gated on Firebird 4.0+ (falls back to row-by-row for older servers). Batch is lazily created on first `batchAdd()` after ODBC conversion functions have applied type overrides. Buffer assembly handles `SQL_TEXT`→`SQL_VARYING` re-conversion and `setSqlData()` pointer redirection. Single server roundtrip for N rows. 17 array binding + 4 batch param tests all pass. | Hard | **Very High** | ✅ RESOLVED |
-| **9.2** | **Extend `IBatch` for inline BLOBs** — After 9.1, support `IBatch::addBlob()`/`addBlobStream()` for statements with BLOB parameters, avoiding per-row `createBlob()` overhead. | Hard | High | ❌ OPEN |
-| **9.3** | **Remove ~35 dead ISC function pointers from `CFbDll`** — Removed all loaded-but-never-called function pointers. Kept only: `_array_*` (3 for array support), `_get_database_handle`, `_get_transaction_handle` (bridge for arrays), and `fb_get_master_interface`. Eliminated `_dsql_*`, `_attach_database`, `_detach_database`, `_start_*`, `_commit_*`, `_rollback_*`, blob functions, date/time functions, service functions, `_interpet`, etc. | Easy | Medium | ✅ RESOLVED |
-| **9.4** | **Migrate `IscUserEvents` from ISC to OO API** — Replace `isc_que_events()` with `IAttachment::queEvents()` returning `IEvents*`. Replace `isc_cancel_events()` with `IEvents::cancel()`. Eliminates the need for `_get_database_handle` in events code. | Medium | Medium | ❌ OPEN |
-| **9.5** | **Migrate manual TPB construction to `IXpbBuilder`** — Replace the raw byte-stuffing in `IscConnection::processTransaction()` (the SET TRANSACTION parser path that builds `char tpbBuffer[4096]` manually) with `IXpbBuilder(TPB)`. Remove manual endianness handling for lock timeout values. | Medium | Medium | ❌ OPEN |
-| **9.6** | **Replace manual Julian-day date/time math with `IUtil`** — Replace the ~150-line `OdbcDateTime::ndate()`/`OdbcDateTime::decode()`/`OdbcDateTime::encode()` implementations with `IUtil::decodeDate/encodeDate/decodeTime/encodeTime`. The `IUtil*` is available via `IMaster::getUtilInterface()`. | Medium | Medium | ❌ OPEN |
-| **9.7** | **Unify error handling — eliminate legacy error path** — Create a single `throwFbException(IStatus*)` helper to replace both `THROW_ISC_EXCEPTION` and `THROW_ISC_EXCEPTION_LEGACY` macros. Remove `getIscStatusTextLegacy()` and its manual `fb_interpret` loop. Replace `isc_sqlcode()` usage with direct ISC error code extraction from `IStatus::getErrors()`. | Medium | Medium | ❌ OPEN |
+| **9.2** | **Extend `IBatch` for inline BLOBs** — Enabled `BLOB_ID_ENGINE` blob policy in the batch BPB when input metadata has BLOB columns. After the ODBC conversion functions create server-side blobs (via `convStringToBlob`/`convBinaryToBlob`), `registerBlob()` maps each existing blob ID to a batch-internal ID before `batch_->add()`. Updated batch eligibility in `OdbcStatement::executeStatementParamArray()` to allow BLOB columns (only arrays and data-at-exec remain excluded). Added `batchHasBlobs_` flag to `IscOdbcStatement`. | Hard | High | ✅ RESOLVED |
+| **9.3** | **Remove ~35 dead ISC function pointers from `CFbDll`** — Removed all loaded-but-never-called function pointers. Kept only: `_array_*` (3 for array support), `_get_database_handle`, `_get_transaction_handle` (bridge for arrays), `_sqlcode`, and `fb_get_master_interface`. Eliminated `_dsql_*`, `_attach_database`, `_detach_database`, `_start_*`, `_commit_*`, `_rollback_*`, blob functions, date/time functions, service functions, `_interprete`, `_que_events`, etc. | Easy | Medium | ✅ RESOLVED |
+| **9.4** | **Migrate `IscUserEvents` from ISC to OO API** — Replaced `isc_que_events()` with `IAttachment::queEvents()` returning `IEvents*`. Added `FbEventCallback` class implementing `IEventCallbackImpl` to bridge OO API event notifications to the legacy `callbackEvent` function pointer. Cancel via `IEvents::cancel()` in destructor. Removed `_que_events` function pointer and `que_events` typedef from `CFbDll`. `eventBuffer` changed from `char*` to `unsigned char*`. | Medium | Medium | ✅ RESOLVED |
+| **9.5** | **Migrate manual TPB construction to `IXpbBuilder`** — Replaced raw byte-stuffing in `IscConnection::buildParamTransaction()` with `IXpbBuilder(TPB)`. Tags, isolation levels, and lock timeout are now inserted via `insertTag()`/`insertInt()` — lock timeout endianness is handled by the builder. For RESERVING clauses, the builder buffer is extracted and `parseReservingTable()` appends raw table-lock entries. Wrapped in try/catch for `FbException`. | Medium | Medium | ✅ RESOLVED |
+| **9.6** | **Replace manual Julian-day date/time math with shared helpers** — Created `IscDbc/FbDateConvert.h` with canonical inline `fb_encode_date`/`fb_decode_date`/`fb_encode_time`/`fb_decode_time` functions. Replaced ~150 lines of triplicated Julian-day arithmetic in `OdbcConvert::encode_sql_date/decode_sql_date/encode_sql_time/decode_sql_time` and `DateTime::encodeDate/decodeDate` with calls to the shared helpers. Removed dead `OdbcDateTime` class from the build (`.cpp`/`.h` removed from CMakeLists.txt — the class was not referenced by any other code). | Medium | Medium | ✅ RESOLVED |
+| **9.7** | **Unify error handling — eliminate legacy error path** — Added `getIscStatusTextFromVector()` to `CFbDll` that creates a temporary `IStatus`, populates it via `setErrors()`, and uses `IUtil::formatStatus()` — no `fb_interpret` needed. Updated `THROW_ISC_EXCEPTION_LEGACY` macro to use `getIscStatusTextFromVector()` and `getSqlCode()`. Removed `getIscStatusTextLegacy()` from `IscConnection`. Removed `_interprete` function pointer and `interprete` typedef from `CFbDll`. Both `THROW_ISC_EXCEPTION` (OO) and `THROW_ISC_EXCEPTION_LEGACY` (ISC vector) now share the same OO API error formatting path. | Medium | Medium | ✅ RESOLVED |
 | **9.8** | **Optimize Sqlda data copy — skip when metadata unchanged** — In `Sqlda::checkAndRebuild()`, when metadata is NOT overridden (`isExternalOverriden()` returns false), effective pointers (`eff_sqldata`/`eff_sqlind`) already equal original pointers and no copy or buffer rebuild is performed. The data copy loop only runs when `useExecBufferMeta` is true. Eliminates unnecessary copies on every execute for the common case. | Easy | Medium | ✅ RESOLVED |
 | **9.9** | **Replace `isc_vax_integer` with inline helper** — Replaced all `GDS->_vax_integer()` calls with an inline `isc_vax_integer_inline()` function in `LoadFbClientDll.h`. Removed `_vax_integer` function pointer from `CFbDll`. 4 lines of portable C++ code. | Easy | Low | ✅ RESOLVED |
 | **9.10** | **Mark `IscConnection` as `final`** — Added `final` keyword to `IscConnection`, `IscStatement`, `IscOdbcStatement`, `IscPreparedStatement`, `IscCallableStatement`, `IscResultSet`, `IscDatabaseMetaData`, and all other concrete IscDbc classes. Enables compiler devirtualization. | Easy | Low | ✅ RESOLVED |
@@ -510,6 +510,181 @@ However, several significant opportunities remain:
 6. Handle `TAG_MULTIERROR` based on `SQL_ATTR_PARAMS_PROCESSED_PTR` requirements
 
 **Deliverable**: Legacy ISC API usage reduced from ~50 function pointers to ~5 (array only). `IBatch` implemented for PARAMSET_SIZE > 1 on FB4+ (single server roundtrip). `isc_vax_integer` replaced inline. Concrete IscDbc classes marked `final`. Dead commented-out ISC code removed. Sqlda data copy optimized. All 318 existing tests pass.
+
+### Phase 10: Performance Engineering — World-Class Throughput
+**Priority**: High  
+**Duration**: 6–10 weeks  
+**Goal**: Minimize per-row and per-column overhead to achieve best-in-class fetch/execute throughput, targeting embedded Firebird (near-zero network latency) where driver overhead dominates
+
+#### Background: Why Performance Matters Now
+
+With correctness, compliance, and feature completeness substantially achieved (Phases 0–9), the driver's remaining competitive gap is **throughput**. When Firebird runs as an embedded library (`libfbclient.so` / `fbclient.dll` loaded in-process), network latency drops to near zero. In this mode, the ODBC driver layer itself becomes the bottleneck — every unnecessary allocation, copy, branch, and kernel transition is measurable.
+
+A comprehensive analysis of the data path from `SQLFetch()` → `OdbcConvert::conv*()` → `IscResultSet::nextFetch()` → `Sqlda::buffer` reveals **12 categories of overhead** that, when eliminated, can reduce per-row driver cost from ~2–5μs to ~200–500ns — a 5–10× improvement.
+
+#### 10.0 Performance Profiling Infrastructure
+
+| Task | Description | Complexity | Benefit |
+|------|-------------|------------|---------|
+| **10.0.1** | **Add micro-benchmark harness** — Create `tests/bench_fetch.cpp` using Google Benchmark (`FetchContent` from GitHub). Benchmark: (a) fetch 1M rows of 10 INT columns, (b) fetch 1M rows of 5 VARCHAR(100) columns, (c) fetch 100K rows of 1 BLOB column, (d) batch insert 100K rows. Report rows/sec, ns/row, ns/col. Run against embedded Firebird. | Medium | **Essential** — cannot optimize what you cannot measure |
+| **10.0.2** | **Add `ODBC_PERF_COUNTERS` compile-time flag** — When enabled, track: total fetch calls, total conversion calls, total allocs in fetch path, total mutex acquires, total W→A conversions. Exposed via a driver-specific `SQLGetConnectAttr` info type for diagnostics. | Easy | Medium — identifies regressions |
+| **10.0.3** | **Establish baseline numbers** — Run benchmarks on current code, record results in `Docs/PERFORMANCE_BASELINE.md`. All future changes must not regress these numbers. | Easy | **Essential** |
+
+#### 10.1 Synchronization: Eliminate Kernel-Mode Mutex
+
+**Current state**: `SafeEnvThread.cpp` uses Win32 `CreateMutex` / `WaitForSingleObject` / `ReleaseMutex` for all locking. This is a **kernel-mode mutex** that requires a ring-3→ring-0 transition on every acquire, even when uncontended. Cost: ~1–2μs per lock/unlock pair on modern hardware. Every `SQLFetch` call acquires this lock once.
+
+**Impact**: For a tight fetch loop of 100K rows, mutex overhead alone is **100–200ms** — often exceeding the actual database work.
+
+| Task | Description | Complexity | Benefit |
+|------|-------------|------------|---------|
+| **10.1.1** | **Replace Win32 `Mutex` with `SRWLOCK`** — `AcquireSRWLockExclusive` / `ReleaseSRWLockExclusive` is a user-mode-only lock that costs ~20ns uncontended (vs ~1000ns for Mutex). `SRWLOCK` also supports shared/exclusive modes for future read-write separation. On Linux, `pthread_mutex_t` is already a futex (fast path). Replace `MutexEnvThread::mutexLockedLevelDll` and `MutexEnvThread::mutexLockedLevelConnect` with `SRWLOCK`. | Easy | **Very High** — 50–100× faster locking |
+| **10.1.2** | **Eliminate global env-level lock for statement operations** — Under `DRIVER_LOCKED_LEVEL_ENV`, all statement operations serialize on a global lock. Switch to per-connection locking for all statement-level operations, reserving the global lock for `SQLAllocEnv`/`SQLFreeEnv` only. | Medium | **High** — eliminates false serialization |
+| **10.1.3** | **Evaluate lock-free fetch path** — When a statement is used from a single thread (the common case), locking is pure waste. Add a `SQL_ATTR_ASYNC_ENABLE`-style hint or auto-detect single-threaded usage to bypass locking entirely on the fetch path. | Hard | Medium |
+
+#### 10.2 Per-Row Allocation Elimination
+
+**Current state**: The `IscResultSet::next()` method (used by the higher-level JDBC-like path) calls `freeConversions()` then `allocConversions()` on **every row**, doing `delete[] conversions` + `new char*[N]`. The `nextFetch()` path (used by ODBC) avoids this, but other allocation patterns remain.
+
+| Task | Description | Complexity | Benefit |
+|------|-------------|------------|---------|
+| **10.2.1** | **Hoist `conversions` array to result-set lifetime** — Allocate `char** conversions` once in `IscResultSet::open()`, `memset` to zero per row, free in `close()`. Eliminates 1 `new[]` + 1 `delete[]` per row for the `next()` path. | Easy | High |
+| **10.2.2** | **Pool BLOB objects** — `IscResultSet::next()` calls `new IscBlob()` per blob column per row. Maintain a per-statement pool of pre-allocated `IscBlob` objects, reset and reuse across rows. | Medium | High (for BLOB-heavy queries) |
+| **10.2.3** | **Reuse `Value::getString()` conversion buffers** — `Value::getString()` does `delete[] *tempPtr; *tempPtr = new char[len+1]` on every numeric→string access. Instead, keep the buffer and only reallocate when the new string is longer (`if (newLen > existingLen) realloc`). | Easy | Medium |
+| **10.2.4** | **Eliminate per-row `clearErrors()` overhead** — Although `clearErrors()` has a fast `infoPosted` guard, the guard still touches the `infoPosted` bool on every API call. Mark `infoPosted` as `[[likely]]` false and ensure the compiler generates a predictable branch. Consider `__builtin_expect` / `[[unlikely]]` annotations. | Easy | Low |
+| **10.2.5** | **Pre-allocate `DescRecord` objects contiguously** — Currently each `DescRecord` is individually heap-allocated via `new DescRecord` in `OdbcDesc::getDescRecord()`. For a 20-column result, that's 20 separate heap allocations (~300–400 bytes each) with poor cache locality. Allocate all records in a single `std::vector<DescRecord>` resized to `headCount+1`. | Medium | Medium (at prepare time) |
+
+#### 10.3 Data Copy Chain Reduction
+
+**Current state**: Data flows through up to 3 copies: (1) Firebird wire → `Sqlda::buffer` (unavoidable), (2) `Sqlda::buffer` → `Value` objects via `IscResultSet::next()` → `Sqlda::getValues()`, (3) `Value` → ODBC application buffer via `OdbcConvert::conv*()`. For the ODBC `nextFetch()` path, step (2) is skipped — data stays in `Sqlda::buffer` and `OdbcConvert` reads directly from SQLDA pointers. But string parameters still involve double copies.
+
+| Task | Description | Complexity | Benefit |
+|------|-------------|------------|---------|
+| **10.3.1** | **Zero-copy string parameter binding** — Currently `Value::setString()` does `new char[len+1]` + `memcpy`, then `Sqlda::setValue()` does another `memcpy` into the exec buffer. When the input pointer lifetime is guaranteed (parameter bound before execute), store only the pointer and length, copying once directly into the exec buffer. | Medium | High (for string-heavy INSERTs) |
+| **10.3.2** | **Eliminate `copyNextSqldaFromBufferStaticCursor()` per row** — Static (scrollable) cursors buffer all rows in memory, then each `fetchScroll` copies one row from the buffer into `Sqlda::buffer` before conversion. Instead, have `OdbcConvert` read directly from the static cursor buffer row, skipping the intermediate copy. | Hard | Medium (scrollable cursors only) |
+| **10.3.3** | **Avoid Sqlda metadata rebuild on re-execute** — `Sqlda::setValue()` overwrites `sqltype` and `sqlsubtype` on every parameter bind, causing `checkAndRebuild()` to detect "overridden" metadata and rebuild on every execute after the first. Track whether the types actually changed and skip the rebuild when they match. | Medium | Medium (for repeated executes) |
+
+#### 10.4 Conversion Function Overhead Reduction
+
+**Current state**: Each column conversion is dispatched via a **member function pointer** (`ADRESS_FUNCTION = int (OdbcConvert::*)(DescRecord*, DescRecord*)`). Inside each conversion, 4 `getAdressBindData/Ind` calls perform null checks + pointer dereferences through offset pointers. The `CHECKNULL` macro branches on `isIndicatorSqlDa` per column per row.
+
+| Task | Description | Complexity | Benefit |
+|------|-------------|------------|---------|
+| **10.4.1** | **Replace member function pointers with regular function pointers** — Change `ADRESS_FUNCTION` from `int (OdbcConvert::*)(DescRecord*, DescRecord*)` to `int (*)(OdbcConvert*, DescRecord*, DescRecord*)`. Member function pointers on MSVC are 16 bytes (vs 8 for regular pointers) and require an extra thunk adjustment. Regular function pointers are faster to dispatch and smaller. | Medium | Medium |
+| **10.4.2** | **Cache bind offset values in `OdbcConvert` by value** — Currently `bindOffsetPtrTo` / `bindOffsetPtrFrom` are `SQLLEN*` pointers that are dereferenced in every `getAdressBindDataTo/From` call (4× per conversion). Cache the actual `SQLLEN` value at the start of each row's conversion pass, avoiding 4 pointer dereferences per column. | Easy | Medium |
+| **10.4.3** | **Split conversion functions by indicator type** — The `CHECKNULL` macro branches on `isIndicatorSqlDa` (true for Firebird internal descriptors, false for app descriptors) on every conversion. Since this property is fixed at bind time, generate two variants of each conversion function and select the correct one in `getAdressFunction()`. | Hard | Medium |
+| **10.4.4** | **Implement bulk identity path** — When `bIdentity == true` (source and destination types match, same scale, no offset), the conversion is a trivial `*(T*)dst = *(T*)src`. For a row of N identity columns, replace N individual function pointer calls with a single `memcpy(dst_row, src_row, row_size)` or a tight loop of fixed-size copies. Detect this at bind time. | Hard | **High** (for identity-type fetches) |
+| **10.4.5** | **Use SIMD/`memcpy` for fixed-width column arrays** — When fetching multiple rows into column-wise bound arrays of fixed-width types (INT, BIGINT, DOUBLE), the per-column data in `Sqlda::buffer` is at a fixed stride. A single `memcpy` per column (or even AVX2 scatter/gather) can replace the per-row-per-column conversion loop. Requires column-wise fetch mode (see 10.5). | Hard | **Very High** (for columnar workloads) |
+| **10.4.6** | **Use ryu or `std::to_chars` for float→string** — The current `TemplateConvert.h` float-to-string uses manual digit extraction with repeated `fmod()` calls (~200 lines). `std::to_chars` (C++17) or the [ryu](https://github.com/ulfjack/ryu) library is 5–10× faster with guaranteed round-trip accuracy. | Easy | Medium (for float→string workloads) |
+| **10.4.7** | **Add `[[likely]]`/`[[unlikely]]` branch hints** — Annotate null-check fast paths in `getAdressBindData*` and `CHECKNULL` macros. The common case is non-NULL data and non-NULL indicators. Help the compiler lay out the hot path linearly. | Easy | Low |
+
+#### 10.5 Block Fetch / Columnar Fetch
+
+**Current state**: `sqlFetch()` fetches one row at a time from Firebird via `IResultSet::fetchNext()`, then converts one row at a time. For embedded Firebird, the per-row call overhead (function pointer dispatch, status check, buffer cursor advance) is significant relative to the actual data access.
+
+| Task | Description | Complexity | Benefit |
+|------|-------------|------------|---------|
+| **10.5.1** | **Implement N-row Sqlda buffer** — Resize `Sqlda::buffer` to hold N rows (e.g., 64 or 256) and call `IResultSet::fetchNext()` N times into successive row slots before returning to the conversion loop. This amortizes the per-fetch overhead across N rows and improves data cache locality. N should be configurable via `SQL_ATTR_ROW_ARRAY_SIZE` or a driver-specific attribute. | Medium | **High** |
+| **10.5.2** | **Columnar conversion pass** — After fetching N rows into a multi-row buffer, convert all N values of column 1, then all N values of column 2, etc. This maximizes L1/L2 cache utilization because: (a) the conversion function pointer is loaded once per column, not once per row; (b) source data for each column is at a fixed stride in the buffer; (c) destination data in column-wise bound arrays is contiguous. | Hard | **Very High** |
+| **10.5.3** | **Prefetch hints** — When fetching N rows, issue `__builtin_prefetch()` / `_mm_prefetch()` on the next row's source data while converting the current row. For multi-row buffers with known stride, prefetch 2–3 rows ahead. | Medium | Medium (hardware-dependent) |
+
+#### 10.6 Unicode (W API) Overhead Reduction
+
+**Current state**: Every W API function creates 1–6 `ConvertingString` RAII objects, each performing: (1) `MultiByteToWideChar` to measure length, (2) `new char[]` heap allocation, (3) `WideCharToMultiByte` to convert, (4) `delete[]` on destruction. For `SQLDescribeColW` called 20 times (one per column), this is 20 heap alloc/free cycles just for column names.
+
+| Task | Description | Complexity | Benefit |
+|------|-------------|------------|---------|
+| **10.6.1** | **Stack-buffer fast path in `ConvertingString`** — Add a `char stackBuf[512]` member. Try conversion into `stackBuf` first; only heap-allocate if the converted string exceeds 512 bytes. Since >99% of ODBC strings (column names, table names, SQL statements < 512 bytes) fit, this eliminates virtually all W-path heap allocations. | Easy | **Very High** |
+| **10.6.2** | **Single-pass W→A conversion** — Currently, `ConvertingString` calls `WideCharToMultiByte` twice (first with `NULL` output to measure, then with the actual buffer). With a 512-byte stack buffer, the first call writes directly into it. If it fits, done. If not, allocate and retry. Eliminates the measurement pass for the common case. | Easy | Medium |
+| **10.6.3** | **Native UTF-16 internal encoding** — The driver currently converts W→A at entry, processes as ANSI, then converts A→W at exit. For a fully Unicode application (the modern default), this is pure waste — every string is converted twice. Instead, store strings internally as UTF-16 (`SQLWCHAR*`) and only convert to ANSI for the Firebird API (which uses UTF-8 when `CHARSET=UTF8`). This eliminates the W→A→W round-trip for metadata strings. | Very Hard | **Very High** (long-term) |
+| **10.6.4** | **Use `Utf16Convert` directly instead of `WideCharToMultiByte` on Windows** — The driver already has a fast custom UTF-8↔UTF-16 codec in `Utf16Convert.cpp`. On Windows, `WideCharToMultiByte` is a general-purpose API supporting all code pages; when the connection charset is UTF-8 (the recommended default), the custom codec may be faster due to the eliminated code-page lookup. Benchmark both. | Easy | Low-Medium |
+
+#### 10.7 Compiler & Build Optimizations
+
+| Task | Description | Complexity | Benefit |
+|------|-------------|------------|---------|
+| **10.7.1** | **Enable LTO (Link-Time Optimization)** — Add `set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)` for Release builds. LTO allows the compiler to inline across translation units (e.g., `OdbcConvert::conv*` called from `OdbcStatement::returnData`), devirtualize calls to `final` classes, and eliminate dead code. Critical for the `OdbcFb.dll` → `IscDbc.lib` boundary. | Easy | **High** |
+| **10.7.2** | **Enable PGO (Profile-Guided Optimization)** — Add a PGO training workflow: (1) build with `/GENPROFILE` (MSVC) or `-fprofile-generate` (GCC/Clang), (2) run the benchmark suite, (3) rebuild with `/USEPROFILE` or `-fprofile-use`. PGO dramatically improves branch prediction and code layout for the fetch hot path. | Medium | **High** |
+| **10.7.3** | **Mark hot functions with `__forceinline`/`[[gnu::always_inline]]`** — Key candidates: `getAdressBindDataTo`, `getAdressBindDataFrom`, `getAdressBindIndTo`, `getAdressBindIndFrom`, `setIndicatorPtr`, `checkIndicatorPtr`. These are called millions of times and are small enough to always inline. | Easy | Medium |
+| **10.7.4** | **Ensure `OdbcConvert` methods are not exported** — Verify that the individual `conv*` methods are not in the DLL export table. Unexported functions can be freely inlined or eliminated by the linker. With LTO, this allows the compiler to inline conversion functions into the fetch loop. | Easy | Medium (with LTO) |
+| **10.7.5** | **Set `/favor:AMD64` or `-march=native` for release builds** — Enable architecture-specific instruction scheduling. For x86-64, this enables `cmov`, `popcnt`, and better vectorization. | Easy | Low |
+| **10.7.6** | **`#pragma optimize("gt", on)` for hot files** — On MSVC, apply `favor:fast` and `global optimizations` specifically to `OdbcConvert.cpp`, `OdbcStatement.cpp`, and `IscResultSet.cpp`. | Easy | Low |
+
+#### 10.8 Memory Layout & Cache Optimization
+
+| Task | Description | Complexity | Benefit |
+|------|-------------|------------|---------|
+| **10.8.1** | **Contiguous `CBindColumn` array** — The `ListBind<CBindColumn>` used in `returnData()` already stores `CBindColumn` structs contiguously. Verify that `CBindColumn` is small and dense (no padding, no pointers to unrelated data). If it contains a pointer to `DescRecord`, consider embedding the needed fields (fnConv, dataPtr, indicatorPtr) directly to avoid the pointer chase. | Medium | Medium |
+| **10.8.2** | **`alignas(64)` on `Sqlda::buffer`** — Align the Firebird data buffer to a cache line boundary. This ensures that the first column's data starts on a cache line and improves prefetch efficiency. | Easy | Low |
+| **10.8.3** | **`DescRecord` field reordering** — Move the hot fields used during conversion (`dataPtr`, `indicatorPtr`, `conciseType`, `fnConv`, `octetLength`, `isIndicatorSqlDa`) to the first 64 bytes of the struct. Cold fields (catalogName, baseTableName, literalPrefix, etc. — 11 JStrings) should be at the end. This keeps one cache line hot during the conversion loop. | Medium | Medium |
+| **10.8.4** | **Avoid false sharing on `countFetched`** — `OdbcStatement::countFetched` is modified on every fetch row. If it shares a cache line with read-only fields accessed by other threads, it causes false sharing. Add `alignas(64)` padding around frequently-written counters. | Easy | Low (only relevant with multi-threaded access) |
+
+#### 10.9 Statement Re-Execution Fast Path
+
+| Task | Description | Complexity | Benefit |
+|------|-------------|------------|---------|
+| **10.9.1** | **Skip `SQLPrepare` re-parse when SQL unchanged** — Cache the last SQL string hash. If `SQLPrepare` is called with the same SQL, skip the Firebird `IStatement::prepare()` call entirely and reuse the existing prepared statement. | Easy | **High** (for ORM-style repeated prepares) |
+| **10.9.2** | **Skip `getUpdateCount()` for SELECT statements** — `IscStatement::execute()` always calls `statement->getAffectedRecords()` after execute. For SELECTs (which return a result set, not an update count), this is a wasted Firebird API call. Guard with `statementType == isc_info_sql_stmt_select`. | Easy | Medium |
+| **10.9.3** | **Avoid conversion function re-resolution on re-execute** — `getAdressFunction()` (the 860-line switch) is called once per column at bind time and cached in `DescRecord::fnConv`. Verify this cache is preserved across re-executions of the same prepared statement with the same bindings. If `OdbcDesc::getDescRecord()` reinitializes `fnConv`, add a dirty flag. | Easy | Low |
+
+#### 10.10 Advanced: Asynchronous & Pipelined Fetch
+
+| Task | Description | Complexity | Benefit |
+|------|-------------|------------|---------|
+| **10.10.1** | **Double-buffered fetch** — Allocate two `Sqlda::buffer` slots. While `OdbcConvert` processes buffer A, issue `IResultSet::fetchNext()` into buffer B on a worker thread (or via async I/O). When conversion of A completes, swap buffers. This hides Firebird fetch latency behind conversion work. Only beneficial when Firebird is not embedded (i.e., client/server mode with network latency). | Very Hard | High (client/server mode) |
+| **10.10.2** | **Evaluate Firebird `IResultSet::fetchNext()` with pre-allocated multi-row buffer** — Investigate whether the Firebird OO API supports fetching N rows at once into a contiguous buffer (like ODBC's `SQL_ATTR_ROW_ARRAY_SIZE`). If so, this eliminates the per-row API call overhead entirely. | Research | **Very High** (if available) |
+
+#### Architecture Diagram: Optimized Fetch Path
+
+```
+Current path (per row, per column):
+  SQLFetch → GUARD_HSTMT(Mutex!) → clearErrors → fetchData
+    → (resultSet->*fetchNext)()                    [fn ptr: IscResultSet::nextFetch]
+      → IResultSet::fetchNext(&status, buffer)     [Firebird OO API call]
+    → returnData()
+      → for each bound column:
+        → (convert->*imp->fnConv)(imp, appRec)     [member fn ptr: OdbcConvert::conv*]
+          → getAdressBindDataFrom(ptr)             [null check + ptr deref + add]
+          → getAdressBindDataTo(ptr)               [null check + ptr deref + add]
+          → getAdressBindIndFrom(ptr)              [null check + ptr deref + add]
+          → getAdressBindIndTo(ptr)                [null check + ptr deref + add]
+          → CHECKNULL (branch on isIndicatorSqlDa)
+          → actual conversion (often 1 instruction)
+
+Optimized path (N rows, columnar):
+  SQLFetch → GUARD_HSTMT(SRWLock) → fetchData
+    → fetch N rows into multi-row buffer           [N × IResultSet::fetchNext, amortized]
+    → for each bound column:
+      → load conversion fn once
+      → for each of N rows:
+        → direct pointer arithmetic (no null check — verified at bind time)
+        → actual conversion (or bulk memcpy for identity)
+```
+
+#### Performance Targets
+
+| Metric | Current (est.) | Target | Method |
+|--------|---------------|--------|--------|
+| Fetch 1M × 10 INT cols (embedded) | ~2–5μs/row | <500ns/row | 10.1 + 10.4.4 + 10.5.1 + 10.7.1 |
+| Fetch 1M × 5 VARCHAR(100) cols | ~3–8μs/row | <1μs/row | 10.1 + 10.6.1 + 10.5.1 |
+| Batch insert 100K × 10 cols (FB4+) | ~1–3μs/row | <500ns/row | IBatch (Phase 9) + 10.3.1 |
+| SQLFetch lock overhead | ~1–2μs | <30ns | 10.1.1 (SRWLOCK) |
+| W API per-call overhead | ~5–15μs | <500ns | 10.6.1 + 10.6.2 |
+| `OdbcConvert::conv*` per column | ~50–100ns | <20ns | 10.4.2 + 10.4.4 + 10.7.1 |
+
+#### Success Criteria
+
+- [ ] Micro-benchmark harness established with reproducible baselines
+- [ ] SQLFetch lock overhead reduced from ~1μs to <30ns (measured)
+- [ ] Zero heap allocations in the fetch path for non-BLOB, non-string queries
+- [ ] W API functions use stack buffers for strings <512 bytes
+- [ ] LTO enabled for Release builds; PGO training workflow documented
+- [ ] Block-fetch mode (N=64) implemented and benchmarked
+- [ ] Identity conversion fast path bypasses per-column function dispatch
+- [ ] All 318+ existing tests still pass
+- [ ] Performance regression tests added to CI
+
+**Deliverable**: A driver that is measurably the fastest ODBC driver for Firebird in existence, with documented benchmark results proving <500ns/row for fixed-type bulk fetch scenarios on embedded Firebird.
 
 ---
 
@@ -642,7 +817,8 @@ Work incrementally. Each phase should be a series of focused, reviewable commits
 | Phase 3 | 318 tests (318 pass). Comprehensive coverage: null handles, connections, cursors, descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape passthrough, server versions, batch params, array binding (column-wise + row-wise), ConnSettings, scrollable cursors, connect options, errors, result/param conversions, prepared statements, cursor-commit, data-at-execution, ODBC 3.8 compliance, GUID/binary types. CI tests on Windows + Linux. |
 | Phase 4 | 270 tests (270 pass). Batch execution validated (row-wise + column-wise, with operation ptr + error handling). Scrollable cursors verified (all orientations). `SQLGetTypeInfo` extended for FB4+ types. ConnSettings implemented. Server version feature-flagging in place. ODBC escape sequences removed (SQL sent AS IS). |
 | Phase 5 | No raw `new`/`delete` in new code. Consistent formatting. Doxygen comments on public APIs. |
-| Phase 9 | Legacy ISC function pointers reduced from ~50 to ~5 (array only). `IBatch` implemented for PARAMSET_SIZE > 1 on FB4+ (single server roundtrip for N rows). `isc_vax_integer` replaced inline. Concrete IscDbc classes marked `final`. Dead commented-out ISC code removed. Sqlda data copy optimized (skip when metadata unchanged). All 318 tests pass. |
+| Phase 9 | Legacy ISC function pointers reduced from ~50 to ~4 (array + sqlcode only). `IBatch` implemented for PARAMSET_SIZE > 1 on FB4+ (single server roundtrip for N rows) with inline BLOB support via `registerBlob()`. Events migrated to OO API (`IAttachment::queEvents` + `FbEventCallback`). TPB construction migrated to `IXpbBuilder`. Date/time math consolidated into `FbDateConvert.h` shared helpers (dead `OdbcDateTime` removed). Error handling unified — `THROW_ISC_EXCEPTION_LEGACY` now uses `getIscStatusTextFromVector()` via OO API (no `fb_interpret`). `isc_vax_integer` replaced inline. Concrete IscDbc classes marked `final`. Dead commented-out ISC code removed. Sqlda data copy optimized (skip when metadata unchanged). **Phase 9 complete.** All 318 tests pass. |
+| Phase 10 | Micro-benchmark harness with baselines. SQLFetch lock <30ns (SRWLOCK). Zero heap allocs in non-BLOB/non-string fetch path. W API stack buffers for <512-byte strings. LTO enabled. Block-fetch (N=64) implemented. Identity conversion fast path. All 318+ tests pass. Performance regression tests in CI. |
 
 ### 6.2 Overall Quality Targets
 
@@ -655,6 +831,9 @@ Work incrementally. Each phase should be a series of focused, reviewable commits
 | Cross-platform tests | **Windows + Linux (x64 + ARM64)** | Windows + Linux + macOS | ✅ CI passes on all platforms |
 | Firebird version matrix | 5.0 only | 3.0, 4.0, 5.0 | CI tests all supported versions |
 | Unicode compliance | **100% tests passing** | 100% | ✅ All W function tests pass including BufferLength validation |
+| Fetch throughput (10 INT cols, embedded) | ~2–5μs/row (est.) | <500ns/row | Phase 10 benchmark target |
+| SQLFetch lock overhead | ~1–2μs (Mutex) | <30ns (SRWLOCK) | Phase 10.1.1 |
+| W API per-call overhead | ~5–15μs (heap alloc) | <500ns (stack buf) | Phase 10.6.1 |
 
 ### 6.3 Benchmark: What "First-Class" Means
 
@@ -729,5 +908,5 @@ Quick reference for which files need changes in each phase.
 
 ---
 
-*Document version: 2.3 — February 8, 2026*  
+*Document version: 2.4 — February 8, 2026*
 *This is the single authoritative reference for all Firebird ODBC driver improvements.*

@@ -65,9 +65,13 @@ public:
 
 private:
 
+	/// Encode a calendar date (day, month, year) to ISC_DATE. Uses shared FbDateConvert.h (Phase 9.6).
 	signed int encode_sql_date(SQLUSMALLINT day, SQLUSMALLINT month, SQLSMALLINT year);
+	/// Decode ISC_DATE to calendar date (day, month, year). Uses shared FbDateConvert.h (Phase 9.6).
 	void decode_sql_date(signed int nday, SQLUSMALLINT &mday, SQLUSMALLINT &month, SQLSMALLINT &year);
+	/// Encode time components to ISC_TIME. Uses shared FbDateConvert.h (Phase 9.6).
 	signed int encode_sql_time(SQLUSMALLINT hour, SQLUSMALLINT minute, SQLUSMALLINT second);
+	/// Decode ISC_TIME to time components. Uses shared FbDateConvert.h (Phase 9.6).
 	void decode_sql_time(signed int ntime, SQLUSMALLINT &hour, SQLUSMALLINT &minute, SQLUSMALLINT &second);
 	void convertStringDateTimeToServerStringDateTime (char *& string, int &len);
 	void getFirstElementFromArrayString(char * string, char *& firstChar, int &len);

@@ -121,6 +121,7 @@ public:
 private:
 	Firebird::IBatch*		batch_ = nullptr;
 	int						batchRowCount_ = 0;
+	bool					batchHasBlobs_ = false;	///< True when input meta has BLOB columns (Phase 9.2)
 };
 
 }; // end namespace IscDbcLibrary

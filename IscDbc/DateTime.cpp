@@ -28,6 +28,7 @@
 #include <stdlib.h>
 #include "IscDbc.h"
 #include "DateTime.h"
+#include "FbDateConvert.h"
 #include "SQLError.h"
 
 #ifdef _DEBUG
@@ -330,105 +331,25 @@ double DateTime::getDouble()
 
 signed int DateTime::decodeDate (signed int nday, tm	*times)
 {
-/**************************************
- *
- *	d e c o d e D a t e
- *
- **************************************
- *
- * Functional description
- *	Convert a numeric day to [day, month, year].
- *
- * Calenders are divided into 4 year cycles.
- * 3 Non-Leap years, and 1 leap year.
- * Each cycle takes 365*4 + 1 == 1461 days.
- * There is a further cycle of 100 4 year cycles.
- * Every 100 years, the normally expected leap year
- * is not present.  Every 400 years it is.
- * This cycle takes 100 * 1461 - 3 == 146097 days
- *
- * The origin of the constant 2400001 is unknown.
- * The origin of the constant 1721119 is unknown.
- *
- * The difference between 2400001 and 1721119 is the
- * number of days From 0/0/0000 to our base date of
- * 11/xx/1858. (678882)
- * The origin of the constant 153 is unknown.
- *
- * This whole routine has problems with ndates
- * less than -678882 (Approx 2/1/0000).
- *
- **************************************/
-	signed int	year, month, day;
-	signed int	century;
+	// Phase 9.6: Delegate to canonical inline helper (FbDateConvert.h)
+	int day, month, year;
+	fb_decode_date(static_cast<ISC_DATE>(nday), day, month, year);
 
-//	nday -= 1721119 - 2400001;
-	nday += 678882;
-
-	century = (4 * nday - 1) / 146097;
-	nday = 4 * nday - 1 - 146097 * century;
-	day = nday / 4;
-
-	nday = (4 * day + 3) / 1461;
-	day = 4 * day + 3 - 1461 * nday;
-	day = (day + 4) / 4;
-
-	month = (5 * day - 3) / 153;
-	day = 5 * day - 3 - 153 * month;
-	day = (day + 5) / 5;
-
-	year = 100 * century + nday;
-
-	if (month < 10)
-		month += 3;
-	else
-		{
-		month -= 9;
-		year += 1;
-		}
-
-	times->tm_mday = (int) day;
-	times->tm_mon = (int) month - 1;
-	times->tm_year = (int) year - 1900;
+	times->tm_mday = day;
+	times->tm_mon = month - 1;
+	times->tm_year = year - 1900;
 	return true;
 }
 
 
 signed int DateTime::encodeDate (struct tm	*times)
 {
-/**************************************
- *
- *	e n c o d e D a t e
- *
- **************************************
- *
- * Functional description
- *	Convert a calendar date to a numeric day
- *	(the number of days since the base date).
- *
- **************************************/
-	signed short	day, month, year;
-	signed int	c, ya;
+	// Phase 9.6: Delegate to canonical inline helper (FbDateConvert.h)
+	int day = times->tm_mday;
+	int month = times->tm_mon + 1;
+	int year = times->tm_year + 1900;
 
-	day = times->tm_mday;
-	month = times->tm_mon + 1;
-	year = times->tm_year + 1900;
-
-	if (month > 2)
-		month -= 3;
-	else
-		{
-		month += 9;
-		year -= 1;
-		}
-
-	c = year / 100;
-	ya = year - 100 * c;
-
-	return (unsigned int) (((QUAD) 146097 * c) / 4 + 
-		(1461 * ya) / 4 + 
-		(153 * month + 2) / 5 + 
-		day + 1721119 - 2400001);
+	return static_cast<signed int>(fb_encode_date(day, month, year));
 }
 
 

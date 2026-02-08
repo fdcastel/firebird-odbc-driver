@@ -2949,31 +2949,37 @@ SQLRETURN OdbcStatement::executeStatementParamArray()
 	}
 
 	// ============================================================
-	// Phase 9.1: Try IBatch for bulk execution (FB4+ only).
+	// Phase 9.1/9.2: Try IBatch for bulk execution (FB4+ only).
 	// IBatch sends all rows in a single server roundtrip.
+	// Phase 9.2: Inline BLOBs are now supported via registerBlob().
 	// Falls back to row-by-row if:
 	//   - Server doesn't support IBatch (pre-FB4)
-	//   - Any parameter uses data-at-exec (blobs/arrays)
+	//   - Any parameter uses data-at-exec (streamed blobs/arrays)
+	//   - Any parameter is an ARRAY type (no batch support)
 	//   - batchBegin() throws an exception
 	// ============================================================
 	bool useBatch = false;
 	if (statement->isBatchSupported() && nCountRow > 1)
 	{
-		// Check if any parameter is data-at-exec (blob/array) — not supported in batch mode yet
-		bool hasDataAtExec = false;
+		// Check for data-at-exec or array parameters — not supported in batch mode
+		bool hasUnsupported = false;
 		StatementMetaData *metaData = statement->getStatementMetaDataIPD();
 		int nInputParam = metaData->getColumnCount();
-		for (int n = 1; n <= nInputParam && !hasDataAtExec; ++n)
+		for (int n = 1; n <= nInputParam && !hasUnsupported; ++n)
 		{
 			DescRecord *record = applicationParamDescriptor->getDescRecord(n);
 			if (record && record->data_at_exec)
-				hasDataAtExec = true;
-			// Also check if the param is a blob/array type
-			if (metaData->isBlobOrArray(n))
-				hasDataAtExec = true;
+				hasUnsupported = true;
+			// Arrays are not supported in batch mode (no IBatch equivalent).
+			// BLOBs are OK since Phase 9.2 (registerBlob support).
+			int blobOrArray = metaData->isBlobOrArray(n);
+			if (blobOrArray == 540)  // SQL_ARRAY
+				hasUnsupported = true;
+			// Note: BLOB columns (blobOrArray == 520) WITHOUT data-at-exec
+			// are now handled by batch inline BLOB support (Phase 9.2).
 		}
 
-		if (!hasDataAtExec)
+		if (!hasUnsupported)
 		{
 			try
 			{

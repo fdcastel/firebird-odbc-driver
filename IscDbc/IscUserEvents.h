@@ -19,15 +19,39 @@
  */
 
 // IscUserEvents.h interface for the user events class.
+// Phase 9.4: Migrated from ISC isc_que_events to OO API IAttachment::queEvents.
 //
 //////////////////////////////////////////////////////////////////////
 
 #if !defined(_UserEvents_H_)
 #define _UserEvents_H_
 
+#include <firebird/IdlFbInterfaces.h>
+
 namespace IscDbcLibrary {
 
 class ParametersEvents;
+
+/// OO API event callback bridge (Phase 9.4).
+/// Implements IEventCallback to bridge OO API event notifications
+/// to the legacy callbackEvent function pointer.
+/// Ref-counted lifetime is managed by the owning IscUserEvents.
+class FbEventCallback final : public Firebird::IEventCallbackImpl<FbEventCallback, Firebird::ThrowStatusWrapper>
+{
+public:
+	FbEventCallback() : owner_(nullptr) {}
+	void setOwner(class IscUserEvents* owner) { owner_ = owner; }
+
+	/// Called by Firebird when events fire.
+	void eventCallbackFunction(unsigned length, const unsigned char* events);
+
+	/// IReferenceCounted — prevent premature disposal (owned by IscUserEvents).
+	void addRef() {}
+	int release() { return 1; }
+
+private:
+	class IscUserEvents* owner_;
+};
 
 class IscUserEvents : public UserEvents
 {
@@ -38,8 +62,8 @@ public:
 
 	void				releaseEventBlock();
 	void				initEventBlock();
-	inline unsigned long vaxInteger( char * val );
-	void				eventCounts( char *result );
+	inline unsigned long vaxInteger( const unsigned char * val );
+	void				eventCounts( const unsigned char *result );
 
 	virtual void		queEvents( void * interfase = NULL );
 	virtual bool		isChanged( int numEvent = 0 );
@@ -55,9 +79,10 @@ private:
 	
 	int					useCount;
 	IscConnection		*connection;
-	char				*eventBuffer;
-	ISC_LONG			eventId;
+	unsigned char		*eventBuffer;
 	short				lengthEventBlock;
+	Firebird::IEvents	*eventsHandle;	///< OO API events handle (Phase 9.4)
+	FbEventCallback		callback_;		///< OO API callback bridge (Phase 9.4)
 
 public:
 	

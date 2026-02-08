@@ -55,7 +55,7 @@
 const ISC_STATUS * statusVector = status->getErrors();\
 throw SQLEXCEPTION ( connection->GDS->getSqlCode( statusVector ), statusVector [1], connection->getIscStatusText (status))
 
-#define THROW_ISC_EXCEPTION_LEGACY(connection, statusVector) throw SQLEXCEPTION ( connection->GDS->_sqlcode( statusVector ), statusVector [1], connection->getIscStatusTextLegacy (statusVector))
+#define THROW_ISC_EXCEPTION_LEGACY(connection, statusVector) throw SQLEXCEPTION ( connection->GDS->getSqlCode( statusVector ), statusVector [1], connection->GDS->getIscStatusTextFromVector (statusVector))
 
 #define OFFSET(type,fld)	(size_t)&(((type*)0)->fld)
 #define MAX(a,b)			((a > b) ? a : b)

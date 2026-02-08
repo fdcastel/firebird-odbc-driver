@@ -19,6 +19,7 @@
  */
 
 // IscUserEvents.cpp user events class.
+// Phase 9.4: Migrated from ISC isc_que_events to OO API IAttachment::queEvents.
 //
 //////////////////////////////////////////////////////////////////////
 
@@ -37,11 +38,33 @@ using namespace Firebird;
 
 namespace IscDbcLibrary {
 
+// ============================================================
+// FbEventCallback — OO API bridge (Phase 9.4)
+// ============================================================
+
+void FbEventCallback::eventCallbackFunction(unsigned length, const unsigned char* events)
+{
+	if (!owner_)
+		return;
+
+	// Bridge to legacy callback signature: void(void*, short, char*)
+	// The legacy callback receives the IscUserEvents pointer (or an
+	// alternate interface) and the raw event buffer for processing.
+	owner_->callbackAstRoutine(
+		owner_,
+		static_cast<short>(length),
+		const_cast<char*>(reinterpret_cast<const char*>(events)));
+}
+
+// ============================================================
+// IscUserEvents
+// ============================================================
+
 IscUserEvents::IscUserEvents( IscConnection *connect, PropertiesEvents *context, callbackEvent astRoutine, void *userAppData )
 {
 	useCount = 1;
 	eventBuffer = NULL;
-	eventId = 0lu;
+	eventsHandle = nullptr;
 	lengthEventBlock = 0;
 
 	connection = connect;
@@ -49,6 +72,8 @@ IscUserEvents::IscUserEvents( IscConnection *connect, PropertiesEvents *context,
 	events->addRef();
 	callbackAstRoutine = astRoutine;
 	userData = userAppData;
+
+	callback_.setOwner(this);
 
 	initEventBlock();
 }
@@ -60,10 +85,21 @@ IscUserEvents::~IscUserEvents()
 
 void IscUserEvents::releaseEventBlock()
 {
+	// Cancel any pending event subscription
+	if (eventsHandle)
+	{
+		try
+		{
+			ThrowStatusWrapper status(connection->GDS->_status);
+			eventsHandle->cancel(&status);
+		}
+		catch (...) {}
+		eventsHandle = nullptr;
+	}
+
 	delete[] eventBuffer;
 	eventBuffer = NULL;
 
-	eventId = 0lu;
 	lengthEventBlock = 0;
 
 	if ( events && !events->release() )
@@ -72,8 +108,8 @@ void IscUserEvents::releaseEventBlock()
 
 void IscUserEvents::initEventBlock()
 {
-	char		*p;
-	const char	*q;
+	unsigned char	*p;
+	const char		*q;
 	int length = 1;
 
 	ParameterEvent *param = events->getHeadPosition();
@@ -83,7 +119,7 @@ void IscUserEvents::initEventBlock()
 		param = events->getNext();
 	}
 
-	p = eventBuffer = new char[length];
+	p = eventBuffer = new unsigned char[length];
 
 	if ( !p )
 	{
@@ -97,10 +133,10 @@ void IscUserEvents::initEventBlock()
 	param = events->getHeadPosition();
 	while ( param )
 	{
-		*p++ = param->lengthNameEvent;
+		*p++ = static_cast<unsigned char>(param->lengthNameEvent);
 		q = param->nameEvent;
 
-		while ( (*p++ = *q++) );
+		while ( (*p++ = static_cast<unsigned char>(*q++)) );
 
 		*p++ = 0;
 		*p++ = 0;
@@ -114,32 +150,40 @@ void IscUserEvents::initEventBlock()
 
 void IscUserEvents::queEvents( void * interfase )
 {
-	ISC_STATUS statusVector[20];
+	// Phase 9.4: Use OO API IAttachment::queEvents instead of ISC isc_que_events.
+	// This eliminates the need for _get_database_handle bridge and isc_que_events pointer.
+	ThrowStatusWrapper status(connection->GDS->_status);
+	try
+	{
+		// Cancel previous subscription if any
+		if (eventsHandle)
+		{
+			eventsHandle->cancel(&status);
+			eventsHandle = nullptr;
+		}
 
-	isc_db_handle dbHandle = NULL;
-	connection->GDS->_get_database_handle( statusVector, &dbHandle, connection->databaseHandle );
-
-	if ( statusVector [1] )
-		THROW_ISC_EXCEPTION_LEGACY( connection, statusVector );
-
-	connection->GDS->_que_events( statusVector, &dbHandle,
-	                              &eventId, lengthEventBlock, eventBuffer,
-	                              (isc_callback)callbackAstRoutine,
-	                              !interfase ? (UserEvents*)this : interfase );
-	if ( statusVector [1] )
-		THROW_ISC_EXCEPTION_LEGACY( connection, statusVector );
+		eventsHandle = connection->databaseHandle->queEvents(
+			&status,
+			&callback_,
+			static_cast<unsigned>(lengthEventBlock),
+			eventBuffer);
+	}
+	catch (const FbException& error)
+	{
+		THROW_ISC_EXCEPTION(connection, error.getStatus());
+	}
 }
 
 inline
-unsigned long IscUserEvents::vaxInteger( char * val )
+unsigned long IscUserEvents::vaxInteger( const unsigned char * val )
 {
 	return (unsigned long)val[0] + ((unsigned long)val[1]<<8) + ((unsigned long)val[2]<<16) + ((unsigned long)val[3]<<24);
 }
 
-void IscUserEvents::eventCounts( char *result )
+void IscUserEvents::eventCounts( const unsigned char *result )
 {
-	char *p = eventBuffer + 1;
-	char *q = result + 1;
+	unsigned char *p = eventBuffer + 1;
+	const unsigned char *q = result + 1;
 
 	ParameterEvent *param = events->getHeadPosition();
 	while ( param )
@@ -185,7 +229,7 @@ int IscUserEvents::getCountRegisteredNameEvents()
 
 void IscUserEvents::updateResultEvents( char * result )
 {
-	eventCounts( result );
+	eventCounts( reinterpret_cast<const unsigned char*>(result) );
 }
 
 void* IscUserEvents::getUserData()

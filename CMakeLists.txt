@@ -64,7 +64,6 @@ set(ODBCJDBC_SOURCES
     MbsAndWcs.cpp
     OdbcConnection.cpp
     OdbcConvert.cpp
-    OdbcDateTime.cpp
     OdbcDesc.cpp
     OdbcEnv.cpp
     OdbcError.cpp
@@ -81,7 +80,6 @@ set(ODBCJDBC_HEADERS
     Main.h
     OdbcConnection.h
     OdbcConvert.h
-    OdbcDateTime.h
     OdbcDesc.h
     OdbcEnv.h
     OdbcError.h

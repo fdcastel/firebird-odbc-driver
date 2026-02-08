@@ -41,6 +41,9 @@
 
 #include "TemplateConvert.h"
 #include "Utf16Convert.h"
+#include "IscDbc/FbDateConvert.h"
+
+using namespace IscDbcLibrary;
 
 #ifndef _WINDOWS
 // for Linux
@@ -4332,108 +4335,34 @@ int OdbcConvert::convVarStringSystemToStringW(DescRecord * from, DescRecord * to
 
 signed int OdbcConvert::encode_sql_date(SQLUSMALLINT day, SQLUSMALLINT month, SQLSMALLINT year)
 {
-/**************************************
- *
- *	n d a y
- *
- **************************************
- *
- * Functional description
- *	Convert a calendar date to a numeric day
- *	(the number of days since the base date).
- *
- **************************************/
-	signed int	c, ya;
-
-	if (month > 2)
-		month -= 3;
-	else
-	{
-		month += 9;
-		year -= 1;
-	}
-
-	c = year / 100;
-	ya = year - 100 * c;
-
-	return (signed int) (((QUAD) 146097 * c) / 4 + 
-		(1461 * ya) / 4 + 
-		(153 * month + 2) / 5 + 
-		day - 678882); //	day + 1721119 - 2400001);
+	// Phase 9.6: Delegate to canonical inline helper (FbDateConvert.h)
+	return static_cast<signed int>(fb_encode_date(day, month, year));
 }
 
 void OdbcConvert::decode_sql_date(signed int nday, SQLUSMALLINT &mday, SQLUSMALLINT &month, SQLSMALLINT &year)
 {
-/**************************************
- *
- *	n d a t e
- *
- **************************************
- *
- * Functional description
- *	Convert a numeric day to [day, month, year].
- *
- * Calenders are divided into 4 year cycles.
- * 3 Non-Leap years, and 1 leap year.
- * Each cycle takes 365*4 + 1 == 1461 days.
- * There is a further cycle of 100 4 year cycles.
- * Every 100 years, the normally expected leap year
- * is not present.  Every 400 years it is.
- * This cycle takes 100 * 1461 - 3 == 146097 days
- * The origin of the constant 2400001 is unknown.
- * The origin of the constant 1721119 is unknown.
- * The difference between 2400001 and 1721119 is the
- * number of days From 0/0/0000 to our base date of
- * 11/xx/1858. (678882)
- * The origin of the constant 153 is unknown.
- *
- * This whole routine has problems with ndates
- * less than -678882 (Approx 2/1/0000).
- *
- **************************************/
-	signed int	day;
-	signed int	century;
-
-//	nday -= 1721119 - 2400001;
-	nday += 678882;
-
-	century = (4 * nday - 1) / 146097;
-	nday = 4 * nday - 1 - 146097 * century;
-	day = nday / 4;
-
-	nday = (4 * day + 3) / 1461;
-	day = 4 * day + 3 - 1461 * nday;
-	day = (day + 4) / 4;
-
-	month = (SQLUSMALLINT)((5 * day - 3) / 153);
-	day = 5 * day - 3 - 153 * month;
-	mday = (SQLUSMALLINT)((day + 5) / 5);
-
-	year = (short)(100 * century + nday);
-
-	if (month < 10)
-		month += 3;
-	else
-	{
-		month -= 9;
-		year += 1;
-	}
+	// Phase 9.6: Delegate to canonical inline helper (FbDateConvert.h)
+	int d, m, y;
+	fb_decode_date(static_cast<ISC_DATE>(nday), d, m, y);
+	mday = static_cast<SQLUSMALLINT>(d);
+	month = static_cast<SQLUSMALLINT>(m);
+	year = static_cast<SQLSMALLINT>(y);
 }
 
 signed int OdbcConvert::encode_sql_time(SQLUSMALLINT hour, SQLUSMALLINT minute, SQLUSMALLINT second)
 {
-	return ((hour * 60 + minute) * 60 +
-				 second) * ISC_TIME_SECONDS_PRECISION;
+	// Phase 9.6: Delegate to canonical inline helper (FbDateConvert.h)
+	return static_cast<signed int>(fb_encode_time(hour, minute, second));
 }
 
 void OdbcConvert::decode_sql_time(signed int ntime, SQLUSMALLINT &hour, SQLUSMALLINT &minute, SQLUSMALLINT &second)
 {
-	int minutes;
-
-	minutes = ntime / (ISC_TIME_SECONDS_PRECISION * 60);
-	hour = (SQLUSMALLINT)(minutes / 60);
-	minute = (SQLUSMALLINT)(minutes % 60);
-	second = (SQLUSMALLINT)((ntime / ISC_TIME_SECONDS_PRECISION) % 60);
+	// Phase 9.6: Delegate to canonical inline helper (FbDateConvert.h)
+	int h, m, s;
+	fb_decode_time(static_cast<ISC_TIME>(ntime), h, m, s);
+	hour = static_cast<SQLUSMALLINT>(h);
+	minute = static_cast<SQLUSMALLINT>(m);
+	second = static_cast<SQLUSMALLINT>(s);
 }
 
 void OdbcConvert::convertStringDateTimeToServerStringDateTime (char *& string, int &len)
