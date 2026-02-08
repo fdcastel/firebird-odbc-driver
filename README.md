@@ -188,8 +188,7 @@ The project includes GitHub Actions workflows (`.github/workflows/build-and-test
 
 ## License
 
-This project is licensed under the [Initial Developer's Public License Version 1.0 (IDPL)](Install/IDPLicense.txt).
+The source code is released under variants of the Mozilla Public Licence 1.1 (MPL):
 
-## History
-
-This driver has been in active development since 2001, originally created by James A. Starkey for IBPhoenix, with significant contributions from Vladimir Tsvigun, Carlos G. Alvarez, Robert Milharcic, and others. The CMake build system and CI pipeline were added in 2026.
+- https://www.firebirdsql.org/en/initial-developer-s-public-license-version-1-0/
+- https://www.firebirdsql.org/en/interbase-public-license/
