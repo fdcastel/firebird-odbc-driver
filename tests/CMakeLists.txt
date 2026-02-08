@@ -83,16 +83,13 @@ else()
     )
 endif()
 
-# Use simple add_test instead of gtest_discover_tests to avoid build-time test discovery
-add_test(NAME firebird_odbc_tests COMMAND firebird_odbc_tests)
-
-# Ensure the test can find DLLs (GTest, driver) at runtime
-if(WIN32)
-    # Add the GTest DLL directory and the driver DLL directory to PATH for CTest
-    set_tests_properties(firebird_odbc_tests PROPERTIES
-        ENVIRONMENT "PATH=$<TARGET_FILE_DIR:gtest>;$<TARGET_FILE_DIR:OdbcFb>;$ENV{PATH}"
-    )
-endif()
+# Discover individual Google Test cases so CTest runs each one separately.
+# Use PRE_TEST discovery mode so the test binary is only executed at ctest time
+# (not at build time), avoiding DLL-not-found errors during the build step.
+gtest_discover_tests(firebird_odbc_tests
+    DISCOVERY_TIMEOUT 30
+    DISCOVERY_MODE PRE_TEST
+)
 
 # Copy the driver DLL next to the test executable so LoadLibrary finds it
 add_custom_command(TARGET firebird_odbc_tests POST_BUILD
