@@ -3,8 +3,8 @@
 **Date**: February 7, 2026  
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
-**Last Updated**: February 7, 2026  
-**Version**: 2.0
+**Last Updated**: February 8, 2026  
+**Version**: 2.1
 
 > This document consolidates all known issues and newly identified architectural deficiencies.
 > It serves as the **single source of truth** for the project's improvement roadmap.
@@ -92,7 +92,17 @@
 | L-8 | ~~Static initialization order issues in `EnvShare`~~ — Replaced global `EnvShare environmentShare` with `getEnvironmentShareInstance()` using construct-on-first-use (Meyer's Singleton); thread-safe in C++11+ | New (code review) | ✅ RESOLVED | IscDbc/EnvShare.h/.cpp, IscDbc/IscConnection.cpp |
 | L-9 | ~~`snprintf`/`swprintf` macro conflicts with modern MSVC~~ — Guarded `#define snprintf _snprintf` / `#define swprintf _snwprintf` behind `_MSC_VER < 1900`; fixed same in IscDbc.h | New (Phase 5 fix) | ✅ RESOLVED | OdbcJdbc.h, IscDbc/IscDbc.h |
 
-### 1.5 Test Infrastructure Issues
+### 1.5 Bugs Identified by ODBC Crusher v0.3.1 (February 8, 2026)
+
+| # | Issue | Discovery | Status | File(s) |
+|---|-------|-----------|--------|---------|
+| OC-1 | `SQLCopyDesc` crashes (access violation 0xC0000005) when copying an ARD that has no bound records — `operator=` in OdbcDesc iterates `records[]` without checking if source `records` pointer is NULL | odbc-crusher Descriptor Tests (ERR CRASH) | ❌ OPEN | OdbcDesc.cpp (`operator=` line ~213) |
+| OC-2 | `SQL_DIAG_ROW_COUNT` via `SQLGetDiagField` always returns 0 — the `sqlDiagRowCount` field is never populated after `SQLExecDirect`/`SQLExecute`; row count is only available through `SQLRowCount` | odbc-crusher `test_diagfield_row_count` | ❌ OPEN | OdbcObject.cpp (sqlGetDiagField), OdbcStatement.cpp (execute paths) |
+| OC-3 | `SQL_ATTR_CONNECTION_TIMEOUT` not supported — `SQLGetConnectAttr` / `SQLSetConnectAttr` do not handle this attribute (falls through to HYC00); only `SQL_ATTR_LOGIN_TIMEOUT` is implemented | odbc-crusher `test_connection_timeout` | ❌ OPEN | OdbcConnection.cpp (sqlGetConnectAttr, sqlSetConnectAttr) |
+| OC-4 | `SQL_ATTR_ASYNC_ENABLE` accepted at connection level but non-functional — value stored but never used; statement-level getter always returns `SQL_ASYNC_ENABLE_OFF` regardless | odbc-crusher `test_async_capability` | ❌ OPEN (Low Priority) | OdbcConnection.cpp, OdbcStatement.cpp |
+| OC-5 | `SQLGetInfo(SQL_DRIVER_NAME)` truncation: when a buffer too small for the DLL filename is provided, the `pcbInfoValue` returned by the driver through the DM chain may not correctly reflect the full required length — DM/driver interaction needs investigation | odbc-crusher `test_truncation_indicators` | ❌ OPEN (needs investigation) | OdbcConnection.cpp (returnStringInfo), Main.cpp (DM interaction) |
+
+### 1.6 Test Infrastructure Issues
 
 | # | Issue | Source | Status | File(s) |
 |---|-------|--------|--------|---------|
@@ -389,6 +399,23 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 
 **Deliverable**: 8 new test files; 110 new test cases covering all Tier 1 and Tier 2 psqlodbc areas; 270 total tests passing.
 
+### Phase 7: ODBC Crusher-Identified Bugs (February 8, 2026)
+**Priority**: Medium  
+**Duration**: 1–2 weeks  
+**Goal**: Fix the 5 genuine issues identified by ODBC Crusher v0.3.1 source-level analysis
+
+| Task | Issues Addressed | Effort | Status |
+|------|-----------------|--------|--------|
+| 7.1 Fix `SQLCopyDesc` crash when source descriptor has no bound records (null `records` pointer dereference in `operator=`) | OC-1 | 0.5 day | ❌ OPEN |
+| 7.2 Populate `sqlDiagRowCount` field after `SQLExecDirect`/`SQLExecute` so `SQLGetDiagField(SQL_DIAG_ROW_COUNT)` returns the actual affected row count | OC-2 | 1 day | ❌ OPEN |
+| 7.3 Implement `SQL_ATTR_CONNECTION_TIMEOUT` in `sqlGetConnectAttr`/`sqlSetConnectAttr` (map to Firebird connection timeout) | OC-3 | 0.5 day | ❌ OPEN |
+| 7.4 Either properly implement `SQL_ATTR_ASYNC_ENABLE` or reject it with `HYC00` instead of silently accepting | OC-4 | 0.5 day | ❌ OPEN |
+| 7.5 Investigate `SQLGetInfo` truncation indicator behavior through the DM — verify `pcbInfoValue` reports full length when truncated | OC-5 | 1 day | ❌ OPEN |
+
+**Note**: These 5 bugs were identified through source-level analysis of ODBC Crusher v0.3.1. Out of 27 non-passing tests, 22 were caused by test design issues (hardcoded `CUSTOMERS`/`USERS` tables that don't exist in the Firebird database). See `ODBC_CRUSHER_RECOMMENDATIONS.md` for details on what the odbc-crusher developers should fix.
+
+**Deliverable**: All 5 genuine bugs fixed; descriptor crash eliminated; diagnostic row count functional.
+
 ---
 
 ## 5. Implementation Guidelines
@@ -604,5 +631,5 @@ Quick reference for which files need changes in each phase.
 
 ---
 
-*Document version: 2.0 — February 7, 2026*  
+*Document version: 2.1 — February 8, 2026*  
 *This is the single authoritative reference for all Firebird ODBC driver improvements.*
