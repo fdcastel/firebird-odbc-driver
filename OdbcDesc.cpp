@@ -883,8 +883,28 @@ SQLRETURN OdbcDesc::sqlSetDescField(int recNumber, int fieldId, SQLPOINTER value
 			case odtApplicationRow:
 			case odtApplicationParameter:
 			case odtImplementationParameter:
-#pragma FB_COMPILER_MESSAGE("If modify value realized ReAlloc FIXME!")
-				headCount = (SQLSMALLINT)(intptr_t)value;
+				{
+					SQLSMALLINT newCount = (SQLSMALLINT)(intptr_t)value;
+					if ( newCount < 0 )
+						return sqlReturn (SQL_ERROR, "07009", "Invalid descriptor index");
+					if ( newCount > headCount )
+					{
+						// Allocate records array up to the new count
+						getDescRecord(newCount);
+					}
+					else if ( newCount < headCount && records )
+					{
+						// Free excess records (per ODBC spec: setting COUNT to a
+						// smaller value releases higher-numbered bindings)
+						for ( int n = newCount + 1; n < recordSlots; ++n )
+							if ( records[n] )
+							{
+								delete records[n];
+								records[n] = NULL;
+							}
+					}
+					headCount = newCount;
+				}
 				break;
 			default:
 				return sqlReturn (SQL_ERROR, "HY091", "Invalid descriptor field identifier");

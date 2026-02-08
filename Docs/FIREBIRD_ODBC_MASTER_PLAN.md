@@ -209,7 +209,7 @@ The ODBC API is a C boundary where applications can pass any value — NULL poin
 
 ### 3.5 Testing Was an Afterthought
 
-The test suite was created recently (2026) after significant bugs were found. psqlodbc has maintained a regression test suite for decades. **UPDATE (Feb 8, 2026):** A comprehensive Google Test suite now exists with 288 tests across 29 test suites covering null handles, connections, cursors (including scrollable), descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape sequence passthrough, server version detection, batch parameters, **array binding (column-wise + row-wise, with NULL values, operation ptr, 1000-row stress, UPDATE/DELETE, multi-type)**, ConnSettings, scrollable cursor fetch orientations, connection options, error handling, result conversions, parameter conversions, prepared statements, cursor-commit behavior, and data-at-execution. Tests run on both Windows and Linux via CI.
+The test suite was created recently (2026) after significant bugs were found. psqlodbc has maintained a regression test suite for decades. **UPDATE (Feb 8, 2026):** A comprehensive Google Test suite now exists with 292 tests across 29 test suites covering null handles, connections, cursors (including scrollable), descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape sequence passthrough, server version detection, batch parameters, **array binding (column-wise + row-wise, with NULL values, operation ptr, 1000-row stress, UPDATE/DELETE, multi-type)**, ConnSettings, scrollable cursor fetch orientations, connection options, error handling, result conversions, parameter conversions, prepared statements, cursor-commit behavior, and data-at-execution. Tests run on both Windows and Linux via CI.
 
 ### 3.6 No Entry-Point Discipline
 
@@ -411,10 +411,11 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 | ✅ 7.3 Implement `SQL_ATTR_CONNECTION_TIMEOUT` in `sqlGetConnectAttr`/`sqlSetConnectAttr` (map to Firebird connection timeout) | OC-3 | 0.5 day | Completed Feb 8, 2026: Added `SQL_ATTR_CONNECTION_TIMEOUT` to both getter and setter; also fixed `SQL_LOGIN_TIMEOUT` getter which was falling through to HYC00; 3 tests |
 | ✅ 7.4 Either properly implement `SQL_ATTR_ASYNC_ENABLE` or reject it with `HYC00` instead of silently accepting | OC-4 | 0.5 day | Completed Feb 8, 2026: Connection-level and statement-level setters now reject `SQL_ASYNC_ENABLE_ON` with HYC00; getters return `SQL_ASYNC_ENABLE_OFF`; 5 tests |
 | ✅ 7.5 Investigate `SQLGetInfo` truncation indicator behavior through the DM — verify `pcbInfoValue` reports full length when truncated | OC-5 | 1 day | Completed Feb 8, 2026: Fixed `returnStringInfo()` to preserve full string length on truncation instead of overwriting with buffer size; added NULL guard to SQLINTEGER* overload; 3 tests |
+| ✅ 7.6 Fix `SQLSetDescField(SQL_DESC_COUNT)` to allocate `records` array (FIXME acknowledged in source) | OC-1 (Root Cause 1) | 0.5 day | Completed Feb 8, 2026: `getDescRecord(newCount)` now called when count increases; excess records freed when count decreases; negative count rejected; removed the `#pragma FIXME`; 4 tests |
 
-**Note**: These 5 bugs were identified through source-level analysis of ODBC Crusher v0.3.1. Out of 27 non-passing tests, 22 were caused by test design issues (hardcoded `CUSTOMERS`/`USERS` tables that don't exist in the Firebird database). See `ODBC_CRUSHER_RECOMMENDATIONS.md` for details on what the odbc-crusher developers should fix.
+**Note**: These 6 fixes address all issues identified through ODBC Crusher v0.3.1 analysis and its `FIREBIRD_ODBC_RECOMMENDATIONS.md` report. Out of 27 non-passing tests, 22 were caused by test design issues (hardcoded `CUSTOMERS`/`USERS` tables that don't exist in the Firebird database). See `ODBC_CRUSHER_RECOMMENDATIONS.md` for details on what the odbc-crusher developers should fix.
 
-**Deliverable**: All 5 genuine bugs fixed; descriptor crash eliminated; diagnostic row count functional. 18 new tests added (288 total).
+**Deliverable**: All 6 genuine bugs fixed; descriptor crash eliminated; diagnostic row count functional. 22 new tests added (292 total).
 
 ---
 

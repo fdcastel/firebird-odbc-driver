@@ -106,6 +106,102 @@ TEST_F(CopyDescCrashTest, CopyPopulatedThenEmpty) {
     SQLFreeHandle(SQL_HANDLE_DESC, hExplicit);
 }
 
+// OC-1 Root Cause 1: SQLSetDescField(SQL_DESC_COUNT) must allocate records
+TEST_F(CopyDescCrashTest, SetDescCountAllocatesRecords) {
+    // Allocate an explicit descriptor
+    SQLHDESC hDesc = SQL_NULL_HDESC;
+    SQLRETURN ret = SQLAllocHandle(SQL_HANDLE_DESC, hDbc, &hDesc);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    // Set SQL_DESC_COUNT to 3 — this should allocate the records array
+    ret = SQLSetDescField(hDesc, 0, SQL_DESC_COUNT, (SQLPOINTER)3, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret))
+        << "SQLSetDescField(SQL_DESC_COUNT, 3) failed: "
+        << GetOdbcError(SQL_HANDLE_DESC, hDesc);
+
+    // Verify the count is 3
+    SQLSMALLINT count = 0;
+    ret = SQLGetDescField(hDesc, 0, SQL_DESC_COUNT, &count, 0, NULL);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    EXPECT_EQ(count, 3);
+
+    // Now set a field on record 2 — this must NOT crash
+    // (Previously, records array wasn't allocated, so this would dereference NULL)
+    ret = SQLSetDescField(hDesc, 2, SQL_DESC_TYPE, (SQLPOINTER)SQL_C_SLONG, 0);
+    EXPECT_TRUE(SQL_SUCCEEDED(ret))
+        << "SQLSetDescField on record 2 after setting COUNT failed: "
+        << GetOdbcError(SQL_HANDLE_DESC, hDesc);
+
+    SQLFreeHandle(SQL_HANDLE_DESC, hDesc);
+}
+
+TEST_F(CopyDescCrashTest, SetDescCountThenCopyDesc) {
+    // This is the exact odbc-crusher scenario: set SQL_DESC_COUNT then SQLCopyDesc
+    SQLHDESC hSrc = SQL_NULL_HDESC;
+    SQLHDESC hDst = SQL_NULL_HDESC;
+    SQLAllocHandle(SQL_HANDLE_DESC, hDbc, &hSrc);
+    SQLAllocHandle(SQL_HANDLE_DESC, hDbc, &hDst);
+
+    // Set count on source without binding any columns
+    SQLRETURN ret = SQLSetDescField(hSrc, 0, SQL_DESC_COUNT, (SQLPOINTER)5, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    // Copy source to destination — must not crash
+    ret = SQLCopyDesc(hSrc, hDst);
+    EXPECT_TRUE(SQL_SUCCEEDED(ret))
+        << "SQLCopyDesc after SQLSetDescField(COUNT) failed: "
+        << GetOdbcError(SQL_HANDLE_DESC, hDst);
+
+    // Verify destination has count = 5
+    SQLSMALLINT count = 0;
+    ret = SQLGetDescField(hDst, 0, SQL_DESC_COUNT, &count, 0, NULL);
+    EXPECT_TRUE(SQL_SUCCEEDED(ret));
+    EXPECT_EQ(count, 5);
+
+    SQLFreeHandle(SQL_HANDLE_DESC, hSrc);
+    SQLFreeHandle(SQL_HANDLE_DESC, hDst);
+}
+
+TEST_F(CopyDescCrashTest, SetDescCountReduceFreesRecords) {
+    // Allocate explicit descriptor and set up 3 records
+    SQLHDESC hDesc = SQL_NULL_HDESC;
+    SQLAllocHandle(SQL_HANDLE_DESC, hDbc, &hDesc);
+
+    SQLSetDescField(hDesc, 0, SQL_DESC_COUNT, (SQLPOINTER)3, 0);
+
+    // Set type on record 3 to verify it exists
+    SQLRETURN ret = SQLSetDescField(hDesc, 3, SQL_DESC_TYPE, (SQLPOINTER)SQL_C_CHAR, 0);
+    EXPECT_TRUE(SQL_SUCCEEDED(ret));
+
+    // Reduce count to 1 — records 2 and 3 should be freed
+    ret = SQLSetDescField(hDesc, 0, SQL_DESC_COUNT, (SQLPOINTER)1, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    SQLSMALLINT count = 0;
+    SQLGetDescField(hDesc, 0, SQL_DESC_COUNT, &count, 0, NULL);
+    EXPECT_EQ(count, 1);
+
+    SQLFreeHandle(SQL_HANDLE_DESC, hDesc);
+}
+
+TEST_F(CopyDescCrashTest, SetDescCountToZeroUnbindsAll) {
+    // Allocate explicit descriptor and set up records
+    SQLHDESC hDesc = SQL_NULL_HDESC;
+    SQLAllocHandle(SQL_HANDLE_DESC, hDbc, &hDesc);
+
+    SQLSetDescField(hDesc, 0, SQL_DESC_COUNT, (SQLPOINTER)2, 0);
+
+    // Set count to 0 — should unbind all
+    SQLRETURN ret = SQLSetDescField(hDesc, 0, SQL_DESC_COUNT, (SQLPOINTER)0, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    SQLSMALLINT count = 99;
+    SQLGetDescField(hDesc, 0, SQL_DESC_COUNT, &count, 0, NULL);
+    EXPECT_EQ(count, 0);
+
+    SQLFreeHandle(SQL_HANDLE_DESC, hDesc);
+}
+
 // ===== OC-2: SQL_DIAG_ROW_COUNT =====
 class DiagRowCountTest : public OdbcConnectedTest {};
 
