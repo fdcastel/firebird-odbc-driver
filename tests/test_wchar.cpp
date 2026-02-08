@@ -92,11 +92,11 @@ TEST_F(WCharTest, BindColAsWChar) {
     EXPECT_GT(ind, 0);
 
     // Verify by checking first characters (ASCII range)
-    EXPECT_EQ(wbuf[0], L'T');
-    EXPECT_EQ(wbuf[1], L'e');
-    EXPECT_EQ(wbuf[2], L's');
-    EXPECT_EQ(wbuf[3], L't');
-    EXPECT_EQ(wbuf[4], L'\0');
+    EXPECT_EQ(wbuf[0], (SQLWCHAR)'T');
+    EXPECT_EQ(wbuf[1], (SQLWCHAR)'e');
+    EXPECT_EQ(wbuf[2], (SQLWCHAR)'s');
+    EXPECT_EQ(wbuf[3], (SQLWCHAR)'t');
+    EXPECT_EQ(wbuf[4], (SQLWCHAR)'\0');
 }
 
 // --- Bind parameter as SQL_C_WCHAR ---
@@ -112,8 +112,8 @@ TEST_F(WCharTest, BindParameterAsWChar) {
                           0, 0, &id, 0, &idInd);
     ASSERT_TRUE(SQL_SUCCEEDED(rc));
 
-    // Bind a wide string parameter
-    SQLWCHAR wtxt[] = L"WideParam";
+    // Bind a wide string parameter (portable: SQLWCHAR may differ from wchar_t on Linux)
+    SQLWCHAR wtxt[] = {'W', 'i', 'd', 'e', 'P', 'a', 'r', 'a', 'm', 0};
     SQLLEN wtxtInd = SQL_NTS;
     rc = SQLBindParameter(hStmt, 2, SQL_PARAM_INPUT, SQL_C_WCHAR, SQL_VARCHAR,
                           200, 0, wtxt, 0, &wtxtInd);
@@ -178,10 +178,10 @@ TEST_F(WCharTest, ReadSameColumnAsCharAndWChar) {
     rc = SQLGetData(hStmt, 1, SQL_C_WCHAR, wbuf, sizeof(wbuf), &wind);
     ASSERT_TRUE(SQL_SUCCEEDED(rc));
     EXPECT_GT(wind, 0);
-    EXPECT_EQ(wbuf[0], L'd');
-    EXPECT_EQ(wbuf[1], L'u');
-    EXPECT_EQ(wbuf[2], L'a');
-    EXPECT_EQ(wbuf[3], L'l');
+    EXPECT_EQ(wbuf[0], (SQLWCHAR)'d');
+    EXPECT_EQ(wbuf[1], (SQLWCHAR)'u');
+    EXPECT_EQ(wbuf[2], (SQLWCHAR)'a');
+    EXPECT_EQ(wbuf[3], (SQLWCHAR)'l');
 }
 
 // --- Truncation indicator for SQL_C_WCHAR ---
@@ -248,9 +248,9 @@ TEST_F(WCharTest, EmptyStringWChar) {
     SQLLEN ind = 0;
     rc = SQLGetData(hStmt, 1, SQL_C_WCHAR, wbuf, sizeof(wbuf), &ind);
     ASSERT_TRUE(SQL_SUCCEEDED(rc));
-    // Empty string: ind == 0 and wbuf[0] == L'\0'
+    // Empty string: ind == 0 and wbuf[0] == 0
     EXPECT_EQ(ind, 0);
-    EXPECT_EQ(wbuf[0], L'\0');
+    EXPECT_EQ(wbuf[0], (SQLWCHAR)'\0');
 }
 
 // --- NULL handling for WCHAR ---
