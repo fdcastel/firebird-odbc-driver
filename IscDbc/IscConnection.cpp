@@ -62,15 +62,12 @@
 #include "ParametersEvents.h"
 #include "Attachment.h"
 #include "Mlist.h"
-#include "SupportFunctions.h"
 #include "../SetupAttributes.h"
 #include "MultibyteConvert.h"
 
 using namespace Firebird;
 
 namespace IscDbcLibrary {
-
-extern SupportFunctions supportFn;
 
 extern char charTable [];
 
@@ -1294,8 +1291,6 @@ int IscConnection::getNativeSql (const char * inStatementText, int textLength1,
 	char * ptIn = (char*)inStatementText;
 	char * ptInEnd = ptIn + textLength1;
 	char * ptOut = outStatementText;
-	char * ptEndBracket = NULL;
-	int ignoreBracket = 0;
 	int statusQuote = 0;
 	int statusBracket = 0;
 	char quote;
@@ -1332,8 +1327,6 @@ int IscConnection::getNativeSql (const char * inStatementText, int textLength1,
 				quote = *ptIn;
 				statusQuote ^= 1;
 			}
-			else if ( *ptIn == '{' )
-				ptEndBracket = ptOut;
 			else if ( autoQuoted && IS_IDENT ( *ptIn ) )
 			{
 				bool mixed = false;
@@ -1439,7 +1432,6 @@ int IscConnection::getNativeSql (const char * inStatementText, int textLength1,
 
 	*ptOut = '\0';
 
-	if ( !ptEndBracket )
 	{
 		if ( textLength2Ptr )
 			*textLength2Ptr = ptOut - outStatementText;
@@ -1521,292 +1513,9 @@ int IscConnection::getNativeSql (const char * inStatementText, int textLength1,
 			}
 		}
 	}
-	else
-	{
-		while ( ptEndBracket )
-		{
-			ptIn = ptEndBracket;
-
-			ptIn++; // '{'
-			SKIP_WHITE ( ptIn );
-
-//	On a note		++ignoreBracket; // ignored { }
-			if ( *ptIn == '?' || IS_MATCH( ptIn, "CALL" ) )
-			{	
-				if ( *ptIn == '?' )
-				{
-					ptIn++;
-					SKIP_WHITE ( ptIn );
-
-					if(*ptIn != '=')
-						return statysModify;
-
-					ptIn++; // '='
-					SKIP_WHITE ( ptIn );
-				}
-
-				if ( !IS_MATCH( ptIn, "CALL" ) )
-					return statysModify;
-
-				ptIn += 4; // 'call'
-				SKIP_WHITE ( ptIn );
-
-				ptOut = ptEndBracket;
-				int ignoreBr = ignoreBracket;
-				char * savePtOut;
-
-				const int lenSpase = 18;
-				int offset = lenSpase - ( ptIn - ptOut );
-
-				memmove(ptOut + offset, ptOut, strlen(ptOut) + 1 );
-				memset(ptOut, ' ', lenSpase);
-				savePtOut = ptOut;
-				ptIn += offset; 
-				ptOut += lenSpase;
-
-				char procedureName[256];
-				char * end = procedureName;
-				bool repeatWhile;
-				char quote = 0;
-
-				do
-				{
-					repeatWhile = false;
-
-					SKIP_WHITE ( ptIn );
-
-					end = procedureName;
-					char *ptTmp = ptIn;
-
-					if ( autoRemoveSchemaFromIdentifier )
-					{
-						if ( IS_QUOTE( *ptIn ) )
-							quote = *ptIn++;
-
-						while ( !(IS_END_TOKEN(*ptIn)) )
-						{
-							if ( IS_POINT( *ptIn ) )
-								break;
-
-							if ( quote )
-							{
-								if ( quote == *ptIn )
-									break;
-	
-								*end++ = *ptIn++;
-							}
-							else
-								*end++ = UPPER(*ptIn), ++ptIn;
-						}
-
-						if ( quote && quote == *ptIn )
-						{
-							++ptIn;
-							if ( IS_POINT( *ptIn ) )
-								quote = 0;
-						}
-
-						SKIP_WHITE ( ptIn );
-
-						if ( IS_POINT( *ptIn ) )
-						{
-							++ptIn;
-							memmove( quote ? ptTmp + 1 : ptTmp, ptIn, strlen( ptIn ) + 1 );
-							ptIn = ptTmp;
-							repeatWhile = true;
-						}
-					}
-					else if ( IS_QUOTE( *ptIn ) )
-					{
-						quote = *ptIn++;
-
-						while ( !(IS_END_TOKEN(*ptIn)) )
-							*end++ = *ptIn++;
-
-						end--;
-
-						if ( !IS_QUOTE(*end) || quote != *end )
-							return statysModify;
-
-						quote = 0;
-					}
-					else
-						while ( !(IS_END_TOKEN(*ptIn)) )
-							*end++ = UPPER(*ptIn), ++ptIn;
-
-				} while ( repeatWhile );
-				
-				*end = '\0';
-
-				int numIn, numOut;
-				bool canSelect;
-
-				if ( !getCountInputParamFromProcedure ( procedureName, numIn, numOut, canSelect ) )
-				{
-					JString text;
-					text.Format( "Unknown procedure '%s'", procedureName );
-					throw SQLEXCEPTION( SYNTAX_ERROR, text );
-				}
-
-				int ret = buildParamProcedure ( ptIn, numIn );
-
-				if ( ret == -1 )
-					return statysModify;
-				else if ( canSelect )
-					memcpy(savePtOut, "select * from ", 14);
-				else
-					memcpy(savePtOut, "execute procedure ", 18);
-
-				ptOut = ptIn;
-
-				statusQuote = 0;
-				quote = 0;
-
-				do
-				{
-					while( *ptIn )
-					{
-						if ( !statusQuote )
-						{
-							if ( IS_QUOTE( *ptIn ) )
-							{
-								quote = *ptIn;
-								statusQuote ^= 1;
-							}
-							else if ( *ptIn == '}' )
-								break;
-						}
-						else if ( quote == *ptIn )
-						{
-							quote = 0;
-							statusQuote ^= 1;
-						}
-
-						*ptOut++ = *ptIn++;
-					}
-
-					if( ignoreBr )
-						*ptOut++ = *ptIn++;
-
-				}while ( ignoreBr-- );
-
-				if(*ptIn != '}')
-					return statysModify;
-
-				ptIn++; // '}'
-
-				while( *ptIn )
-					*ptOut++ = *ptIn++;
-
-				*ptOut = '\0';
-				statysModify = ret == 1 ? 2 : 1;
-			}
-			else
-			{
-				ptOut = ptEndBracket;
-
-				// Check 'oj' or 'OJ'
-				if ( *(short*)ptIn == 0x6a6f || *(short*)ptIn == 0x4a4f )
-					ptIn += 2; // 'oj'
-				else if ( IS_MATCH( ptOut, "INTERVAL" ) )
-					ptIn += 8; // 'INTERVAL'
-				else if ( !strncasecmp ( ptOut, "{TS", 3 ) )
-					ptIn += 2; // 'ts'
-				else if ( !strncasecmp ( ptOut, "{D", 2 ) || !strncasecmp ( ptOut, "{T", 2 ) )
-					ptIn += 1; // 'd', 't'
-				else if (!strncasecmp(ptIn, "ESCAPE", 6))
-				{
-					//nothing to do
-				}
-				else
-				{
-					ptIn += 2; // 'fn'
-//
-// select "FIRST_NAME" from "EMPLOYEE" where { fn UCASE("FIRST_NAME") } = { fn UCASE('robert') }
-// to
-// select "FIRST_NAME" from "EMPLOYEE" where UPPER("FIRST_NAME") = UPPER('robert')
-//
-// ATTENTION! ptIn and ptOut pointer of outStatementText
-					supportFn.translateNativeFunction ( ptIn, ptOut );
-				}
-
-				int ignoreBr = ignoreBracket;
-				statusQuote = 0;
-				quote = 0;
-
-				do
-				{
-					while( *ptIn )
-					{
-						if ( !statusQuote )
-						{
-							if ( IS_QUOTE( *ptIn ) )
-							{
-								quote = *ptIn;
-								statusQuote ^= 1;
-							}
-							else if ( *ptIn == '}' )
-								break;
-						}
-						else if ( quote == *ptIn )
-						{
-							quote = 0;
-							statusQuote ^= 1;
-						}
-
-						*ptOut++ = *ptIn++;
-					}
-
-					if( ignoreBr )
-						*ptOut++ = *ptIn++;
-
-				}while ( ignoreBr-- );
-
-				if(*ptIn != '}')
-					return statysModify;
-
-				ptIn++; // '}'
-
-				while( *ptIn )
-					*ptOut++ = *ptIn++;
-
-				*ptOut = '\0';
-				statysModify = 1;
-			}
-
-			--ptEndBracket; // '{'
-
-			statusQuote = 0;
-			quote = 0;
-
-			while ( ptEndBracket > outStatementText )
-			{
-				if ( !statusQuote )
-				{
-					if ( IS_QUOTE( *ptEndBracket ) )
-					{
-						quote = *ptEndBracket;
-						statusQuote ^= 1;
-					}
-					else if ( *ptEndBracket == '{' )
-						break;
-				}
-				else if ( quote == *ptEndBracket )
-				{
-					quote = 0;
-					statusQuote ^= 1;
-				}
-
-				--ptEndBracket;
-			}
-
-			if(*ptEndBracket != '{')
-				ptEndBracket = NULL;
-		}
-
-		if ( textLength2Ptr )
-			*textLength2Ptr = ptOut - outStatementText;
-	}
+	// ODBC escape sequences ({fn ...}, {d ...}, {ts ...}, {oj ...}, {CALL ...})
+	// are NOT processed. SQL is sent to Firebird as-is for maximum performance
+	// and transparency. Applications should use native Firebird SQL syntax.
 
 	return statysModify;
 }

@@ -47,7 +47,6 @@ set(ISCDBC_SOURCES
     SQLError.cpp
     SqlTime.cpp
     Stream.cpp
-    SupportFunctions.cpp
     TimeStamp.cpp
     TypesResultSet.cpp
     Value.cpp
@@ -111,7 +110,6 @@ set(ISCDBC_HEADERS
     SQLException.h
     SqlTime.h
     Stream.h
-    SupportFunctions.h
     TimeStamp.h
     Types.h
     TypesResultSet.h
