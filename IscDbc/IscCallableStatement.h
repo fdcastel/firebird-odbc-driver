@@ -39,7 +39,7 @@
 
 namespace IscDbcLibrary {
 
-class IscCallableStatement : public IscPreparedStatement, public CallableStatement  
+class IscCallableStatement final : public IscPreparedStatement, public CallableStatement  
 {
 public:
 //{{{ specification jdbc

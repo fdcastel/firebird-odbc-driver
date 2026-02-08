@@ -1719,10 +1719,10 @@ int IscConnection::getInfoItem(char * buffer, int infoItem, int defaultValue)
 	for (char *p = buffer; *p != isc_info_end;)
 		{
 		char item = *p++;
-		int length = GDS->_vax_integer (p, 2);
+		int length = fb_vax_integer(p, 2);
 		p += 2;
 		if (item == infoItem)
-			return GDS->_vax_integer (p, length);
+			return fb_vax_integer(p, length);
 		p += length;
 		}
 
@@ -1734,7 +1734,7 @@ JString IscConnection::getInfoString(char * buffer, int infoItem, const char * d
 	for (char *p = buffer; *p != isc_info_end;)
 		{
 		char item = *p++;
-		int length = GDS->_vax_integer (p, 2);
+		int length = fb_vax_integer(p, 2);
 		p += 2;
 		if (item == infoItem)
 			return JString (p, length);

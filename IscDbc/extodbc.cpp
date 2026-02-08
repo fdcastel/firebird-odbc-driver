@@ -167,7 +167,7 @@ int getInfoDatabase(IscConnection * connection, const void * info_buffer, int bu
 	for(d = buffer, info = info_buf; *d != isc_info_end;) 
 	{
 		item = *d++;
-		length = GDS->_vax_integer(d, 2);
+		length = fb_vax_integer(d, 2);
 		d += 2;
 		switch (item) 
 		{
@@ -175,26 +175,26 @@ int getInfoDatabase(IscConnection * connection, const void * info_buffer, int bu
 			break;
 
 		case isc_info_page_size:
-			value_out = GDS->_vax_integer(d, length);
+			value_out = fb_vax_integer(d, length);
 			len = sprintf(info, "PAGE_SIZE %ld\n", value_out);
 			break;
 		case isc_info_num_wal_buffers:
 			print_set(set_used,info,len);
-			value_out = GDS->_vax_integer(d, length);
+			value_out = fb_vax_integer(d, length);
 			len = sprintf(info,"NUM_LOG_BUFFERS = %ld", value_out);
 			break;
 		case isc_info_wal_buffer_size:
-			value_out = GDS->_vax_integer(d, length);
+			value_out = fb_vax_integer(d, length);
 			print_set(set_used,info,len);
 			len = sprintf(info,"LOG_BUFFER_SIZE = %ld", value_out);
 			break;
 		case isc_info_wal_grpc_wait_usecs:
-			value_out = GDS->_vax_integer(d, length);
+			value_out = fb_vax_integer(d, length);
 			print_set(set_used,info,len);
 			len = sprintf(info,"GROUP_COMMIT_WAIT_TIME = %ld",value_out);
 			break;
 		case isc_info_wal_ckpt_length:
-			value_out = GDS->_vax_integer(d, length);
+			value_out = fb_vax_integer(d, length);
 			print_set(set_used,info,len);
 			len = sprintf(info,"CHECK_POINT_LENGTH = %ld",value_out);
 			break;

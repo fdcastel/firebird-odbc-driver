@@ -65,9 +65,6 @@ public:
 	~Attachment();
 
 	CFbDll		*GDS;
-	//isc_db_handle databaseHandle;
-	//isc_tr_handle transactionHandle; // for two phase
-
 	Firebird::IAttachment* databaseHandle;
 	Firebird::ITransaction* transactionHandle; // for two phase
 

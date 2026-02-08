@@ -94,3 +94,20 @@ add_custom_command(TARGET firebird_odbc_tests POST_BUILD
         $<TARGET_FILE_DIR:firebird_odbc_tests>
     COMMENT "Copying driver DLL next to test executable"
 )
+
+# Copy gtest/gmock DLLs next to the test executable
+add_custom_command(TARGET firebird_odbc_tests POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:gtest>
+        $<TARGET_FILE_DIR:firebird_odbc_tests>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:gtest_main>
+        $<TARGET_FILE_DIR:firebird_odbc_tests>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:gmock>
+        $<TARGET_FILE_DIR:firebird_odbc_tests>
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:gmock_main>
+        $<TARGET_FILE_DIR:firebird_odbc_tests>
+    COMMENT "Copying gtest/gmock DLLs next to test executable"
+)

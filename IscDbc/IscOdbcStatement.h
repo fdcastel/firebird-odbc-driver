@@ -35,7 +35,7 @@ class IscConnection;
 class IscStatementMetaData;
 class IscOdbcStatement;
 
-class IscOdbcStatement : public IscStatement, public InternalStatement
+class IscOdbcStatement final : public IscStatement, public InternalStatement
 {
 public:
 //{{{ class InternalStatement specification jdbc
@@ -108,8 +108,19 @@ public:
 	virtual void		executeMetaDataQuery();
 	void				getInputParameters();
 
+	// Batch execution (IBatch API, FB4+). Phase 9.1.
+	bool				isBatchSupported() override;
+	void				batchBegin() override;
+	void				batchAdd() override;
+	int					batchExecute(unsigned short* statusOut, int nRows) override;
+	void				batchCancel() override;
+
 	IscStatementMetaData	*statementMetaDataIPD;
 	IscStatementMetaData	*statementMetaDataIRD;
+
+private:
+	Firebird::IBatch*		batch_ = nullptr;
+	int						batchRowCount_ = 0;
 };
 
 }; // end namespace IscDbcLibrary

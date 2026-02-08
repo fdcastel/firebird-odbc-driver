@@ -360,7 +360,7 @@ void Attachment::openDatabase(const char *dbName, Properties *properties)
 		for (auto p = result; p < result + sizeof (result) && *p != isc_info_end && *p != isc_info_truncated;)
 		{
 			char item = *p++;
-			int length = GDS->_vax_integer (p, 2);
+			int length = fb_vax_integer(p, 2);
 			p += 2;
 			switch (item)
 			{
@@ -374,11 +374,11 @@ void Attachment::openDatabase(const char *dbName, Properties *properties)
 				break;
 
 			case isc_info_db_sql_dialect:
-				databaseDialect = GDS->_vax_integer (p, length);
+				databaseDialect = fb_vax_integer(p, length);
 				break;
 			
 			case isc_info_base_level:
-				serverBaseLevel = GDS->_vax_integer (p, length);
+				serverBaseLevel = fb_vax_integer(p, length);
 				break;
 
 			case isc_info_user_names:
@@ -482,7 +482,7 @@ void Attachment::openDatabase(const char *dbName, Properties *properties)
 				break;
 
 			case isc_info_page_size:
-				pageSize = GDS->_vax_integer (p, length);
+				pageSize = fb_vax_integer(p, length);
 				break;
 			}
 			p += length;

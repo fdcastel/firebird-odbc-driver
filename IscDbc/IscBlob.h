@@ -34,7 +34,7 @@ class IscStatement;
 class IscConnection;
 
 
-class IscBlob : public BinaryBlob
+class IscBlob final : public BinaryBlob
 {
 public:
 	void* getSegment (int pos);

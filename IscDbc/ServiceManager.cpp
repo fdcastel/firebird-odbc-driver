@@ -548,7 +548,7 @@ bool CServiceManager::nextQuery( char *outBuffer, int lengthOut, int &lengthReal
 			++countError;
 		}
 
-		ISC_USHORT len = (ISC_USHORT)GDS->_vax_integer( ++p, sizeof ( ISC_USHORT ) );
+		ISC_USHORT len = (ISC_USHORT)fb_vax_integer( ++p, sizeof ( ISC_USHORT ) );
 		p += sizeof ( ISC_USHORT );
 		if ( !len )
 		{
@@ -621,7 +621,7 @@ bool CServiceManager::nextQueryLimboTransactionInfo( char *outBuffer, int length
 		offset = 0;
 		nextQuery = *p == isc_info_svc_limbo_trans;
 
-		ISC_USHORT len = (ISC_USHORT)GDS->_vax_integer( ++p, sizeof ( ISC_USHORT ) );
+		ISC_USHORT len = (ISC_USHORT)fb_vax_integer( ++p, sizeof ( ISC_USHORT ) );
 		p += sizeof ( ISC_USHORT );
 		if ( !len )
 		{
@@ -694,7 +694,7 @@ bool CServiceManager::nextQueryUserInfo( char *outBuffer, int lengthOut, int &le
 		offset = 0;
 		nextQuery = *p == isc_info_svc_get_users;
 
-		ISC_USHORT len = (ISC_USHORT)GDS->_vax_integer( ++p, sizeof ( ISC_USHORT ) );
+		ISC_USHORT len = (ISC_USHORT)fb_vax_integer( ++p, sizeof ( ISC_USHORT ) );
 		p += sizeof ( ISC_USHORT );
 		if ( !len )
 		{
@@ -737,7 +737,7 @@ bool CServiceManager::nextQueryUserInfo( char *outBuffer, int lengthOut, int &le
 
 				out += sizeof ( UserInfo );
 
-				len = (ISC_USHORT)GDS->_vax_integer( p, sizeof ( ISC_USHORT ) );
+				len = (ISC_USHORT)fb_vax_integer( p, sizeof ( ISC_USHORT ) );
 				p += sizeof ( ISC_USHORT );
 				strncpy( out, p, len );
 				p += len;
@@ -748,7 +748,7 @@ bool CServiceManager::nextQueryUserInfo( char *outBuffer, int lengthOut, int &le
 				break;
             
 			case isc_spb_sec_firstname:
-				len = (ISC_USHORT)GDS->_vax_integer( p, sizeof ( ISC_USHORT ) );
+				len = (ISC_USHORT)fb_vax_integer( p, sizeof ( ISC_USHORT ) );
 				p += sizeof ( ISC_USHORT );
 				strncpy( out, p, len );
 				p += len;
@@ -759,7 +759,7 @@ bool CServiceManager::nextQueryUserInfo( char *outBuffer, int lengthOut, int &le
 				break;
             
 			case isc_spb_sec_middlename:
-				len = (ISC_USHORT)GDS->_vax_integer( p, sizeof ( ISC_USHORT ) );
+				len = (ISC_USHORT)fb_vax_integer( p, sizeof ( ISC_USHORT ) );
 				p += sizeof( ISC_USHORT );
 				strncpy( out, p, len );
 				p += len;
@@ -770,7 +770,7 @@ bool CServiceManager::nextQueryUserInfo( char *outBuffer, int lengthOut, int &le
 				break;
             
 			case isc_spb_sec_lastname:
-				len = (ISC_USHORT)GDS->_vax_integer( p, sizeof ( ISC_USHORT ) );
+				len = (ISC_USHORT)fb_vax_integer( p, sizeof ( ISC_USHORT ) );
 				p += sizeof ( ISC_USHORT );
 				strncpy( out, p, len );
 				p += len;
@@ -781,12 +781,12 @@ bool CServiceManager::nextQueryUserInfo( char *outBuffer, int lengthOut, int &le
 				break;
             
 			case isc_spb_sec_groupid:
-				info->groupId = GDS->_vax_integer( p, sizeof ( ISC_ULONG ) );
+				info->groupId = fb_vax_integer( p, sizeof ( ISC_ULONG ) );
 				p += sizeof ( ISC_ULONG );
 				break;
             
 			case isc_spb_sec_userid:
-				info->userId = GDS->_vax_integer( p, sizeof ( ISC_ULONG ) );
+				info->userId = fb_vax_integer( p, sizeof ( ISC_ULONG ) );
 				p += sizeof ( ISC_ULONG );
 				break;
 			}

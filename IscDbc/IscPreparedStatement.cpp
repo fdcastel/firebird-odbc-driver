@@ -155,26 +155,9 @@ void IscPreparedStatement::prepare(const char * sqlString)
 
 void IscPreparedStatement::getInputParameters()
 {
-/*
-	ISC_STATUS statusVector [20];
-
-	int dialect = connection->getDatabaseDialect ();
-	connection->GDS->_dsql_describe_bind (statusVector, &statementHandle, dialect, inputSqlda);
-
-	if (statusVector [1])
-		THROW_ISC_EXCEPTION (connection, statusVector);
-
-	if (inputSqlda.checkOverflow())
-	{
-		connection->GDS->_dsql_describe_bind (statusVector, &statementHandle, dialect, inputSqlda);
-		if (statusVector [1])
-			THROW_ISC_EXCEPTION (connection, statusVector);
-	}
-*/
+	// Phase 9.11: Removed commented-out legacy ISC _dsql_describe_bind code.
+	// Input parameters are now obtained via IStatement::getInputMetadata() in Sqlda.
 	parameters.alloc (inputSqlda.getColumnCount());
-/*
-	inputSqlda.allocBuffer ( this );
-*/
 }
 
 int IscPreparedStatement::getNumParams()

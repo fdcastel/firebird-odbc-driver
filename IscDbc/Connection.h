@@ -870,6 +870,21 @@ public:
 	virtual void		drop() = 0;
 	virtual Statement*	getStatement() = 0;
 	virtual int			objectVersion() = 0;
+
+	// Batch execution (IBatch API, FB4+). Phase 9.1.
+	// Returns true if the server supports batch execution for this statement.
+	virtual bool		isBatchSupported() { return false; }
+	// Begin a new batch. Must be called before batchAdd().
+	virtual void		batchBegin() {}
+	// Add the current input parameter buffer as a row to the batch.
+	virtual void		batchAdd() {}
+	// Execute the batch, returning per-row status. Returns total rows affected.
+	// statusOut: array of SQLUSMALLINT with nRows entries (SQL_PARAM_SUCCESS, SQL_PARAM_ERROR, etc.)
+	// nRows: number of rows in the batch
+	// Returns count of rows affected (sum of individual updates).
+	virtual int			batchExecute(unsigned short* statusOut, int nRows) { return 0; }
+	// Cancel/release the batch without executing.
+	virtual void		batchCancel() {}
 };
 
 class PropertiesEvents

@@ -63,7 +63,7 @@ class IscDatabaseMetaData;
 class Attachment;
 class IscUserEvents;
 
-class IscConnection : public Connection  
+class IscConnection final : public Connection  
 {
 public:
 	enum TypeTransaction { TRANSACTION_NONE, TRANSACTION_READ_COMMITTED, TRANSACTION_READ_UNCOMMITTED ,

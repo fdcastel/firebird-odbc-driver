@@ -790,14 +790,8 @@ bool IscStatement::executeProcedure()
 
 void IscStatement::clearResults()
 {
-#if 0
-	openCursor = false;
-	typeStmt = stmtNone;
-	closeFbResultSet();
-	freeStatementHandle();
-	inputSqlda.clearSqlda();
-	outputSqlda.clearSqlda();
-#endif
+	// Phase 9.11: Intentionally empty.
+	// Statement cleanup is handled by close()/freeStatementHandle() instead.
 }
 
 int IscStatement::objectVersion()
@@ -828,7 +822,7 @@ int IscStatement::getUpdateCounts()
 	for (char *p = buffer; *p != isc_info_end;)
 	{
 		char item = *p++;
-		int length = GDS->_vax_integer (p, 2);
+		int length = fb_vax_integer(p, 2);
 		p += 2;
 		switch (item)
 		{
@@ -837,20 +831,20 @@ int IscStatement::getUpdateCounts()
 				for (char *q = p; *q != isc_info_end;)
 				{
 					char item = *q++;
-					int l = GDS->_vax_integer (q, 2);
+					int l = fb_vax_integer(q, 2);
 					q += 2;
 					switch (item)
 					{
 					case isc_info_req_insert_count:
-						insertCount = GDS->_vax_integer (q, l);
+						insertCount = fb_vax_integer(q, l);
 						break;
 
 					case isc_info_req_delete_count:
-						deleteCount = GDS->_vax_integer (q, l);
+						deleteCount = fb_vax_integer(q, l);
 						break;
 
 					case isc_info_req_update_count:
-						updateCount = GDS->_vax_integer (q, l);
+						updateCount = fb_vax_integer(q, l);
 						break;
 					}
 					q += l;
@@ -859,7 +853,7 @@ int IscStatement::getUpdateCounts()
 			break;
 
 		case isc_info_sql_stmt_type:
-			statementType = GDS->_vax_integer (p, length);
+			statementType = fb_vax_integer(p, length);
 			break;
 		}
 		p += length;

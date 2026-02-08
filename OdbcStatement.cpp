@@ -131,6 +131,7 @@
 #include <string.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <vector>
 #include "IscDbc/Connection.h"
 #include "IscDbc/SQLException.h"
 #include "OdbcEnv.h"
@@ -2947,74 +2948,220 @@ SQLRETURN OdbcStatement::executeStatementParamArray()
 			statusPtr[i] = SQL_PARAM_UNUSED;
 	}
 
-	while ( rowNumberParamArray < nCountRow )
+	// ============================================================
+	// Phase 9.1: Try IBatch for bulk execution (FB4+ only).
+	// IBatch sends all rows in a single server roundtrip.
+	// Falls back to row-by-row if:
+	//   - Server doesn't support IBatch (pre-FB4)
+	//   - Any parameter uses data-at-exec (blobs/arrays)
+	//   - batchBegin() throws an exception
+	// ============================================================
+	bool useBatch = false;
+	if (statement->isBatchSupported() && nCountRow > 1)
 	{
-		// Check SQL_ATTR_PARAM_OPERATION_PTR — skip rows marked SQL_PARAM_IGNORE
-		if ( operationPtr && operationPtr[rowNumberParamArray] == SQL_PARAM_IGNORE )
+		// Check if any parameter is data-at-exec (blob/array) — not supported in batch mode yet
+		bool hasDataAtExec = false;
+		StatementMetaData *metaData = statement->getStatementMetaDataIPD();
+		int nInputParam = metaData->getColumnCount();
+		for (int n = 1; n <= nInputParam && !hasDataAtExec; ++n)
 		{
-			// Advance offset for row-wise binding even for skipped rows
-			if ( !arrayColumnWiseBinding )
-				bindOffsetPtrTmp += rowSize;
-			++rowNumberParamArray;
-			continue;
+			DescRecord *record = applicationParamDescriptor->getDescRecord(n);
+			if (record && record->data_at_exec)
+				hasDataAtExec = true;
+			// Also check if the param is a blob/array type
+			if (metaData->isBlobOrArray(n))
+				hasDataAtExec = true;
 		}
 
-		// Update processed count (includes current row being processed)
-		++(*rowCountPt);
-
-		if ( arrayColumnWiseBinding )
-			bindOffsetIndColumnWiseBinding = ( bindOffsetPtrTmp + rowNumberParamArray ) * sizeof ( SQLLEN );
-
-		SQLRETURN rowRet = inputParam( arrayColumnWiseBinding );
-		if ( rowRet != SQL_SUCCESS && rowRet != SQL_SUCCESS_WITH_INFO )
+		if (!hasDataAtExec)
 		{
-			// Error reading parameters for this row
-			if ( statusPtr )
-				statusPtr[rowNumberParamArray] = SQL_PARAM_ERROR;
-			hadError = true;
-			// Continue with next row instead of aborting
+			try
+			{
+				statement->batchBegin();
+				useBatch = true;
+			}
+			catch (...)
+			{
+				// Fall back to row-by-row on any error
+				useBatch = false;
+			}
+		}
+	}
+
+	if (useBatch)
+	{
+		// ------- IBatch path: add all rows, then execute once -------
+		// Track which batch index maps to which parameter set index
+		std::vector<int> batchIndexToRow;
+		batchIndexToRow.reserve(nCountRow);
+
+		while ( rowNumberParamArray < nCountRow )
+		{
+			// Check SQL_ATTR_PARAM_OPERATION_PTR — skip rows marked SQL_PARAM_IGNORE
+			if ( operationPtr && operationPtr[rowNumberParamArray] == SQL_PARAM_IGNORE )
+			{
+				if ( !arrayColumnWiseBinding )
+					bindOffsetPtrTmp += rowSize;
+				++rowNumberParamArray;
+				continue;
+			}
+
+			++(*rowCountPt);
+
+			if ( arrayColumnWiseBinding )
+				bindOffsetIndColumnWiseBinding = ( bindOffsetPtrTmp + rowNumberParamArray ) * sizeof ( SQLLEN );
+
+			SQLRETURN rowRet = inputParam( arrayColumnWiseBinding );
+			if ( rowRet != SQL_SUCCESS && rowRet != SQL_SUCCESS_WITH_INFO )
+			{
+				if ( statusPtr )
+					statusPtr[rowNumberParamArray] = SQL_PARAM_ERROR;
+				hadError = true;
+				if ( !arrayColumnWiseBinding )
+					bindOffsetPtrTmp += rowSize;
+				parameterNeedData = 1;
+				++rowNumberParamArray;
+				continue;
+			}
+
+			try
+			{
+				statement->batchAdd();
+				batchIndexToRow.push_back(rowNumberParamArray);
+			}
+			catch ( SQLException &exception )
+			{
+				if ( statusPtr )
+					statusPtr[rowNumberParamArray] = SQL_PARAM_ERROR;
+				hadError = true;
+				postError( "HY000", exception );
+			}
+
 			if ( !arrayColumnWiseBinding )
 				bindOffsetPtrTmp += rowSize;
 			parameterNeedData = 1;
 			++rowNumberParamArray;
-			continue;
+
+			if ( rowRet == SQL_SUCCESS_WITH_INFO && ret == SQL_SUCCESS )
+				ret = SQL_SUCCESS_WITH_INFO;
 		}
 
-		try
+		// Execute the batch — single server roundtrip
+		if (!batchIndexToRow.empty())
 		{
-			statement->executeStatement();
+			try
+			{
+				// Allocate temporary status array for the batch
+				std::vector<SQLUSMALLINT> batchStatus(batchIndexToRow.size(), SQL_PARAM_UNUSED);
+				int totalAffected = statement->batchExecute(batchStatus.data(),
+					static_cast<int>(batchIndexToRow.size()));
 
-			if ( statusPtr )
-				statusPtr[rowNumberParamArray] = (rowRet == SQL_SUCCESS_WITH_INFO)
-					? SQL_PARAM_SUCCESS_WITH_INFO : SQL_PARAM_SUCCESS;
+				// Map batch status back to original parameter set indices
+				for (size_t bi = 0; bi < batchIndexToRow.size(); ++bi)
+				{
+					int origRow = batchIndexToRow[bi];
+					if (statusPtr)
+						statusPtr[origRow] = batchStatus[bi];
+					if (batchStatus[bi] == SQL_PARAM_ERROR)
+						hadError = true;
+				}
+
+				setDiagRowCount(totalAffected);
+			}
+			catch ( SQLException &exception )
+			{
+				// If batch execute fails entirely, mark all rows as error
+				for (size_t bi = 0; bi < batchIndexToRow.size(); ++bi)
+				{
+					int origRow = batchIndexToRow[bi];
+					if (statusPtr)
+						statusPtr[origRow] = SQL_PARAM_ERROR;
+				}
+				hadError = true;
+				postError( "HY000", exception );
+				statement->batchCancel();
+
+				setDiagRowCount(0);
+			}
 		}
-		catch ( SQLException &exception )
+		else
 		{
-			if ( statusPtr )
-				statusPtr[rowNumberParamArray] = SQL_PARAM_ERROR;
-			hadError = true;
-			// Post error with row context but continue processing
-			postError( "HY000", exception );
+			statement->batchCancel();
+			setDiagRowCount(0);
+		}
+	}
+	else
+	{
+		// ------- Row-by-row path (original logic) -------
+		while ( rowNumberParamArray < nCountRow )
+		{
+			// Check SQL_ATTR_PARAM_OPERATION_PTR — skip rows marked SQL_PARAM_IGNORE
+			if ( operationPtr && operationPtr[rowNumberParamArray] == SQL_PARAM_IGNORE )
+			{
+				// Advance offset for row-wise binding even for skipped rows
+				if ( !arrayColumnWiseBinding )
+					bindOffsetPtrTmp += rowSize;
+				++rowNumberParamArray;
+				continue;
+			}
+
+			// Update processed count (includes current row being processed)
+			++(*rowCountPt);
+
+			if ( arrayColumnWiseBinding )
+				bindOffsetIndColumnWiseBinding = ( bindOffsetPtrTmp + rowNumberParamArray ) * sizeof ( SQLLEN );
+
+			SQLRETURN rowRet = inputParam( arrayColumnWiseBinding );
+			if ( rowRet != SQL_SUCCESS && rowRet != SQL_SUCCESS_WITH_INFO )
+			{
+				// Error reading parameters for this row
+				if ( statusPtr )
+					statusPtr[rowNumberParamArray] = SQL_PARAM_ERROR;
+				hadError = true;
+				// Continue with next row instead of aborting
+				if ( !arrayColumnWiseBinding )
+					bindOffsetPtrTmp += rowSize;
+				parameterNeedData = 1;
+				++rowNumberParamArray;
+				continue;
+			}
+
+			try
+			{
+				statement->executeStatement();
+
+				if ( statusPtr )
+					statusPtr[rowNumberParamArray] = (rowRet == SQL_SUCCESS_WITH_INFO)
+						? SQL_PARAM_SUCCESS_WITH_INFO : SQL_PARAM_SUCCESS;
+			}
+			catch ( SQLException &exception )
+			{
+				if ( statusPtr )
+					statusPtr[rowNumberParamArray] = SQL_PARAM_ERROR;
+				hadError = true;
+				// Post error with row context but continue processing
+				postError( "HY000", exception );
+			}
+
+			if ( !arrayColumnWiseBinding )
+				bindOffsetPtrTmp += rowSize;
+			parameterNeedData = 1;
+			++rowNumberParamArray;
+
+			// Accumulate SQL_SUCCESS_WITH_INFO from successful rows
+			if ( rowRet == SQL_SUCCESS_WITH_INFO && ret == SQL_SUCCESS )
+				ret = SQL_SUCCESS_WITH_INFO;
 		}
 
-		if ( !arrayColumnWiseBinding )
-			bindOffsetPtrTmp += rowSize;
-		parameterNeedData = 1;
-		++rowNumberParamArray;
+		if ( statement->getMoreResults() )
+			setResultSet (statement->getResultSet(), false);
 
-		// Accumulate SQL_SUCCESS_WITH_INFO from successful rows
-		if ( rowRet == SQL_SUCCESS_WITH_INFO && ret == SQL_SUCCESS )
-			ret = SQL_SUCCESS_WITH_INFO;
+		// Populate SQL_DIAG_ROW_COUNT with total rows affected across all parameter sets
+		setDiagRowCount(statement->getUpdateCount());
 	}
 
 	headBindOffsetPtr = bindOffsetPtrSave;
 	convert->setBindOffsetPtrFrom ( applicationParamDescriptor->headBindOffsetPtr, applicationParamDescriptor->headBindOffsetPtr );
-
-	if ( statement->getMoreResults() )
-		setResultSet (statement->getResultSet(), false);
-
-	// Populate SQL_DIAG_ROW_COUNT with total rows affected across all parameter sets
-	setDiagRowCount(statement->getUpdateCount());
 
 	if ( hadError )
 		return SQL_SUCCESS_WITH_INFO;

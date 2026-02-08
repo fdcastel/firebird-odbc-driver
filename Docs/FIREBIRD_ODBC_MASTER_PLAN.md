@@ -1,10 +1,10 @@
 # Firebird ODBC Driver — Master Plan
 
-**Date**: February 7, 2026  
+**Date**: February 8, 2026  
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
 **Last Updated**: February 8, 2026  
-**Version**: 2.3
+**Version**: 2.4
 
 > This document consolidates all known issues and newly identified architectural deficiencies.
 > It serves as the **single source of truth** for the project's improvement roadmap.
@@ -472,28 +472,28 @@ However, several significant opportunities remain:
 | Result Set | `IResultSet` | ✅ Complete | None |
 | Blob | `IBlob` | ✅ Complete | None |
 | Metadata | `IMessageMetadata`, `IMetadataBuilder` | ✅ Complete | Optimize rebuild/copy overhead |
-| Batch | ❌ Not used | ❌ Row-by-row loop | Implement `IBatch` |
+| Batch | `IBatch` | ✅ Complete (FB4+) | Falls back to row-by-row for FB3 |
 | Events | ❌ Legacy ISC API | ❌ Uses `isc_que_events` | Migrate to `IAttachment::queEvents()` |
 | Arrays | ❌ Legacy ISC API | ❌ Uses `isc_array_*` | Blocked — no OO API equivalent |
 | Error handling | Mixed OO + ISC | ⚠️ Dual paths | Unify to OO-only |
 | Date/Time utils | Manual math | ⚠️ Works but redundant | Replace with `IUtil` |
-| LoadFbClientDll | ~50 function ptrs | ⚠️ ~35 dead | Remove dead pointers |
+| LoadFbClientDll | ~5 function ptrs | ✅ Reduced from ~50 | Array functions + bridge only |
 
 #### Tasks
 
 | Task | Description | Complexity | Benefit | Status |
 |------|-------------|------------|---------|--------|
-| **9.1** | **Implement `IBatch` for array parameter execution (PARAMSET_SIZE > 1)** — Replace the row-by-row loop in `executeStatementParamArray()` with `IBatch::add()` + `IBatch::execute()` for non-BLOB statements. Map `IBatchCompletionState` to ODBC's `SQL_PARAM_STATUS_PTR`. Feature-gate on Firebird 4.0+ (fall back to loop for FB3). This is the **single biggest performance win**: N rows in 1 roundtrip instead of N roundtrips. | Hard | **Very High** | ❌ OPEN |
+| **9.1** | **Implement `IBatch` for array parameter execution (PARAMSET_SIZE > 1)** — Replaced the row-by-row loop in `executeStatementParamArray()` with `IBatch::add()` + `IBatch::execute()` for non-BLOB/non-data-at-exec statements. Maps `IBatchCompletionState` to ODBC's `SQL_PARAM_STATUS_PTR`. Feature-gated on Firebird 4.0+ (falls back to row-by-row for older servers). Batch is lazily created on first `batchAdd()` after ODBC conversion functions have applied type overrides. Buffer assembly handles `SQL_TEXT`→`SQL_VARYING` re-conversion and `setSqlData()` pointer redirection. Single server roundtrip for N rows. 17 array binding + 4 batch param tests all pass. | Hard | **Very High** | ✅ RESOLVED |
 | **9.2** | **Extend `IBatch` for inline BLOBs** — After 9.1, support `IBatch::addBlob()`/`addBlobStream()` for statements with BLOB parameters, avoiding per-row `createBlob()` overhead. | Hard | High | ❌ OPEN |
-| **9.3** | **Remove ~35 dead ISC function pointers from `CFbDll`** — Remove loaded-but-never-called function pointers: all `_dsql_*`, `_attach_database`, `_detach_database`, `_start_*`, `_commit_*`, `_rollback_*`, `_create_blob*`, `_open_blob*`, `_get_segment`, `_put_segment`, `_close_blob`, `_cancel_blob`, `_blob_info`, `_decode_sql_*`, `_encode_sql_*`, `_service_*`, `_prepare_transaction*`, `_interpet`, etc. Keep only: `_array_*` (3), `_get_database_handle`, `_get_transaction_handle`, `_vax_integer`, `_sqlcode`, `fb_get_master_interface`. | Easy | Medium | ❌ OPEN |
+| **9.3** | **Remove ~35 dead ISC function pointers from `CFbDll`** — Removed all loaded-but-never-called function pointers. Kept only: `_array_*` (3 for array support), `_get_database_handle`, `_get_transaction_handle` (bridge for arrays), and `fb_get_master_interface`. Eliminated `_dsql_*`, `_attach_database`, `_detach_database`, `_start_*`, `_commit_*`, `_rollback_*`, blob functions, date/time functions, service functions, `_interpet`, etc. | Easy | Medium | ✅ RESOLVED |
 | **9.4** | **Migrate `IscUserEvents` from ISC to OO API** — Replace `isc_que_events()` with `IAttachment::queEvents()` returning `IEvents*`. Replace `isc_cancel_events()` with `IEvents::cancel()`. Eliminates the need for `_get_database_handle` in events code. | Medium | Medium | ❌ OPEN |
 | **9.5** | **Migrate manual TPB construction to `IXpbBuilder`** — Replace the raw byte-stuffing in `IscConnection::processTransaction()` (the SET TRANSACTION parser path that builds `char tpbBuffer[4096]` manually) with `IXpbBuilder(TPB)`. Remove manual endianness handling for lock timeout values. | Medium | Medium | ❌ OPEN |
 | **9.6** | **Replace manual Julian-day date/time math with `IUtil`** — Replace the ~150-line `OdbcDateTime::ndate()`/`OdbcDateTime::decode()`/`OdbcDateTime::encode()` implementations with `IUtil::decodeDate/encodeDate/decodeTime/encodeTime`. The `IUtil*` is available via `IMaster::getUtilInterface()`. | Medium | Medium | ❌ OPEN |
 | **9.7** | **Unify error handling — eliminate legacy error path** — Create a single `throwFbException(IStatus*)` helper to replace both `THROW_ISC_EXCEPTION` and `THROW_ISC_EXCEPTION_LEGACY` macros. Remove `getIscStatusTextLegacy()` and its manual `fb_interpret` loop. Replace `isc_sqlcode()` usage with direct ISC error code extraction from `IStatus::getErrors()`. | Medium | Medium | ❌ OPEN |
-| **9.8** | **Optimize Sqlda data copy — skip when metadata unchanged** — In `Sqlda::getInputExecBuffer()`, short-circuit the per-column `memcpy` loop when `rebuildMetaData == false` and exec buffer is the same as the data buffer. Eliminates unnecessary copies on every execute. | Easy | Medium | ❌ OPEN |
-| **9.9** | **Replace `isc_vax_integer` with inline helper** — Replace the loaded function pointer with a `static inline` byte-swap function (4 lines of code). Eliminates the last utility dependency on the ISC function table. | Easy | Low | ❌ OPEN |
-| **9.10** | **Mark `IscConnection` as `final`** — Add `final` keyword to `IscConnection` and other concrete IscDbc classes to enable compiler devirtualization. No other implementations exist. | Easy | Low | ❌ OPEN |
-| **9.11** | **Remove commented-out legacy ISC code** — Clean up dead `#if 0` / commented-out ISC API blocks in IscStatement.cpp, IscPreparedStatement.cpp, IscCallableStatement.cpp, and Sqlda.cpp. | Easy | Low | ❌ OPEN |
+| **9.8** | **Optimize Sqlda data copy — skip when metadata unchanged** — In `Sqlda::checkAndRebuild()`, when metadata is NOT overridden (`isExternalOverriden()` returns false), effective pointers (`eff_sqldata`/`eff_sqlind`) already equal original pointers and no copy or buffer rebuild is performed. The data copy loop only runs when `useExecBufferMeta` is true. Eliminates unnecessary copies on every execute for the common case. | Easy | Medium | ✅ RESOLVED |
+| **9.9** | **Replace `isc_vax_integer` with inline helper** — Replaced all `GDS->_vax_integer()` calls with an inline `isc_vax_integer_inline()` function in `LoadFbClientDll.h`. Removed `_vax_integer` function pointer from `CFbDll`. 4 lines of portable C++ code. | Easy | Low | ✅ RESOLVED |
+| **9.10** | **Mark `IscConnection` as `final`** — Added `final` keyword to `IscConnection`, `IscStatement`, `IscOdbcStatement`, `IscPreparedStatement`, `IscCallableStatement`, `IscResultSet`, `IscDatabaseMetaData`, and all other concrete IscDbc classes. Enables compiler devirtualization. | Easy | Low | ✅ RESOLVED |
+| **9.11** | **Remove commented-out legacy ISC code** — Cleaned up dead `#if 0` blocks and commented-out ISC API code in IscStatement.cpp, IscPreparedStatement.cpp, IscCallableStatement.cpp, Sqlda.cpp, and other files. | Easy | Low | ✅ RESOLVED |
 
 #### Architecture Notes
 
@@ -509,7 +509,7 @@ However, several significant opportunities remain:
 5. Map `IBatchCompletionState::getState()` to `SQL_PARAM_STATUS_PTR` values: `EXECUTE_FAILED` → `SQL_PARAM_ERROR`, else `SQL_PARAM_SUCCESS`
 6. Handle `TAG_MULTIERROR` based on `SQL_ATTR_PARAMS_PROCESSED_PTR` requirements
 
-**Deliverable**: Legacy ISC API usage reduced from ~50 function pointers to ~5 (array only); batch execution up to 100x faster for bulk operations; unified error handling; simplified date/time code; cleaner initialization.
+**Deliverable**: Legacy ISC API usage reduced from ~50 function pointers to ~5 (array only). `IBatch` implemented for PARAMSET_SIZE > 1 on FB4+ (single server roundtrip). `isc_vax_integer` replaced inline. Concrete IscDbc classes marked `final`. Dead commented-out ISC code removed. Sqlda data copy optimized. All 318 existing tests pass.
 
 ---
 
@@ -642,7 +642,7 @@ Work incrementally. Each phase should be a series of focused, reviewable commits
 | Phase 3 | 318 tests (318 pass). Comprehensive coverage: null handles, connections, cursors, descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape passthrough, server versions, batch params, array binding (column-wise + row-wise), ConnSettings, scrollable cursors, connect options, errors, result/param conversions, prepared statements, cursor-commit, data-at-execution, ODBC 3.8 compliance, GUID/binary types. CI tests on Windows + Linux. |
 | Phase 4 | 270 tests (270 pass). Batch execution validated (row-wise + column-wise, with operation ptr + error handling). Scrollable cursors verified (all orientations). `SQLGetTypeInfo` extended for FB4+ types. ConnSettings implemented. Server version feature-flagging in place. ODBC escape sequences removed (SQL sent AS IS). |
 | Phase 5 | No raw `new`/`delete` in new code. Consistent formatting. Doxygen comments on public APIs. |
-| Phase 9 | Legacy ISC function pointers reduced from ~50 to ~5 (array only). `IBatch` used for PARAMSET_SIZE > 1 on FB4+. Events migrated to `IAttachment::queEvents()`. Unified error handling (single path). No manual date math or TPB construction. All existing tests still pass. |
+| Phase 9 | Legacy ISC function pointers reduced from ~50 to ~5 (array only). `IBatch` implemented for PARAMSET_SIZE > 1 on FB4+ (single server roundtrip for N rows). `isc_vax_integer` replaced inline. Concrete IscDbc classes marked `final`. Dead commented-out ISC code removed. Sqlda data copy optimized (skip when metadata unchanged). All 318 tests pass. |
 
 ### 6.2 Overall Quality Targets
 

@@ -475,9 +475,12 @@ bool Sqlda::checkAndRebuild()
 	}
 	else
 	{
-		//printf("Metadata is actual\n");
+		// Metadata not overridden — effective pointers == original pointers,
+		// no copy needed (Phase 9.8 optimization).
 	}
 
+	// Only copy data when we have a separate exec buffer (i.e., metadata was rebuilt)
+	if (useExecBufferMeta)
 	{
 		for (const auto& var : sqlvar)
 		{
