@@ -423,8 +423,6 @@ SQLRETURN OdbcStatement::sqlPrepare(SQLCHAR * sql, int sqlLength)
 				execute = &OdbcStatement::executeStatement;
 			else if ( statement->isActiveProcedure() )
 				execute = &OdbcStatement::executeProcedure;
-			else if ( statement->isActiveModify() && applicationParamDescriptor->headArraySize > 1 )
-				execute = &OdbcStatement::executeStatementParamArray;
 			else
 				execute = &OdbcStatement::executeStatement;
 
@@ -1929,7 +1927,14 @@ SQLRETURN OdbcStatement::sqlExecute()
 		enFetch = NoneFetch;
 		releaseResultSet();
 		parameterNeedData = 0;
-		retcode = (this->*execute)();
+
+		// Check at execute-time whether to use array execution (ODBC spec
+		// allows SQL_ATTR_PARAMSET_SIZE to be set after SQLPrepare)
+		if ( statement->isActiveModify() && applicationParamDescriptor->headArraySize > 1
+			&& execute != &OdbcStatement::executeStatementParamArray )
+			retcode = executeStatementParamArray();
+		else
+			retcode = (this->*execute)();
 	}
 	catch ( SQLException &exception )
 	{
@@ -1952,7 +1957,13 @@ SQLRETURN OdbcStatement::sqlExecDirect(SQLCHAR * sql, int sqlLength)
 	{
 		enFetch = NoneFetch;
 		parameterNeedData = 0;
-		retcode = (this->*execute)();
+
+		// Check at execute-time whether to use array execution
+		if ( statement->isActiveModify() && applicationParamDescriptor->headArraySize > 1
+			&& execute != &OdbcStatement::executeStatementParamArray )
+			retcode = executeStatementParamArray();
+		else
+			retcode = (this->*execute)();
 	}
 	catch ( SQLException &exception )
 	{
@@ -2640,6 +2651,24 @@ void OdbcStatement::bindInputOutputParam(int param, DescRecord * recordApp)
 
 		recordApp->fnConv = convert->getAdressFunction( recordApp, record );
 
+		// Fix sizeColumnExtendedFetch for column-wise array binding:
+		// When bufferLength=0 is passed to SQLBindParameter (common for fixed-size
+		// types like integers), sizeColumnExtendedFetch stays 0, causing all array
+		// rows to read from the same offset. Compute the actual C type size here.
+		switch ( recordApp->conciseType )
+		{
+		case SQL_C_CHAR:
+		case SQL_C_WCHAR:
+		case SQL_C_BINARY:
+			if ( recordApp->sizeColumnExtendedFetch )
+				break;
+			// For variable-length types with no bufferLength, fall through
+			// to compute from C type size (which will use 'length')
+		default:
+			if ( !recordApp->sizeColumnExtendedFetch )
+				recordApp->sizeColumnExtendedFetch = ipd->getConciseSize( recordApp->conciseType, recordApp->length );
+		}
+
 //		if ( convert->isIdentity() )
 			addBindParam ( param, record, recordApp );
 	}
@@ -2880,50 +2909,97 @@ SQLRETURN OdbcStatement::executeStatementParamArray()
 {
 	SQLRETURN ret = SQL_SUCCESS;
 	SQLULEN rowCount = 0;
-	SQLULEN *rowCountPt = implementationParamDescriptor->headRowsProcessedPtr ? implementationParamDescriptor->headRowsProcessedPtr
+	SQLULEN *rowCountPt = implementationParamDescriptor->headRowsProcessedPtr
+							? implementationParamDescriptor->headRowsProcessedPtr
 							: &rowCount;
-	SQLUSMALLINT *statusPtr = implementationParamDescriptor->headArrayStatusPtr ? implementationParamDescriptor->headArrayStatusPtr
-								: NULL;
+	SQLUSMALLINT *statusPtr = implementationParamDescriptor->headArrayStatusPtr;
+	SQLUSMALLINT *operationPtr = applicationParamDescriptor->headArrayStatusPtr; // SQL_ATTR_PARAM_OPERATION_PTR
 	int rowSize = applicationParamDescriptor->headBindType;
 	int nCountRow = applicationParamDescriptor->headArraySize;
 	SQLLEN	*&headBindOffsetPtr = applicationParamDescriptor->headBindOffsetPtr;
 	SQLLEN	*bindOffsetPtrSave = headBindOffsetPtr;
 	SQLLEN	bindOffsetPtrTmp = headBindOffsetPtr ? *headBindOffsetPtr : 0;
 	bool arrayColumnWiseBinding = rowSize == SQL_PARAM_BIND_BY_COLUMN;
+	bool hadError = false;
 
 	headBindOffsetPtr = &bindOffsetPtrTmp;
 	*rowCountPt = rowNumberParamArray = 0;
 
-	while ( rowNumberParamArray < nCountRow )
+	// Initialize all status entries to SQL_PARAM_UNUSED (per ODBC spec)
+	if ( statusPtr )
 	{
-		if ( arrayColumnWiseBinding )
-			bindOffsetIndColumnWiseBinding = ( bindOffsetPtrTmp + rowNumberParamArray ) * sizeof ( SQLINTEGER );
-
-		if ( (ret = inputParam( arrayColumnWiseBinding ), ret) && ret != SQL_SUCCESS_WITH_INFO )
-		{
-			headBindOffsetPtr = bindOffsetPtrSave;
-			convert->setBindOffsetPtrFrom ( applicationParamDescriptor->headBindOffsetPtr, applicationParamDescriptor->headBindOffsetPtr );
-			if ( statusPtr )
-				*statusPtr = SQL_PARAM_ERROR;
-			return ret;
-		}
-
-		statement->executeStatement();
-
-		if ( statusPtr )
-			*statusPtr++ = ret == SQL_SUCCESS_WITH_INFO ? SQL_PARAM_SUCCESS_WITH_INFO : SQL_PARAM_SUCCESS;
-
-		bindOffsetPtrTmp += rowSize;
-		parameterNeedData = 1;
-		++rowNumberParamArray;
+		for ( int i = 0; i < nCountRow; ++i )
+			statusPtr[i] = SQL_PARAM_UNUSED;
 	}
 
-	*rowCountPt = rowNumberParamArray;
+	while ( rowNumberParamArray < nCountRow )
+	{
+		// Check SQL_ATTR_PARAM_OPERATION_PTR — skip rows marked SQL_PARAM_IGNORE
+		if ( operationPtr && operationPtr[rowNumberParamArray] == SQL_PARAM_IGNORE )
+		{
+			// Advance offset for row-wise binding even for skipped rows
+			if ( !arrayColumnWiseBinding )
+				bindOffsetPtrTmp += rowSize;
+			++rowNumberParamArray;
+			continue;
+		}
+
+		// Update processed count (includes current row being processed)
+		++(*rowCountPt);
+
+		if ( arrayColumnWiseBinding )
+			bindOffsetIndColumnWiseBinding = ( bindOffsetPtrTmp + rowNumberParamArray ) * sizeof ( SQLLEN );
+
+		SQLRETURN rowRet = inputParam( arrayColumnWiseBinding );
+		if ( rowRet != SQL_SUCCESS && rowRet != SQL_SUCCESS_WITH_INFO )
+		{
+			// Error reading parameters for this row
+			if ( statusPtr )
+				statusPtr[rowNumberParamArray] = SQL_PARAM_ERROR;
+			hadError = true;
+			// Continue with next row instead of aborting
+			if ( !arrayColumnWiseBinding )
+				bindOffsetPtrTmp += rowSize;
+			parameterNeedData = 1;
+			++rowNumberParamArray;
+			continue;
+		}
+
+		try
+		{
+			statement->executeStatement();
+
+			if ( statusPtr )
+				statusPtr[rowNumberParamArray] = (rowRet == SQL_SUCCESS_WITH_INFO)
+					? SQL_PARAM_SUCCESS_WITH_INFO : SQL_PARAM_SUCCESS;
+		}
+		catch ( SQLException &exception )
+		{
+			if ( statusPtr )
+				statusPtr[rowNumberParamArray] = SQL_PARAM_ERROR;
+			hadError = true;
+			// Post error with row context but continue processing
+			postError( "HY000", exception );
+		}
+
+		if ( !arrayColumnWiseBinding )
+			bindOffsetPtrTmp += rowSize;
+		parameterNeedData = 1;
+		++rowNumberParamArray;
+
+		// Accumulate SQL_SUCCESS_WITH_INFO from successful rows
+		if ( rowRet == SQL_SUCCESS_WITH_INFO && ret == SQL_SUCCESS )
+			ret = SQL_SUCCESS_WITH_INFO;
+	}
+
 	headBindOffsetPtr = bindOffsetPtrSave;
 	convert->setBindOffsetPtrFrom ( applicationParamDescriptor->headBindOffsetPtr, applicationParamDescriptor->headBindOffsetPtr );
 
 	if ( statement->getMoreResults() )
 		setResultSet (statement->getResultSet(), false);
+
+	if ( hadError )
+		return SQL_SUCCESS_WITH_INFO;
 
 	return ret;
 }

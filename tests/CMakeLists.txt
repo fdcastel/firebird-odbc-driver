@@ -42,6 +42,7 @@ add_executable(firebird_odbc_tests
     test_prepare.cpp
     test_cursor_commit.cpp
     test_data_at_execution.cpp
+    test_array_binding.cpp
 )
 
 # Link with Google Test and the ODBC library

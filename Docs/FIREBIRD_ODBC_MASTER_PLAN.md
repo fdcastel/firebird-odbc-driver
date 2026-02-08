@@ -4,7 +4,7 @@
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
 **Last Updated**: February 7, 2026  
-**Version**: 1.9
+**Version**: 2.0
 
 > This document consolidates all known issues and newly identified architectural deficiencies.
 > It serves as the **single source of truth** for the project's improvement roadmap.
@@ -74,7 +74,7 @@
 | M-4 | ~~No ODBC escape sequence parsing (`{fn ...}`, `{d ...}`, `{ts ...}`, `{oj ...}`)~~ — All escape processing code removed from `IscConnection::nativeSql()`; `SQLGetInfo` reports 0 for all numeric/string/timedate/system function bitmasks and `SQL_CVT_CHAR` only for convert functions; `SupportFunctions.cpp/.h` removed from build; SQL is now sent AS IS to Firebird | New (comparison) | ❌ WONTFIX — Legacy ODBC feature, removed | IscDbc/IscConnection.cpp, InfoItems.h, IscDbc/CMakeLists.txt |
 | M-5 | ~~Connection settings not supported~~ — Added `ConnSettings` connection string parameter; SQL statements executed via PreparedStatement after connection open; semicolons split multiple statements; invalid SQL fails the connection | New (comparison) | ✅ RESOLVED | OdbcConnection.cpp, tests/test_conn_settings.cpp |
 | M-6 | ~~No DTC/XA distributed transaction support~~ — ATL/DTC support removed entirely (unnecessary complexity, not needed by Firebird) | New (comparison) | ❌ WONTFIX | Removed: AtlStubs.cpp, ResourceManagerSink.cpp/h, TransactionResourceAsync.cpp/h |
-| M-7 | ~~No batch parameter execution testing~~ — Validated `executeStatementParamArray()` with row-wise binding (4 tests); documented that PARAMSET_SIZE must be set before SQLPrepare; column-wise array binding has indicator stride limitation (uses sizeof(SQLINTEGER) instead of sizeof(SQLLEN)) | New (comparison) | ✅ RESOLVED | OdbcStatement.cpp, tests/test_batch_params.cpp |
+| M-7 | ~~No batch parameter execution testing~~ — Full ODBC "Array of Parameter Values" support: column-wise binding (fixed `sizeColumnExtendedFetch=0` bug for fixed-size types, fixed indicator stride `sizeof(SQLINTEGER)`→`sizeof(SQLLEN)`), row-wise binding, `SQL_ATTR_PARAM_OPERATION_PTR` (skip rows via `SQL_PARAM_IGNORE`), proper status array initialization (`SQL_PARAM_UNUSED`), per-row error handling (continues after failures), execute-time PARAMSET_SIZE routing (no longer requires setting before SQLPrepare). 17 array binding tests + 4 batch param tests. | New (comparison) | ✅ RESOLVED | OdbcStatement.cpp, tests/test_array_binding.cpp, tests/test_batch_params.cpp |
 | M-8 | ~~`SQLGetTypeInfo` incomplete for Firebird types~~ — Added INT128 (as SQL_VARCHAR), DECFLOAT (as SQL_DOUBLE), TIME WITH TIME ZONE (as SQL_TYPE_TIME), TIMESTAMP WITH TIME ZONE (as SQL_TYPE_TIMESTAMP) to TypesResultSet; types only shown when server version ≥ 4; added BLR handler safety net in IscSqlType::buildType for FB4+ wire types | New (analysis) | ✅ RESOLVED | IscDbc/TypesResultSet.cpp/.h, IscDbc/IscSqlType.cpp, tests/test_server_version.cpp |
 | M-9 | ~~No declare/fetch mode for large result sets~~ — Firebird's OO API already implements streaming fetch natively via `openCursor()`+`fetchNext()` for forward-only cursors (one row at a time from server); static cursors load all rows by design (required for scrollability). No additional chunked-fetch wrapper needed. | New (comparison) | ✅ RESOLVED (native) | IscDbc/IscResultSet.cpp |
 
@@ -109,7 +109,7 @@
 | T-9 | ~~No cursor/bookmark/positioned-update tests~~ — 9 scrollable cursor tests (FetchFirstAndLast, FetchPrior, FetchAbsolute, FetchRelative, FetchNextInScrollable, ForwardOnlyRejectsPrior, FetchBeyondEndReturnsNoData, FetchBeforeStartReturnsNoData, RewindAfterEnd) | New (comparison) | ✅ RESOLVED | tests/test_scrollable_cursor.cpp |
 | T-10 | No descriptor tests (`SQLGetDescRec`, `SQLSetDescRec`, `SQLCopyDesc`) | New (comparison) | ❌ OPEN | Tests/ |
 | T-11 | No multi-statement-handle interleaving tests (psqlodbc tests 100 simultaneous handles) | New (comparison) | ❌ OPEN | Tests/ |
-| T-12 | ~~No batch/array binding tests~~ — 4 batch param tests with row-wise binding (InsertWithRowWiseBinding, RowWiseVerifyValues, ParamsetSizeThree, ParamsetSizeOne) | New (comparison) | ✅ RESOLVED | tests/test_batch_params.cpp |
+| T-12 | ~~No batch/array binding tests~~ — 21 tests total: 4 batch param tests (row-wise binding) + 17 array binding tests ported from psqlodbc (column-wise INSERT/UPDATE/DELETE, row-wise INSERT, NULL handling, SQL_ATTR_PARAM_OPERATION_PTR skip rows, 1000-row large array, re-execute with different data, handle lifecycle, multiple data types, integer-only, without status pointers, SQLGetInfo validation) | New (comparison) | ✅ RESOLVED | tests/test_batch_params.cpp, tests/test_array_binding.cpp |
 
 ---
 
@@ -199,7 +199,7 @@ The ODBC API is a C boundary where applications can pass any value — NULL poin
 
 ### 3.5 Testing Was an Afterthought
 
-The test suite was created recently (2026) after significant bugs were found. psqlodbc has maintained a regression test suite for decades. **UPDATE (Feb 7, 2026):** A comprehensive Google Test suite now exists with 253 tests across 23 test suites covering null handles, connections, cursors (including scrollable), descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape sequence passthrough, server version detection, batch parameters, ConnSettings, scrollable cursor fetch orientations, connection options, error handling, result conversions, parameter conversions, prepared statements, cursor-commit behavior, and data-at-execution. Tests run on both Windows and Linux via CI.
+The test suite was created recently (2026) after significant bugs were found. psqlodbc has maintained a regression test suite for decades. **UPDATE (Feb 7, 2026):** A comprehensive Google Test suite now exists with 270 tests across 24 test suites covering null handles, connections, cursors (including scrollable), descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape sequence passthrough, server version detection, batch parameters, **array binding (column-wise + row-wise, with NULL values, operation ptr, 1000-row stress, UPDATE/DELETE, multi-type)**, ConnSettings, scrollable cursor fetch orientations, connection options, error handling, result conversions, parameter conversions, prepared statements, cursor-commit behavior, and data-at-execution. Tests run on both Windows and Linux via CI.
 
 ### 3.6 No Entry-Point Discipline
 
@@ -313,7 +313,7 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 |------|-----------------|--------|
 | 4.1 Implement ODBC escape sequence parsing (`{fn}`, `{d}`, `{ts}`, `{oj}`) | M-4 | ❌ WONTFIX — Legacy ODBC feature. All escape processing code removed from `IscConnection::nativeSql()`. `SupportFunctions.cpp/.h` removed from build. `SQLGetInfo` reports 0 for function bitmasks. SQL is sent AS IS to Firebird. |
 | ✅ 4.2 Add server version feature-flagging (Firebird 3.0/4.0/5.0 differences) | M-3 | 2 days | Completed Feb 7, 2026: Added `getServerMajorVersion()`/`getServerMinorVersion()` to Connection interface; implemented in IscConnection via Attachment; used by TypesResultSet for conditional FB4+ type exposure |
-| ✅ 4.3 Validate and fix batch parameter execution (`PARAMSET_SIZE` > 1) | M-7 | 3 days | Completed Feb 7, 2026: Validated row-wise binding works correctly; documented PARAMSET_SIZE must be set before SQLPrepare; 4 tests added |
+| ✅ 4.3 Validate and fix batch parameter execution (`PARAMSET_SIZE` > 1) | M-7 | 3 days | Completed Feb 7, 2026: Full ODBC "Array of Parameter Values" — fixed column-wise binding (`sizeColumnExtendedFetch` computed for fixed-size types, indicator stride uses `sizeof(SQLLEN)`), `SQL_ATTR_PARAM_OPERATION_PTR` support, per-row error handling, execute-time PARAMSET_SIZE routing; 21 tests (4 row-wise + 17 column-wise ported from psqlodbc) |
 | ✅ 4.4 Review and complete `SQLGetTypeInfo` for all Firebird types (INT128, DECFLOAT, TIME WITH TZ) | M-8 | 3 days | Completed Feb 7, 2026: Added 4 FB4+ types to TypesResultSet (version-gated); added BLR handler safety net in IscSqlType::buildType |
 | ✅ 4.5 Confirm declare/fetch mode for large result sets | M-9 | 0.5 day | Completed Feb 7, 2026: Confirmed Firebird OO API already uses streaming fetch natively for forward-only cursors; no additional work needed |
 | ✅ 4.6 Add `ConnSettings` support (SQL to execute on connect) | M-5 | 1 day | Completed Feb 7, 2026: ConnSettings connection string parameter parsed and executed via PreparedStatement after connect; 3 tests added |
@@ -368,7 +368,7 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 | `cursor-commit-test` | Cursor behavior across commit/rollback | Important for transaction semantics | ✅ DONE — tests/test_cursor_commit.cpp (6 tests) |
 | `descrec-test` | SQLGetDescRec for all column types | Map type codes to Firebird | ✅ PARTIAL (6 DescriptorTests in Phase 3) |
 | `bindcol-test` | Dynamic unbinding/rebinding mid-fetch | Should work as-is | ✅ PARTIAL (4 BindCycleTests in Phase 3) |
-| `arraybinding-test` | Array/row-wise parameter binding | Should work as-is | ✅ PARTIAL (BatchParamTests in Phase 3) |
+| `arraybinding-test` | Array/row-wise parameter binding (column-wise, row-wise, NULL, operation ptr, large arrays) | Ported to tests/test_array_binding.cpp with 17 tests | ✅ DONE — tests/test_array_binding.cpp (17 tests) |
 | `dataatexecution-test` | SQL_DATA_AT_EXEC / SQLPutData | Should work as-is | ✅ DONE — tests/test_data_at_execution.cpp (6 tests) |
 | `numeric-test` | NUMERIC/DECIMAL precision and scale | Critical for financial applications | ✅ COVERED (8 numeric tests in test_data_types.cpp) |
 
@@ -379,7 +379,7 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 | psqlodbc Test | What It Tests | Firebird Adaptation | Priority |
 |---------------|---------------|-------------------|----------|
 | `wchar-char-test` | Wide character handling in multiple encodings |   | LOW  |
-| `params-batch-exec-test` | Array of Parameter Values (1) | Called BATCH operations in Firebird. (2) | MEDIUM |
+| `params-batch-exec-test` | Array of Parameter Values (batch re-execute, status arrays) | Ported to tests/test_array_binding.cpp (ReExecuteWithDifferentData, status verification) | ✅ DONE |
 | `cursor-name-test` | SQLSetCursorName/SQLGetCursorName | Part of CursorTests in Phase 3 | LOW (covered) |
 
 (1) See https://learn.microsoft.com/en-us/sql/odbc/reference/develop-app/using-arrays-of-parameters
@@ -387,7 +387,7 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 
 **Current Status**: 2 of 6 fully covered; others deferred or partially covered.
 
-**Deliverable**: 7 new test files; 93 new test cases covering all Tier 1 and Tier 2 psqlodbc areas; 253 total tests passing.
+**Deliverable**: 8 new test files; 110 new test cases covering all Tier 1 and Tier 2 psqlodbc areas; 270 total tests passing.
 
 ---
 
@@ -517,8 +517,8 @@ Work incrementally. Each phase should be a series of focused, reviewable commits
 | Phase 0 | Zero crashes with null/invalid handles. All critical-severity issues closed. |
 | Phase 1 | 100% of existing tests passing. Correct SQLSTATE for syntax errors, constraint violations, connection failures, lock conflicts. |
 | Phase 2 | Every ODBC entry point follows the standard wrapper pattern. Thread safety is always-on. |
-| Phase 3 | 253 tests (253 pass). Comprehensive coverage: null handles, connections, cursors, descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape passthrough, server versions, batch params, ConnSettings, scrollable cursors, connect options, errors, result/param conversions, prepared statements, cursor-commit, data-at-execution. CI tests on Windows + Linux. |
-| Phase 4 | 253 tests (253 pass). Batch execution validated (row-wise). Scrollable cursors verified (all orientations). `SQLGetTypeInfo` extended for FB4+ types. ConnSettings implemented. Server version feature-flagging in place. ODBC escape sequences removed (SQL sent AS IS). |
+| Phase 3 | 270 tests (270 pass). Comprehensive coverage: null handles, connections, cursors, descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape passthrough, server versions, batch params, array binding (column-wise + row-wise), ConnSettings, scrollable cursors, connect options, errors, result/param conversions, prepared statements, cursor-commit, data-at-execution. CI tests on Windows + Linux. |
+| Phase 4 | 270 tests (270 pass). Batch execution validated (row-wise + column-wise, with operation ptr + error handling). Scrollable cursors verified (all orientations). `SQLGetTypeInfo` extended for FB4+ types. ConnSettings implemented. Server version feature-flagging in place. ODBC escape sequences removed (SQL sent AS IS). |
 | Phase 5 | No raw `new`/`delete` in new code. Consistent formatting. Doxygen comments on public APIs. |
 
 ### 6.2 Overall Quality Targets
@@ -526,7 +526,7 @@ Work incrementally. Each phase should be a series of focused, reviewable commits
 | Metric | Current | Target | Notes |
 |--------|---------|--------|-------|
 | Test pass rate | **100%** | 100% | ✅ All tests pass; connection tests skip gracefully without database |
-| Test count | **253** | 150+ | ✅ Target far exceeded — 253 tests covering 23 test suites |
+| Test count | **270** | 150+ | ✅ Target far exceeded — 270 tests covering 24 test suites |
 | SQLSTATE mapping coverage | **90%+ (121 kSqlStates, 100+ ISC mappings)** | 90%+ | ✅ All common Firebird errors map to correct SQLSTATEs |
 | Crash on invalid input | **Never (NULL handles return SQL_INVALID_HANDLE)** | Never | ✅ Phase 0 complete — 65 GTest (direct-DLL) + 28 null handle tests |
 | Cross-platform tests | **Windows + Linux (x64 + ARM64)** | Windows + Linux + macOS | ✅ CI passes on all platforms |
@@ -604,5 +604,5 @@ Quick reference for which files need changes in each phase.
 
 ---
 
-*Document version: 1.9 — February 7, 2026*  
+*Document version: 2.0 — February 7, 2026*  
 *This is the single authoritative reference for all Firebird ODBC driver improvements.*
