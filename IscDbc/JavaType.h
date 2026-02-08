@@ -81,4 +81,6 @@
 #define JDBC_INTERVAL_HOUR_TO_SECOND		112
 #define JDBC_INTERVAL_MINUTE_TO_SECOND		113
 
+#define JDBC_GUID		  -11
+
 #endif

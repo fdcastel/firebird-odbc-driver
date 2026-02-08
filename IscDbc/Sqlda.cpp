@@ -882,6 +882,8 @@ int Sqlda::getSqlType(CAttrSqlVar *var, int &realSqlType)
 	case SQL_TEXT:
 		if ( var->sqllen == 1 && var->sqlsubtype == 1 )
 			return (realSqlType = JDBC_TINYINT);
+		else if ( var->sqllen == 16 && var->sqlsubtype == 1 )
+			return (realSqlType = JDBC_GUID);
 		else if ( ( var->sqlsubtype == 3 // UNICODE_FSS
 				    || var->sqlsubtype == 4 ) // UTF8
 			&& !(var->sqllen % getCharsetSize( var->sqlsubtype )) )
@@ -950,6 +952,8 @@ const char* Sqlda::getSqlTypeName ( CAttrSqlVar *var )
 	case SQL_TEXT:
 		if ( var->sqllen == 1 && var->sqlsubtype == 1 )
 			return "TINYINT";
+		else if ( var->sqllen == 16 && var->sqlsubtype == 1 )
+			return "GUID";
 		return "CHAR";
 
 	case SQL_VARYING:

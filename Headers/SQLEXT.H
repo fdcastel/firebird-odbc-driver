@@ -68,7 +68,28 @@ extern "C" {                         /* Assume C declarations for C++ */
 /* values for SQL_ATTR_ODBC_VERSION */
 #define SQL_OV_ODBC2						2UL
 #define	SQL_OV_ODBC3						3UL
+#ifndef SQL_OV_ODBC3_80
+#define SQL_OV_ODBC3_80						380UL
+#endif
 #endif  /* ODBCVER >= 0x0300 */
+
+/* ODBC 3.8 connection attribute for connection pool reset */
+#ifndef SQL_ATTR_RESET_CONNECTION
+#define SQL_ATTR_RESET_CONNECTION			116
+#define SQL_RESET_CONNECTION_YES			1UL
+#endif
+
+/* ODBC 3.8 info type for async DBC functions capability */
+#ifndef SQL_ASYNC_DBC_FUNCTIONS
+#define SQL_ASYNC_DBC_FUNCTIONS				10023
+#define SQL_ASYNC_DBC_CAPABLE				1UL
+#define SQL_ASYNC_DBC_NOT_CAPABLE			0UL
+#endif
+
+/* ODBC 3.8 getdata extension for streamed output parameters */
+#ifndef SQL_GD_OUTPUT_PARAMS
+#define SQL_GD_OUTPUT_PARAMS				0x00000010L
+#endif
 
 /* connection attributes */
 #define SQL_ACCESS_MODE                 101

@@ -60,6 +60,14 @@ void IscSqlType::buildType ()
 				bufferLength = length;
 				length = MAX_TINYINT_LENGTH;
 				}
+			else if ( lengthIn == 16 && characterId == 1 )
+				{
+				// CHAR(16) CHARACTER SET OCTETS or BINARY(16) — map to SQL_GUID
+				type = JDBC_GUID;
+				typeName = "GUID";
+				bufferLength = 16;
+				length = 16;
+				}
 			else
 				{
 				type = JDBC_CHAR;

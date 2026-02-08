@@ -4,7 +4,7 @@
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
 **Last Updated**: February 8, 2026  
-**Version**: 2.1
+**Version**: 2.2
 
 > This document consolidates all known issues and newly identified architectural deficiencies.
 > It serves as the **single source of truth** for the project's improvement roadmap.
@@ -106,7 +106,7 @@
 
 | # | Issue | Source | Status | File(s) |
 |---|-------|--------|--------|---------|
-| T-1 | All tests pass (100% pass rate) on Windows, Linux x64, Linux ARM64; 65 NullHandleTests (GTest direct-DLL) + 28 NullHandleTests | ISSUE-244, PLAN-NEW-TESTS | ✅ RESOLVED | Tests/Cases/, tests/ |
+| T-1 | All tests pass (100% pass rate) on Windows, Linux x64, Linux ARM64; 65 NullHandleTests (GTest direct-DLL) + 253 connected tests | ISSUE-244, PLAN-NEW-TESTS | ✅ RESOLVED | Tests/Cases/, tests/ |
 | T-2 | InfoTests fixed to use `SQLWCHAR` buffers with Unicode ODBC functions | PLAN-NEW-TESTS §Known Issues 1 | ✅ RESOLVED | Tests/Cases/InfoTests.cpp |
 | T-3 | No unit tests for the IscDbc layer — only ODBC API-level integration tests | New (analysis) | ❌ OPEN | Tests/ |
 | T-4 | No data conversion unit tests for OdbcConvert's ~150 conversion methods | New (analysis) | ❌ OPEN | Tests/ |
@@ -209,7 +209,7 @@ The ODBC API is a C boundary where applications can pass any value — NULL poin
 
 ### 3.5 Testing Was an Afterthought
 
-The test suite was created recently (2026) after significant bugs were found. psqlodbc has maintained a regression test suite for decades. **UPDATE (Feb 8, 2026):** A comprehensive Google Test suite now exists with 292 tests across 29 test suites covering null handles, connections, cursors (including scrollable), descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape sequence passthrough, server version detection, batch parameters, **array binding (column-wise + row-wise, with NULL values, operation ptr, 1000-row stress, UPDATE/DELETE, multi-type)**, ConnSettings, scrollable cursor fetch orientations, connection options, error handling, result conversions, parameter conversions, prepared statements, cursor-commit behavior, and data-at-execution. Tests run on both Windows and Linux via CI.
+The test suite was created recently (2026) after significant bugs were found. psqlodbc has maintained a regression test suite for decades. **UPDATE (Feb 8, 2026):** A comprehensive Google Test suite now exists with 318 tests across 33 test suites covering null handles, connections, cursors (including scrollable), descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape sequence passthrough, server version detection, batch parameters, **array binding (column-wise + row-wise, with NULL values, operation ptr, 1000-row stress, UPDATE/DELETE, multi-type)**, ConnSettings, scrollable cursor fetch orientations, connection options, error handling, result conversions, parameter conversions, prepared statements, cursor-commit behavior, data-at-execution, **ODBC 3.8 compliance, SQL_GUID type mapping, and Firebird 4+ version-specific types**. Tests run on both Windows and Linux via CI.
 
 ### 3.6 No Entry-Point Discipline
 
@@ -417,6 +417,30 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 
 **Deliverable**: All 6 genuine bugs fixed; descriptor crash eliminated; diagnostic row count functional. 22 new tests added (292 total).
 
+### Phase 8: ODBC 3.8 Compliance, SQL_GUID, and Data Type Improvements ✅ (Completed — February 8, 2026)
+**Priority**: Medium  
+**Duration**: 1 day  
+**Goal**: Full ODBC 3.8 specification compliance; SQL_GUID type support; version-aware data type mapping
+
+| Task | Issues Addressed | Effort | Status |
+|------|-----------------|--------|--------|
+| ✅ 8.1 Accept `SQL_OV_ODBC3_80` (380) as valid `SQL_ATTR_ODBC_VERSION` value | H-4 follow-up | 0.5 day | Completed Feb 8, 2026: `OdbcEnv::sqlSetEnvAttr` validates SQL_OV_ODBC2, SQL_OV_ODBC3, SQL_OV_ODBC3_80; rejects invalid values with HY024 |
+| ✅ 8.2 Update `SQL_DRIVER_ODBC_VER` from `"03.51"` to `"03.80"` | ODBC 3.8 compliance | 0.25 day | Completed Feb 8, 2026: OdbcConnection.cpp ODBC_DRIVER_VERSION changed to "03.80" |
+| ✅ 8.3 Add `SQL_ATTR_RESET_CONNECTION` support for connection pool reset | ODBC 3.8 (§Upgrading a 3.5 Driver to 3.8) | 0.5 day | Completed Feb 8, 2026: Resets autocommit, access mode, transaction isolation, connection timeout to defaults |
+| ✅ 8.4 Add `SQL_GD_OUTPUT_PARAMS` to `SQL_GETDATA_EXTENSIONS` bitmask | ODBC 3.8 streamed output params | 0.25 day | Completed Feb 8, 2026: InfoItems.h updated to include SQL_GD_OUTPUT_PARAMS |
+| ✅ 8.5 Add `SQL_ASYNC_DBC_FUNCTIONS` info type (reports `SQL_ASYNC_DBC_NOT_CAPABLE`) | ODBC 3.8 async DBC capability | 0.25 day | Completed Feb 8, 2026: InfoItems.h adds SQL_ASYNC_DBC_FUNCTIONS returning NOT_CAPABLE |
+| ✅ 8.6 Add ODBC 3.8 constants to Headers/SQLEXT.H | Build infrastructure | 0.25 day | Completed Feb 8, 2026: Added SQL_OV_ODBC3_80, SQL_ATTR_RESET_CONNECTION, SQL_ASYNC_DBC_FUNCTIONS, SQL_GD_OUTPUT_PARAMS with proper guards |
+| ✅ 8.7 Implement SQL_GUID type mapping from `CHAR(16) CHARACTER SET OCTETS` (FB3) and `BINARY(16)` (FB4+) | SQL_GUID support | 1 day | Completed Feb 8, 2026: IscSqlType::buildType and Sqlda::getSqlType/getSqlTypeName detect 16-byte OCTETS columns and map to JDBC_GUID (-11 = SQL_GUID); TypesResultSet reports SQL_GUID in SQLGetTypeInfo |
+| ✅ 8.8 Add GUID conversion methods (GUID↔string, GUID↔binary, binary→GUID, string→GUID) | SQL_GUID conversions | 0.5 day | Completed Feb 8, 2026: OdbcConvert.cpp adds convGuidToBinary, convGuidToGuid, convBinaryToGuid, convStringToGuid; added SQL_C_GUID target in SQL_C_BINARY and SQL_C_CHAR converters |
+| ✅ 8.9 Add `BINARY`/`VARBINARY` types to TypesResultSet for Firebird 4+ | FB4+ type completeness | 0.25 day | Completed Feb 8, 2026: ALPHA_V entries for BINARY and VARBINARY (version-gated to server ≥ 4) |
+| ✅ 8.10 Fix TypesResultSet ODBC 3.8 version check | ODBC 3.80 correctness | 0.25 day | Completed Feb 8, 2026: `appOdbcVersion == 3 \|\| appOdbcVersion == 380` for correct date/time type mapping |
+| ✅ 8.11 Add comprehensive tests for ODBC 3.8 features | Regression testing | 0.5 day | Completed Feb 8, 2026: test_odbc38_compliance.cpp (12 tests: env version, driver version, getdata extensions, async DBC, reset connection, autocommit restore, interface conformance) |
+| ✅ 8.12 Add comprehensive tests for GUID and data type features | Regression testing | 0.5 day | Completed Feb 8, 2026: test_guid_and_binary.cpp (14 tests: GUID type info, UUID insert/retrieve binary, UUID_TO_CHAR, CHAR_TO_UUID roundtrip, GEN_UUID uniqueness, SQLGUID struct, type coverage, INT128/DECFLOAT/TIME WITH TZ/TIMESTAMP WITH TZ on FB4+, BINARY/VARBINARY, BINARY(16)→SQL_GUID, DECFLOAT values) |
+
+**Reference**: [Upgrading a 3.5 Driver to a 3.8 Driver](https://learn.microsoft.com/en-us/sql/odbc/reference/develop-driver/upgrading-a-3-5-driver-to-a-3-8-driver)
+
+**Deliverable**: Full ODBC 3.8 compliance; SQL_GUID type support with conversions; version-aware BINARY/VARBINARY types; 26 new tests (318 total).
+
 ---
 
 ## 5. Implementation Guidelines
@@ -545,7 +569,7 @@ Work incrementally. Each phase should be a series of focused, reviewable commits
 | Phase 0 | Zero crashes with null/invalid handles. All critical-severity issues closed. |
 | Phase 1 | 100% of existing tests passing. Correct SQLSTATE for syntax errors, constraint violations, connection failures, lock conflicts. |
 | Phase 2 | Every ODBC entry point follows the standard wrapper pattern. Thread safety is always-on. |
-| Phase 3 | 270 tests (270 pass). Comprehensive coverage: null handles, connections, cursors, descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape passthrough, server versions, batch params, array binding (column-wise + row-wise), ConnSettings, scrollable cursors, connect options, errors, result/param conversions, prepared statements, cursor-commit, data-at-execution. CI tests on Windows + Linux. |
+| Phase 3 | 318 tests (318 pass). Comprehensive coverage: null handles, connections, cursors, descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape passthrough, server versions, batch params, array binding (column-wise + row-wise), ConnSettings, scrollable cursors, connect options, errors, result/param conversions, prepared statements, cursor-commit, data-at-execution, ODBC 3.8 compliance, GUID/binary types. CI tests on Windows + Linux. |
 | Phase 4 | 270 tests (270 pass). Batch execution validated (row-wise + column-wise, with operation ptr + error handling). Scrollable cursors verified (all orientations). `SQLGetTypeInfo` extended for FB4+ types. ConnSettings implemented. Server version feature-flagging in place. ODBC escape sequences removed (SQL sent AS IS). |
 | Phase 5 | No raw `new`/`delete` in new code. Consistent formatting. Doxygen comments on public APIs. |
 
@@ -554,7 +578,7 @@ Work incrementally. Each phase should be a series of focused, reviewable commits
 | Metric | Current | Target | Notes |
 |--------|---------|--------|-------|
 | Test pass rate | **100%** | 100% | ✅ All tests pass; connection tests skip gracefully without database |
-| Test count | **270** | 150+ | ✅ Target far exceeded — 270 tests covering 24 test suites |
+| Test count | **318** | 150+ | ✅ Target far exceeded — 318 tests covering 33 test suites |
 | SQLSTATE mapping coverage | **90%+ (121 kSqlStates, 100+ ISC mappings)** | 90%+ | ✅ All common Firebird errors map to correct SQLSTATEs |
 | Crash on invalid input | **Never (NULL handles return SQL_INVALID_HANDLE)** | Never | ✅ Phase 0 complete — 65 GTest (direct-DLL) + 28 null handle tests |
 | Cross-platform tests | **Windows + Linux (x64 + ARM64)** | Windows + Linux + macOS | ✅ CI passes on all platforms |
@@ -632,5 +656,5 @@ Quick reference for which files need changes in each phase.
 
 ---
 
-*Document version: 2.1 — February 8, 2026*  
+*Document version: 2.2 — February 8, 2026*  
 *This is the single authoritative reference for all Firebird ODBC driver improvements.*

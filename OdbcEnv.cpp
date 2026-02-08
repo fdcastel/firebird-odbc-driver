@@ -213,7 +213,12 @@ SQLRETURN OdbcEnv::sqlSetEnvAttr(int attribute, SQLPOINTER value, int length)
 			break;
 
 		case SQL_ATTR_ODBC_VERSION:
-			useAppOdbcVersion = (intptr_t)value;
+			{
+			intptr_t ver = (intptr_t)value;
+			if (ver != SQL_OV_ODBC2 && ver != SQL_OV_ODBC3 && ver != SQL_OV_ODBC3_80)
+				return sqlReturn (SQL_ERROR, "HY024", "Invalid attribute value");
+			useAppOdbcVersion = ver;
+			}
 			break;
 
 		default:

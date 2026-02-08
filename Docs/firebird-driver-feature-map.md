@@ -201,7 +201,7 @@ Legend for the table below:
 | `SQL_INTERVAL_HOUR_TO_MINUTE` | No | No | No | No `INTERVAL` data type family |
 | `SQL_INTERVAL_HOUR_TO_SECOND` | No | No | No | No `INTERVAL` data type family |
 | `SQL_INTERVAL_MINUTE_TO_SECOND` | No | No | No | No `INTERVAL` data type family |
-| `SQL_GUID` | Mapped | Mapped | Mapped | No native `UUID` type; map to 16-byte binary (`OCTETS`/`BINARY`) + UUID functions |
+| `SQL_GUID` | Mapped | Mapped | Mapped | `CHAR(16) CHARACTER SET OCTETS` (3.0) or `BINARY(16)` (4.0+) automatically mapped to `SQL_GUID` by the driver; supports `SQL_C_GUID`, `SQL_C_BINARY`, and `SQL_C_CHAR` conversions |
 
 Reference pointers for the mappings above:
 - Character and text types: [3.0 Character Types](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref30/firebird-30-language-reference.html#fblangref30-datatypes-chartypes), [4.0 Character Types](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref40/firebird-40-language-reference.html#fblangref40-datatypes-chartypes), [5.0 Character Types](https://www.firebirdsql.org/file/documentation/html/en/refdocs/fblangref50/firebird-50-language-reference.html#fblangref50-datatypes-chartypes)

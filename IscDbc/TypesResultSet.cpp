@@ -136,6 +136,10 @@ static Types types [] =
 	NUMERIC_V (4, "DECFLOAT", JDBC_DOUBLE, 34, "precision", UNSCALED, UNSCALED, 10),
 	DATETIME_V (4, "TIME WITH TIME ZONE", JDBC_TIME, MAX_TIME_LENGTH, "{t'","'}", 2),
 	DATETIME_V (4, "TIMESTAMP WITH TIME ZONE", JDBC_TIMESTAMP, MAX_TIMESTAMP_LENGTH, "{ts'","'}", 3),
+	ALPHA_V (4, "BINARY", JDBC_BINARY, MAX_CHAR_LENGTH),
+	ALPHA_V (4, "VARBINARY", JDBC_VARBINARY, MAX_VARCHAR_LENGTH),
+	// SQL_GUID: mapped from CHAR(16) CHARACTER SET OCTETS (3.0) or BINARY(16) (4.0+)
+	ALPHA ("CHAR(16) CHARACTER SET OCTETS", JDBC_GUID, 16),
 	// Date/time types must remain at the end (adjusted for ODBC 2.x/3.x in constructor)
 	DATE("DATE",JDBC_DATE,MAX_DATE_LENGTH,"{d'","'}",1),
 	DATETIME("TIME",JDBC_TIME,MAX_TIME_LENGTH,"{t'","'}",2),
@@ -155,7 +159,7 @@ TypesResultSet::TypesResultSet(int dataType, int appOdbcVersion, int bytesPerCha
 
 	int endRow = sizeof (types) / sizeof (types [0]);
 
-	if ( appOdbcVersion == 3 ) // SQL_OV_ODBC3
+	if ( appOdbcVersion == 3 || appOdbcVersion == 380 ) // SQL_OV_ODBC3 or SQL_OV_ODBC3_80
 	{
 		switch( dataTypes )
 		{

@@ -658,6 +658,8 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 				return &OdbcConvert::transferBinaryStringToAllowedType;
 			}
 			return &OdbcConvert::convBlobToBigint;
+		case SQL_C_GUID:
+			return &OdbcConvert::convBinaryToGuid;
 		case SQL_C_BINARY:
 			if ( to->isIndicatorSqlDa )
 				return &OdbcConvert::convBinaryToBlob;
@@ -999,6 +1001,8 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 					to->headSqlVarPtr->setTypeText();
 					return &OdbcConvert::transferStringWToDateTime;
 				}
+			case SQL_C_GUID:
+				return &OdbcConvert::convStringToGuid;
 			default:
 				return &OdbcConvert::notYetImplemented;
 			}
@@ -1011,6 +1015,10 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 			return &OdbcConvert::convGuidToString;
 		case SQL_C_WCHAR:
 			return &OdbcConvert::convGuidToStringW;
+		case SQL_C_BINARY:
+			return &OdbcConvert::convGuidToBinary;
+		case SQL_C_GUID:
+			return &OdbcConvert::convGuidToGuid;
 		default:
 			return &OdbcConvert::notYetImplemented;
 		}
@@ -1688,6 +1696,113 @@ int OdbcConvert::convGuidToStringW(DescRecord * from, DescRecord * to)
 	} else
 	if ( indicatorTo )
 		setIndicatorPtr(indicatorTo, len, to);
+
+	return SQL_SUCCESS;
+}
+
+int OdbcConvert::convGuidToBinary(DescRecord * from, DescRecord * to)
+{
+	char* pointer = (char*)getAdressBindDataTo((char*)to->dataPtr);
+	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
+	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
+
+	ODBCCONVERT_CHECKNULL( pointer );
+
+	SQLGUID *g = (SQLGUID*)getAdressBindDataFrom((char*)from->dataPtr);
+	int len = sizeof(SQLGUID);
+
+	if ( to->length >= len )
+		memcpy(pointer, g, len);
+	else
+		len = to->length;
+
+	if ( to->isIndicatorSqlDa ) {
+		to->headSqlVarPtr->setSqlLen(len);
+	} else
+	if ( indicatorTo )
+		setIndicatorPtr(indicatorTo, len, to);
+
+	return SQL_SUCCESS;
+}
+
+int OdbcConvert::convGuidToGuid(DescRecord * from, DescRecord * to)
+{
+	char* pointer = (char*)getAdressBindDataTo((char*)to->dataPtr);
+	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
+	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
+
+	ODBCCONVERT_CHECKNULL( pointer );
+
+	SQLGUID *g = (SQLGUID*)getAdressBindDataFrom((char*)from->dataPtr);
+	memcpy(pointer, g, sizeof(SQLGUID));
+
+	if ( to->isIndicatorSqlDa ) {
+		to->headSqlVarPtr->setSqlLen(sizeof(SQLGUID));
+	} else
+	if ( indicatorTo )
+		setIndicatorPtr(indicatorTo, sizeof(SQLGUID), to);
+
+	return SQL_SUCCESS;
+}
+
+int OdbcConvert::convBinaryToGuid(DescRecord * from, DescRecord * to)
+{
+	char* pointer = (char*)getAdressBindDataTo((char*)to->dataPtr);
+	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
+	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
+
+	ODBCCONVERT_CHECKNULL( pointer );
+
+	char *src = (char*)getAdressBindDataFrom((char*)from->dataPtr);
+	// Copy up to 16 bytes (sizeof SQLGUID) from binary source
+	int copyLen = (from->length < (int)sizeof(SQLGUID)) ? from->length : (int)sizeof(SQLGUID);
+	memset(pointer, 0, sizeof(SQLGUID));
+	memcpy(pointer, src, copyLen);
+
+	if ( to->isIndicatorSqlDa ) {
+		to->headSqlVarPtr->setSqlLen(sizeof(SQLGUID));
+	} else
+	if ( indicatorTo )
+		setIndicatorPtr(indicatorTo, sizeof(SQLGUID), to);
+
+	return SQL_SUCCESS;
+}
+
+int OdbcConvert::convStringToGuid(DescRecord * from, DescRecord * to)
+{
+	char* pointer = (char*)getAdressBindDataTo((char*)to->dataPtr);
+	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
+	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
+
+	ODBCCONVERT_CHECKNULL( pointer );
+
+	char *src = (char*)getAdressBindDataFrom((char*)from->dataPtr);
+	SQLGUID *g = (SQLGUID*)pointer;
+	unsigned int d1;
+	unsigned int d2, d3;
+	unsigned int d4[8];
+
+	int parsed = sscanf(src, "%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X",
+		&d1, &d2, &d3, &d4[0], &d4[1], &d4[2], &d4[3], &d4[4], &d4[5], &d4[6], &d4[7]);
+
+	if (parsed == 11)
+	{
+		g->Data1 = d1;
+		g->Data2 = (unsigned short)d2;
+		g->Data3 = (unsigned short)d3;
+		for (int i = 0; i < 8; i++)
+			g->Data4[i] = (unsigned char)d4[i];
+	}
+	else
+	{
+		memset(g, 0, sizeof(SQLGUID));
+	}
+
+	if ( to->isIndicatorSqlDa ) {
+		to->headSqlVarPtr->setSqlLen(sizeof(SQLGUID));
+	} else
+	if ( indicatorTo )
+		setIndicatorPtr(indicatorTo, sizeof(SQLGUID), to);
 
 	return SQL_SUCCESS;
 }

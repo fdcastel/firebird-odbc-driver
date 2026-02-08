@@ -98,7 +98,7 @@
 #define BUILD_ODBC_VER(zero1,major,zero2,minor,zero3,build) zero1 #major "." zero2 #minor "." zero3 #build
 #define STR_BUILD_ODBC_VER(zero1,major,zero2,minor,zero3,build) BUILD_ODBC_VER( zero1, major, zero2, minor, zero3, build )
 
-#define ODBC_DRIVER_VERSION	"03.51.0000"
+#define ODBC_DRIVER_VERSION	"03.80"
 #define ODBC_VERSION_NUMBER	STR_BUILD_ODBC_VER( ZERO_MAJOR, MAJOR_VERSION, ZERO_MINOR, MINOR_VERSION, ZERO_BUILDNUM, BUILDNUM_VERSION )
 
 namespace OdbcJdbcLibrary {
@@ -430,6 +430,23 @@ SQLRETURN OdbcConnection::sqlSetConnectAttr( SQLINTEGER attribute, SQLPOINTER va
 		if ( (intptr_t) value == SQL_ASYNC_ENABLE_ON )
 			return sqlReturn (SQL_ERROR, "HYC00", "Optional feature not implemented");
 		// SQL_ASYNC_ENABLE_OFF is fine — it's the only mode we support
+		break;
+
+	case SQL_ATTR_RESET_CONNECTION:
+		// ODBC 3.8: Driver Manager sets this when returning a connection to the pool.
+		// Reset connection attributes to defaults.
+		if ( (intptr_t) value == SQL_RESET_CONNECTION_YES )
+		{
+			autoCommit = true;
+			accessMode = SQL_MODE_READ_WRITE;
+			transactionIsolation = 0;
+			connectionTimeout = 0;
+			if (connection)
+			{
+				connection->setAutoCommit(true);
+				connection->setTransactionIsolation(0);
+			}
+		}
 		break;
 
 	case SQL_ATTR_ACCESS_MODE:
