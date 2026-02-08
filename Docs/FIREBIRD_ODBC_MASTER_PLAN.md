@@ -4,7 +4,7 @@
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
 **Last Updated**: February 8, 2026  
-**Version**: 2.2
+**Version**: 2.3
 
 > This document consolidates all known issues and newly identified architectural deficiencies.
 > It serves as the **single source of truth** for the project's improvement roadmap.
@@ -441,6 +441,76 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 
 **Deliverable**: Full ODBC 3.8 compliance; SQL_GUID type support with conversions; version-aware BINARY/VARBINARY types; 26 new tests (318 total).
 
+### Phase 9: Firebird OO API Alignment & Simplification
+**Priority**: Medium  
+**Duration**: 6–10 weeks  
+**Goal**: Fully leverage the Firebird OO API to eliminate legacy ISC code, remove intermediaries, reduce allocations, and unlock batch performance
+
+**Reference**: [Firebird OO API](https://github.com/FirebirdSQL/firebird/blob/master/doc/Using_OO_API.md) — see also [Docs/firebird-api.MD](firebird-api.MD)
+
+#### Background
+
+A comprehensive comparison of the current codebase against the Firebird OO API documentation (Using_OO_API.md) reveals that **the driver has already substantially migrated** from the legacy ISC C API to the modern OO API. The core subsystems — connections (`IAttachment`), transactions (`ITransaction`), statements (`IStatement`), result sets (`IResultSet`), blobs (`IBlob`), and metadata (`IMessageMetadata`/`IMetadataBuilder`) — are all using the OO API correctly.
+
+However, several significant opportunities remain:
+
+1. **Batch API (`IBatch`)** — The single biggest performance optimization available. Array parameter execution currently loops N individual server roundtrips; `IBatch` can do it in one.
+2. **Dead legacy code** — ~35 ISC function pointers loaded but never called; removal simplifies initialization and reduces confusion.
+3. **Events still on ISC API** — `IscUserEvents` uses legacy `isc_que_events()` when `IAttachment::queEvents()` exists.
+4. **Manual TPB construction** — One code path still hand-stuffs raw TPB bytes instead of using `IXpbBuilder`.
+5. **Manual date math** — ~150 lines of Julian-day arithmetic that `IUtil::decodeDate/encodeDate` already provides.
+6. **Dual error paths** — Both `THROW_ISC_EXCEPTION` (OO) and `THROW_ISC_EXCEPTION_LEGACY` (ISC) coexist; the legacy `isc_sqlcode()` function is still used even in the OO path.
+7. **Sqlda metadata overhead** — Data copy loops run on every execute even when metadata hasn't changed.
+
+#### Migration Status Summary
+
+| Category | Current API | Status | Remaining Work |
+|----------|-------------|--------|----------------|
+| Connection | `IAttachment`, `IProvider` | ✅ Complete | None |
+| Transaction | `ITransaction`, `IXpbBuilder(TPB)` | ✅ Mostly complete | Manual TPB in `processTransaction()` |
+| Statement | `IStatement` | ✅ Complete | None |
+| Result Set | `IResultSet` | ✅ Complete | None |
+| Blob | `IBlob` | ✅ Complete | None |
+| Metadata | `IMessageMetadata`, `IMetadataBuilder` | ✅ Complete | Optimize rebuild/copy overhead |
+| Batch | ❌ Not used | ❌ Row-by-row loop | Implement `IBatch` |
+| Events | ❌ Legacy ISC API | ❌ Uses `isc_que_events` | Migrate to `IAttachment::queEvents()` |
+| Arrays | ❌ Legacy ISC API | ❌ Uses `isc_array_*` | Blocked — no OO API equivalent |
+| Error handling | Mixed OO + ISC | ⚠️ Dual paths | Unify to OO-only |
+| Date/Time utils | Manual math | ⚠️ Works but redundant | Replace with `IUtil` |
+| LoadFbClientDll | ~50 function ptrs | ⚠️ ~35 dead | Remove dead pointers |
+
+#### Tasks
+
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
+| **9.1** | **Implement `IBatch` for array parameter execution (PARAMSET_SIZE > 1)** — Replace the row-by-row loop in `executeStatementParamArray()` with `IBatch::add()` + `IBatch::execute()` for non-BLOB statements. Map `IBatchCompletionState` to ODBC's `SQL_PARAM_STATUS_PTR`. Feature-gate on Firebird 4.0+ (fall back to loop for FB3). This is the **single biggest performance win**: N rows in 1 roundtrip instead of N roundtrips. | Hard | **Very High** | ❌ OPEN |
+| **9.2** | **Extend `IBatch` for inline BLOBs** — After 9.1, support `IBatch::addBlob()`/`addBlobStream()` for statements with BLOB parameters, avoiding per-row `createBlob()` overhead. | Hard | High | ❌ OPEN |
+| **9.3** | **Remove ~35 dead ISC function pointers from `CFbDll`** — Remove loaded-but-never-called function pointers: all `_dsql_*`, `_attach_database`, `_detach_database`, `_start_*`, `_commit_*`, `_rollback_*`, `_create_blob*`, `_open_blob*`, `_get_segment`, `_put_segment`, `_close_blob`, `_cancel_blob`, `_blob_info`, `_decode_sql_*`, `_encode_sql_*`, `_service_*`, `_prepare_transaction*`, `_interpet`, etc. Keep only: `_array_*` (3), `_get_database_handle`, `_get_transaction_handle`, `_vax_integer`, `_sqlcode`, `fb_get_master_interface`. | Easy | Medium | ❌ OPEN |
+| **9.4** | **Migrate `IscUserEvents` from ISC to OO API** — Replace `isc_que_events()` with `IAttachment::queEvents()` returning `IEvents*`. Replace `isc_cancel_events()` with `IEvents::cancel()`. Eliminates the need for `_get_database_handle` in events code. | Medium | Medium | ❌ OPEN |
+| **9.5** | **Migrate manual TPB construction to `IXpbBuilder`** — Replace the raw byte-stuffing in `IscConnection::processTransaction()` (the SET TRANSACTION parser path that builds `char tpbBuffer[4096]` manually) with `IXpbBuilder(TPB)`. Remove manual endianness handling for lock timeout values. | Medium | Medium | ❌ OPEN |
+| **9.6** | **Replace manual Julian-day date/time math with `IUtil`** — Replace the ~150-line `OdbcDateTime::ndate()`/`OdbcDateTime::decode()`/`OdbcDateTime::encode()` implementations with `IUtil::decodeDate/encodeDate/decodeTime/encodeTime`. The `IUtil*` is available via `IMaster::getUtilInterface()`. | Medium | Medium | ❌ OPEN |
+| **9.7** | **Unify error handling — eliminate legacy error path** — Create a single `throwFbException(IStatus*)` helper to replace both `THROW_ISC_EXCEPTION` and `THROW_ISC_EXCEPTION_LEGACY` macros. Remove `getIscStatusTextLegacy()` and its manual `fb_interpret` loop. Replace `isc_sqlcode()` usage with direct ISC error code extraction from `IStatus::getErrors()`. | Medium | Medium | ❌ OPEN |
+| **9.8** | **Optimize Sqlda data copy — skip when metadata unchanged** — In `Sqlda::getInputExecBuffer()`, short-circuit the per-column `memcpy` loop when `rebuildMetaData == false` and exec buffer is the same as the data buffer. Eliminates unnecessary copies on every execute. | Easy | Medium | ❌ OPEN |
+| **9.9** | **Replace `isc_vax_integer` with inline helper** — Replace the loaded function pointer with a `static inline` byte-swap function (4 lines of code). Eliminates the last utility dependency on the ISC function table. | Easy | Low | ❌ OPEN |
+| **9.10** | **Mark `IscConnection` as `final`** — Add `final` keyword to `IscConnection` and other concrete IscDbc classes to enable compiler devirtualization. No other implementations exist. | Easy | Low | ❌ OPEN |
+| **9.11** | **Remove commented-out legacy ISC code** — Clean up dead `#if 0` / commented-out ISC API blocks in IscStatement.cpp, IscPreparedStatement.cpp, IscCallableStatement.cpp, and Sqlda.cpp. | Easy | Low | ❌ OPEN |
+
+#### Architecture Notes
+
+**Why the IscDbc abstraction layer should be kept (for now)**: Despite being the only implementation, the IscDbc layer (Connection → IscConnection, Statement → IscStatement, etc.) provides a clean separation between ODBC spec compliance and database operations. Collapsing it would be a high-risk refactor affecting every file with moderate benefit — the virtual dispatch overhead is negligible compared to actual ODBC/network latency. The layer should be retained but the concrete classes should be marked `final` for devirtualization.
+
+**Why Arrays cannot be migrated**: The Firebird OO API does not expose `IAttachment::getSlice()`/`putSlice()` equivalents for array access. The current code uses `_get_database_handle`/`_get_transaction_handle` to obtain legacy handles from OO API objects, then calls `isc_array_get_slice()`/`isc_array_put_slice()`. This bridge pattern must remain until Firebird adds OO API array support. The 3 array functions + 2 bridge functions are the irreducible minimum of ISC API usage.
+
+**`IBatch` implementation strategy**: The `IBatch` interface (Firebird 4.0+) is the highest-impact improvement. Implementation steps:
+1. In `executeStatementParamArray()`, detect if `IBatch` is available (FB4+) and no array/BLOB parameters exist
+2. Call `IStatement::createBatch()` with `RECORD_COUNTS` enabled
+3. For each parameter set, build the message buffer using existing Sqlda logic and call `IBatch::add()`
+4. Call `IBatch::execute()` — single server roundtrip for all rows
+5. Map `IBatchCompletionState::getState()` to `SQL_PARAM_STATUS_PTR` values: `EXECUTE_FAILED` → `SQL_PARAM_ERROR`, else `SQL_PARAM_SUCCESS`
+6. Handle `TAG_MULTIERROR` based on `SQL_ATTR_PARAMS_PROCESSED_PTR` requirements
+
+**Deliverable**: Legacy ISC API usage reduced from ~50 function pointers to ~5 (array only); batch execution up to 100x faster for bulk operations; unified error handling; simplified date/time code; cleaner initialization.
+
 ---
 
 ## 5. Implementation Guidelines
@@ -572,6 +642,7 @@ Work incrementally. Each phase should be a series of focused, reviewable commits
 | Phase 3 | 318 tests (318 pass). Comprehensive coverage: null handles, connections, cursors, descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape passthrough, server versions, batch params, array binding (column-wise + row-wise), ConnSettings, scrollable cursors, connect options, errors, result/param conversions, prepared statements, cursor-commit, data-at-execution, ODBC 3.8 compliance, GUID/binary types. CI tests on Windows + Linux. |
 | Phase 4 | 270 tests (270 pass). Batch execution validated (row-wise + column-wise, with operation ptr + error handling). Scrollable cursors verified (all orientations). `SQLGetTypeInfo` extended for FB4+ types. ConnSettings implemented. Server version feature-flagging in place. ODBC escape sequences removed (SQL sent AS IS). |
 | Phase 5 | No raw `new`/`delete` in new code. Consistent formatting. Doxygen comments on public APIs. |
+| Phase 9 | Legacy ISC function pointers reduced from ~50 to ~5 (array only). `IBatch` used for PARAMSET_SIZE > 1 on FB4+. Events migrated to `IAttachment::queEvents()`. Unified error handling (single path). No manual date math or TPB construction. All existing tests still pass. |
 
 ### 6.2 Overall Quality Targets
 
@@ -652,9 +723,11 @@ Quick reference for which files need changes in each phase.
 - [psqlodbc Source Code](https://git.postgresql.org/gitweb/?p=psqlodbc.git) (reference in `./tmp/psqlodbc/`)
 - [Firebird 5.0 Language Reference](https://firebirdsql.org/file/documentation/html/en/refdocs/fblangref50/firebird-50-language-reference.html)
 - [Firebird New OO API Reference](https://github.com/FirebirdSQL/firebird/blob/master/doc/Using_OO_API.md)
+- [Firebird OO API Summary for Driver Authors](firebird-api.MD)
+- [Firebird IBatch Interface](https://github.com/FirebirdSQL/firebird/blob/master/doc/Using_OO_API.md#modifying-data-in-a-batch)
 
 
 ---
 
-*Document version: 2.2 — February 8, 2026*  
+*Document version: 2.3 — February 8, 2026*  
 *This is the single authoritative reference for all Firebird ODBC driver improvements.*
