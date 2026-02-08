@@ -96,11 +96,11 @@
 
 | # | Issue | Discovery | Status | File(s) |
 |---|-------|-----------|--------|---------|
-| OC-1 | `SQLCopyDesc` crashes (access violation 0xC0000005) when copying an ARD that has no bound records — `operator=` in OdbcDesc iterates `records[]` without checking if source `records` pointer is NULL | odbc-crusher Descriptor Tests (ERR CRASH) | ❌ OPEN | OdbcDesc.cpp (`operator=` line ~213) |
-| OC-2 | `SQL_DIAG_ROW_COUNT` via `SQLGetDiagField` always returns 0 — the `sqlDiagRowCount` field is never populated after `SQLExecDirect`/`SQLExecute`; row count is only available through `SQLRowCount` | odbc-crusher `test_diagfield_row_count` | ❌ OPEN | OdbcObject.cpp (sqlGetDiagField), OdbcStatement.cpp (execute paths) |
-| OC-3 | `SQL_ATTR_CONNECTION_TIMEOUT` not supported — `SQLGetConnectAttr` / `SQLSetConnectAttr` do not handle this attribute (falls through to HYC00); only `SQL_ATTR_LOGIN_TIMEOUT` is implemented | odbc-crusher `test_connection_timeout` | ❌ OPEN | OdbcConnection.cpp (sqlGetConnectAttr, sqlSetConnectAttr) |
-| OC-4 | `SQL_ATTR_ASYNC_ENABLE` accepted at connection level but non-functional — value stored but never used; statement-level getter always returns `SQL_ASYNC_ENABLE_OFF` regardless | odbc-crusher `test_async_capability` | ❌ OPEN (Low Priority) | OdbcConnection.cpp, OdbcStatement.cpp |
-| OC-5 | `SQLGetInfo(SQL_DRIVER_NAME)` truncation: when a buffer too small for the DLL filename is provided, the `pcbInfoValue` returned by the driver through the DM chain may not correctly reflect the full required length — DM/driver interaction needs investigation | odbc-crusher `test_truncation_indicators` | ❌ OPEN (needs investigation) | OdbcConnection.cpp (returnStringInfo), Main.cpp (DM interaction) |
+| OC-1 | `SQLCopyDesc` crashes (access violation 0xC0000005) when copying an ARD that has no bound records — `operator=` in OdbcDesc iterates `records[]` without checking if source `records` pointer is NULL | odbc-crusher Descriptor Tests (ERR CRASH) | ✅ RESOLVED | OdbcDesc.cpp (`operator=`) |
+| OC-2 | `SQL_DIAG_ROW_COUNT` via `SQLGetDiagField` always returns 0 — the `sqlDiagRowCount` field is never populated after `SQLExecDirect`/`SQLExecute`; row count is only available through `SQLRowCount` | odbc-crusher `test_diagfield_row_count` | ✅ RESOLVED | OdbcObject.h (setDiagRowCount), OdbcObject.cpp (write as SQLLEN), OdbcStatement.cpp (3 execute paths) |
+| OC-3 | `SQL_ATTR_CONNECTION_TIMEOUT` not supported — `SQLGetConnectAttr` / `SQLSetConnectAttr` do not handle this attribute (falls through to HYC00); only `SQL_ATTR_LOGIN_TIMEOUT` is implemented | odbc-crusher `test_connection_timeout` | ✅ RESOLVED | OdbcConnection.cpp (both setter and getter now handle SQL_ATTR_CONNECTION_TIMEOUT; also fixed SQL_LOGIN_TIMEOUT getter which was falling through to error) |
+| OC-4 | `SQL_ATTR_ASYNC_ENABLE` accepted at connection level but non-functional — value stored but never used; statement-level getter always returns `SQL_ASYNC_ENABLE_OFF` regardless | odbc-crusher `test_async_capability` | ✅ RESOLVED | OdbcConnection.cpp (rejects SQL_ASYNC_ENABLE_ON with HYC00), OdbcStatement.cpp (same) |
+| OC-5 | `returnStringInfo()` truncation bug: on truncation, `*returnLength` was overwritten with the truncated buffer size instead of the full string length, violating the ODBC spec requirement that truncated calls report the total bytes available | odbc-crusher `test_truncation_indicators` | ✅ RESOLVED | OdbcObject.cpp (returnStringInfo — removed the `*returnLength = maxLength` overwrite; also added NULL guard to SQLINTEGER* overload) |
 
 ### 1.6 Test Infrastructure Issues
 
@@ -209,7 +209,7 @@ The ODBC API is a C boundary where applications can pass any value — NULL poin
 
 ### 3.5 Testing Was an Afterthought
 
-The test suite was created recently (2026) after significant bugs were found. psqlodbc has maintained a regression test suite for decades. **UPDATE (Feb 7, 2026):** A comprehensive Google Test suite now exists with 270 tests across 24 test suites covering null handles, connections, cursors (including scrollable), descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape sequence passthrough, server version detection, batch parameters, **array binding (column-wise + row-wise, with NULL values, operation ptr, 1000-row stress, UPDATE/DELETE, multi-type)**, ConnSettings, scrollable cursor fetch orientations, connection options, error handling, result conversions, parameter conversions, prepared statements, cursor-commit behavior, and data-at-execution. Tests run on both Windows and Linux via CI.
+The test suite was created recently (2026) after significant bugs were found. psqlodbc has maintained a regression test suite for decades. **UPDATE (Feb 8, 2026):** A comprehensive Google Test suite now exists with 288 tests across 29 test suites covering null handles, connections, cursors (including scrollable), descriptors, multi-statement, data types, BLOBs, savepoints, catalog functions, bind cycling, escape sequence passthrough, server version detection, batch parameters, **array binding (column-wise + row-wise, with NULL values, operation ptr, 1000-row stress, UPDATE/DELETE, multi-type)**, ConnSettings, scrollable cursor fetch orientations, connection options, error handling, result conversions, parameter conversions, prepared statements, cursor-commit behavior, and data-at-execution. Tests run on both Windows and Linux via CI.
 
 ### 3.6 No Entry-Point Discipline
 
@@ -399,22 +399,22 @@ SQLRETURN SQL_API SQLXxx(SQLHSTMT hStmt, ...) {
 
 **Deliverable**: 8 new test files; 110 new test cases covering all Tier 1 and Tier 2 psqlodbc areas; 270 total tests passing.
 
-### Phase 7: ODBC Crusher-Identified Bugs (February 8, 2026)
+### Phase 7: ODBC Crusher-Identified Bugs ✅ (Completed — February 8, 2026)
 **Priority**: Medium  
-**Duration**: 1–2 weeks  
+**Duration**: 1 day  
 **Goal**: Fix the 5 genuine issues identified by ODBC Crusher v0.3.1 source-level analysis
 
 | Task | Issues Addressed | Effort | Status |
 |------|-----------------|--------|--------|
-| 7.1 Fix `SQLCopyDesc` crash when source descriptor has no bound records (null `records` pointer dereference in `operator=`) | OC-1 | 0.5 day | ❌ OPEN |
-| 7.2 Populate `sqlDiagRowCount` field after `SQLExecDirect`/`SQLExecute` so `SQLGetDiagField(SQL_DIAG_ROW_COUNT)` returns the actual affected row count | OC-2 | 1 day | ❌ OPEN |
-| 7.3 Implement `SQL_ATTR_CONNECTION_TIMEOUT` in `sqlGetConnectAttr`/`sqlSetConnectAttr` (map to Firebird connection timeout) | OC-3 | 0.5 day | ❌ OPEN |
-| 7.4 Either properly implement `SQL_ATTR_ASYNC_ENABLE` or reject it with `HYC00` instead of silently accepting | OC-4 | 0.5 day | ❌ OPEN |
-| 7.5 Investigate `SQLGetInfo` truncation indicator behavior through the DM — verify `pcbInfoValue` reports full length when truncated | OC-5 | 1 day | ❌ OPEN |
+| ✅ 7.1 Fix `SQLCopyDesc` crash when source descriptor has no bound records (null `records` pointer dereference in `operator=`) | OC-1 | 0.5 day | Completed Feb 8, 2026: Added null guard for `sour.records` and early return when `sour.headCount == 0`; 3 tests |
+| ✅ 7.2 Populate `sqlDiagRowCount` field after `SQLExecDirect`/`SQLExecute` so `SQLGetDiagField(SQL_DIAG_ROW_COUNT)` returns the actual affected row count | OC-2 | 1 day | Completed Feb 8, 2026: Added `setDiagRowCount()` protected setter; populated in `executeStatement()`, `executeStatementParamArray()`, `executeProcedure()`; fixed `sqlGetDiagField` to write as `SQLLEN*`; 4 tests |
+| ✅ 7.3 Implement `SQL_ATTR_CONNECTION_TIMEOUT` in `sqlGetConnectAttr`/`sqlSetConnectAttr` (map to Firebird connection timeout) | OC-3 | 0.5 day | Completed Feb 8, 2026: Added `SQL_ATTR_CONNECTION_TIMEOUT` to both getter and setter; also fixed `SQL_LOGIN_TIMEOUT` getter which was falling through to HYC00; 3 tests |
+| ✅ 7.4 Either properly implement `SQL_ATTR_ASYNC_ENABLE` or reject it with `HYC00` instead of silently accepting | OC-4 | 0.5 day | Completed Feb 8, 2026: Connection-level and statement-level setters now reject `SQL_ASYNC_ENABLE_ON` with HYC00; getters return `SQL_ASYNC_ENABLE_OFF`; 5 tests |
+| ✅ 7.5 Investigate `SQLGetInfo` truncation indicator behavior through the DM — verify `pcbInfoValue` reports full length when truncated | OC-5 | 1 day | Completed Feb 8, 2026: Fixed `returnStringInfo()` to preserve full string length on truncation instead of overwriting with buffer size; added NULL guard to SQLINTEGER* overload; 3 tests |
 
 **Note**: These 5 bugs were identified through source-level analysis of ODBC Crusher v0.3.1. Out of 27 non-passing tests, 22 were caused by test design issues (hardcoded `CUSTOMERS`/`USERS` tables that don't exist in the Firebird database). See `ODBC_CRUSHER_RECOMMENDATIONS.md` for details on what the odbc-crusher developers should fix.
 
-**Deliverable**: All 5 genuine bugs fixed; descriptor crash eliminated; diagnostic row count functional.
+**Deliverable**: All 5 genuine bugs fixed; descriptor crash eliminated; diagnostic row count functional. 18 new tests added (288 total).
 
 ---
 

@@ -200,13 +200,21 @@ SQLRETURN OdbcDesc::operator =(OdbcDesc &sour)
 		return sqlReturn (SQL_ERROR, "HY007", "Associated statement is not prepared");
 
 	removeRecords();
-	getDescRecord(sour.headCount);
 
 	headArraySize = sour.headArraySize;
 	headArrayStatusPtr = sour.headArrayStatusPtr;
 	headBindOffsetPtr = sour.headBindOffsetPtr;
 	headRowsProcessedPtr = sour.headRowsProcessedPtr;
 	headBindType = sour.headBindType;
+
+	// If source has no records (empty descriptor), nothing to copy
+	if ( sour.headCount == 0 || sour.records == NULL )
+	{
+		headCount = 0;
+		return sqlSuccess();
+	}
+
+	getDescRecord(sour.headCount);
 
 	for ( int n = 0 ; n <= headCount ; n++ )
 	{

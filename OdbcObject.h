@@ -119,6 +119,10 @@ protected:
 	/// Row count for scrollable cursors (used heavily by OdbcStatement).
 	SQLINTEGER	sqlDiagCursorRowCount;			// SQL_DIAG_CURSOR_ROW_COUNT
 
+	/// Set the SQL_DIAG_ROW_COUNT diagnostic header field.
+	/// Called by OdbcStatement after DML execution.
+	void setDiagRowCount(SQLINTEGER count) { sqlDiagRowCount = count; }
+
 private:
 	// Diagnostic header fields — only accessed within OdbcObject methods.
 	SQLCHAR *	sqlDiagDynamicFunction;			// SQL_DIAG_DYNAMIC_FUNCTION

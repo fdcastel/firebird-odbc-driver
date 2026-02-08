@@ -2890,16 +2890,31 @@ SQLRETURN OdbcStatement::executeStatement()
 	{
 		resultSet->readStaticCursor(); 
 		setCursorRowCount(resultSet->getCountRowsStaticCursor());
+		setDiagRowCount(-1);	// Not meaningful for SELECTs
 	}
-	else if ( statement->isActiveModify() && statement->getUpdateCount() <= 0 )
+	else if ( statement->isActiveSelect() )
 	{
-		if ( connection->env->useAppOdbcVersion == SQL_OV_ODBC3 )
-			return SQL_NO_DATA;
-		else
+		setDiagRowCount(-1);	// Not meaningful for SELECTs
+	}
+	else if ( statement->isActiveModify() )
+	{
+		int updateCount = statement->getUpdateCount();
+		setDiagRowCount(updateCount);
+
+		if ( updateCount <= 0 )
 		{
-			postError( "01S03", "No rows updated or deleted" );
-			return SQL_SUCCESS_WITH_INFO;
+			if ( connection->env->useAppOdbcVersion == SQL_OV_ODBC3 )
+				return SQL_NO_DATA;
+			else
+			{
+				postError( "01S03", "No rows updated or deleted" );
+				return SQL_SUCCESS_WITH_INFO;
+			}
 		}
+	}
+	else
+	{
+		setDiagRowCount(-1);	// DDL or other statement type
 	}
 
 	return SQL_SUCCESS;
@@ -2998,6 +3013,9 @@ SQLRETURN OdbcStatement::executeStatementParamArray()
 	if ( statement->getMoreResults() )
 		setResultSet (statement->getResultSet(), false);
 
+	// Populate SQL_DIAG_ROW_COUNT with total rows affected across all parameter sets
+	setDiagRowCount(statement->getUpdateCount());
+
 	if ( hadError )
 		return SQL_SUCCESS_WITH_INFO;
 
@@ -3050,6 +3068,9 @@ SQLRETURN OdbcStatement::executeProcedure()
 			}
 		}
 	}
+
+	// Populate SQL_DIAG_ROW_COUNT for procedure execution
+	setDiagRowCount(statement->getUpdateCount());
 
 	return ret;
 }
@@ -3483,7 +3504,9 @@ SQLRETURN OdbcStatement::sqlSetStmtAttr(int attribute, SQLPOINTER ptr, int lengt
 			break;
 
 		case SQL_ATTR_ASYNC_ENABLE:			// 4
-			asyncEnable = (intptr_t) ptr == SQL_ASYNC_ENABLE_ON;
+			if ( (intptr_t) ptr == SQL_ASYNC_ENABLE_ON )
+				return sqlReturn (SQL_ERROR, "HYC00", "Optional feature not implemented");
+			// SQL_ASYNC_ENABLE_OFF is fine — it's the only mode we support
 			TRACE02(SQL_ATTR_ASYNC_ENABLE,(intptr_t) ptr);
 			break;
 

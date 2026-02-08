@@ -58,7 +58,9 @@ OdbcObject::~OdbcObject()
 SQLRETURN OdbcObject::returnStringInfo(SQLPOINTER ptr, SQLSMALLINT maxLength, SQLSMALLINT* returnLength, const char * value)
 {
 	int count = (int)strlen (value);
-	*returnLength = count;
+
+	if (returnLength)
+		*returnLength = count;
 
 	if ( ptr && maxLength > 0 )
 	{
@@ -71,7 +73,7 @@ SQLRETURN OdbcObject::returnStringInfo(SQLPOINTER ptr, SQLSMALLINT maxLength, SQ
 
 		memcpy (ptr, value, maxLength);
 		((char*) ptr) [maxLength] = 0;
-		*returnLength = maxLength;
+		// returnLength already set to full count above (per ODBC spec)
 	}
 
 	return sqlReturn (SQL_SUCCESS_WITH_INFO, "01004", "String data, right truncated");
@@ -82,7 +84,8 @@ SQLRETURN OdbcObject::returnStringInfo(SQLPOINTER ptr, SQLSMALLINT maxLength, SQ
 	// Delegate to the SQLSMALLINT* overload and widen the result
 	SQLSMALLINT shortLength = 0;
 	SQLRETURN ret = returnStringInfo(ptr, maxLength, &shortLength, value);
-	*returnLength = shortLength;
+	if (returnLength)
+		*returnLength = shortLength;
 	return ret;
 }
 
@@ -311,7 +314,7 @@ SQLRETURN OdbcObject::sqlGetDiagField(int recNumber, int diagId, SQLPOINTER ptr,
 
 	case SQL_DIAG_ROW_COUNT:
 		if (ptr)
-			*(SQLINTEGER*)ptr = sqlDiagRowCount;
+			*(SQLLEN*)ptr = sqlDiagRowCount;
 		return SQL_SUCCESS;
 	}
 

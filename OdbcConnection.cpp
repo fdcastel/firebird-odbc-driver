@@ -405,6 +405,7 @@ SQLRETURN OdbcConnection::sqlSetConnectAttr( SQLINTEGER attribute, SQLPOINTER va
 		break;
 
 	case SQL_ATTR_LOGIN_TIMEOUT:
+	case SQL_ATTR_CONNECTION_TIMEOUT:
 		connectionTimeout = (intptr_t) value;
 		break;
 
@@ -425,9 +426,10 @@ SQLRETURN OdbcConnection::sqlSetConnectAttr( SQLINTEGER attribute, SQLPOINTER va
 			connection->setTransactionIsolation( (intptr_t) value );
 		break;
 
-		//Added by CA
 	case SQL_ATTR_ASYNC_ENABLE:
-		asyncEnabled = (intptr_t) value;
+		if ( (intptr_t) value == SQL_ASYNC_ENABLE_ON )
+			return sqlReturn (SQL_ERROR, "HYC00", "Optional feature not implemented");
+		// SQL_ASYNC_ENABLE_OFF is fine — it's the only mode we support
 		break;
 
 	case SQL_ATTR_ACCESS_MODE:
@@ -2140,7 +2142,12 @@ SQLRETURN OdbcConnection::sqlGetConnectAttr(int attribute, SQLPOINTER ptr, int b
 	switch (attribute)
 	{
 	case SQL_ATTR_ASYNC_ENABLE:
-		value = asyncEnabled;
+		value = SQL_ASYNC_ENABLE_OFF;	// Async not supported; always report OFF
+		break;
+
+	case SQL_ATTR_LOGIN_TIMEOUT:
+	case SQL_ATTR_CONNECTION_TIMEOUT:
+		value = connectionTimeout;
 		break;
 
 	case SQL_ATTR_ACCESS_MODE:			//   101		
@@ -2174,7 +2181,6 @@ SQLRETURN OdbcConnection::sqlGetConnectAttr(int attribute, SQLPOINTER ptr, int b
 		string = databaseName;
 		break;
 
-	case SQL_LOGIN_TIMEOUT:			//   103
 	case SQL_OPT_TRACE:				//   104
 	case SQL_OPT_TRACEFILE:			//   105
 	case SQL_TRANSLATE_DLL:			//   106
