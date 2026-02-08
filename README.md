@@ -73,87 +73,52 @@ Driver={Firebird ODBC Driver};Database=myserver:/data/mydb.fdb;UID=SYSDBA;PWD=ma
 |-------------|---------|
 | C++ compiler | C++17 capable (MSVC 2019+, GCC 7+, Clang 5+) |
 | CMake | 3.15 or later |
+| PowerShell | 7.0 or later |
+| [Invoke-Build](https://github.com/nightroman/Invoke-Build) | Any |
 | ODBC headers | Windows SDK (included) or unixODBC-dev (Linux) |
 
 No Firebird installation is needed to build — the Firebird client headers are included in the repository (`FBClient.Headers/`). At runtime, the driver loads `fbclient.dll` / `libfbclient.so` dynamically.
 
-### Windows
+Install Invoke-Build (one-time):
 
 ```powershell
-# Configure
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
-
-# Build
-cmake --build build --config Release
-
-# The driver DLL is at: build\Release\FirebirdODBC.dll
+Install-Module InvokeBuild -Scope CurrentUser
 ```
 
-### Linux
-
-```bash
-# Install ODBC development package
-sudo apt-get install unixodbc-dev cmake g++
-
-# Configure
-cmake -B build -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=ON
-
-# Build
-cmake --build build -- -j$(nproc)
-
-# The driver shared object is at: build/libOdbcFb.so
-```
-
-### CMake Options
-
-| Option | Default | Description |
-|--------|---------|-------------|
-| `BUILD_TESTING` | `ON` | Build the test suite |
-| `BUILD_SHARED_LIBS` | `ON` | Build as shared library (DLL/SO) |
-| `BUILD_SETUP` | `OFF` | Build the Windows setup/configuration dialog |
-
----
-
-## Installing the Driver
-
-### Windows
-
-Register the driver in the ODBC Driver Manager:
+### Build
 
 ```powershell
-# Register using the ODBC installer API (run as Administrator)
-$driverPath = "C:\path\to\FirebirdODBC.dll"
+# Debug build (default)
+Invoke-Build build
 
-$regPath = "HKLM:\SOFTWARE\ODBC\ODBCINST.INI\Firebird ODBC Driver"
-New-Item -Path "HKLM:\SOFTWARE\ODBC\ODBCINST.INI" -Name "Firebird ODBC Driver" -Force
-Set-ItemProperty -Path $regPath -Name "Driver" -Value $driverPath -Type String
-Set-ItemProperty -Path $regPath -Name "Setup" -Value $driverPath -Type String
-Set-ItemProperty -Path $regPath -Name "DriverODBCVer" -Value "03.51" -Type String
-
-$driversPath = "HKLM:\SOFTWARE\ODBC\ODBCINST.INI\ODBC Drivers"
-Set-ItemProperty -Path $driversPath -Name "Firebird ODBC Driver" -Value "Installed" -Type String
+# Release build
+Invoke-Build build -Configuration Release
 ```
 
-### Linux
+The driver output is at `build\<Configuration>\FirebirdODBC.dll` (Windows) or `build/libOdbcFb.so` (Linux).
 
-Register the driver in `/etc/odbcinst.ini`:
+### Install / Uninstall
 
-```ini
-[Firebird ODBC Driver]
-Description = Firebird ODBC Driver
-Driver = /usr/local/lib/odbc/libOdbcFb.so
-Setup = /usr/local/lib/odbc/libOdbcFb.so
-FileUsage = 1
+Register the built driver in the system ODBC driver list:
+
+```powershell
+# Install — Debug configuration registers as "Firebird ODBC Driver (Debug)"
+Invoke-Build install
+
+# Install — Release configuration registers as "Firebird ODBC Driver"
+Invoke-Build install -Configuration Release
+
+# Uninstall
+Invoke-Build uninstall
+Invoke-Build uninstall -Configuration Release
 ```
 
-Then copy the built library:
+On Windows this writes to the registry (`HKLM:\SOFTWARE\ODBC\ODBCINST.INI`). On Linux this uses `odbcinst`.
 
-```bash
-sudo mkdir -p /usr/local/lib/odbc
-sudo cp build/libOdbcFb.so /usr/local/lib/odbc/
+### Clean
 
-# Verify
-odbcinst -q -d
+```powershell
+Invoke-Build clean
 ```
 
 ---
@@ -164,8 +129,8 @@ Tests use [Google Test](https://github.com/google/googletest/) and are fetched a
 
 ### Without a database (unit tests only)
 
-```bash
-ctest --test-dir build --output-on-failure -C Release
+```powershell
+Invoke-Build test
 ```
 
 ### With a Firebird database (full integration tests)
@@ -175,13 +140,13 @@ Set the `FIREBIRD_ODBC_CONNECTION` environment variable to enable integration te
 ```powershell
 # PowerShell (Windows)
 $env:FIREBIRD_ODBC_CONNECTION='Driver={Firebird ODBC Driver};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=C:\Firebird\fbclient.dll'
-ctest --test-dir build --output-on-failure -C Release
+Invoke-Build test
 ```
 
-```bash
-# Bash (Linux)
-export FIREBIRD_ODBC_CONNECTION='Driver={Firebird ODBC Driver};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=/usr/lib/libfbclient.so'
-ctest --test-dir build --output-on-failure
+```powershell
+# PowerShell (Linux)
+$env:FIREBIRD_ODBC_CONNECTION='Driver={Firebird ODBC Driver};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=/usr/lib/libfbclient.so'
+Invoke-Build test
 ```
 
 ### CI
@@ -198,6 +163,7 @@ The project includes GitHub Actions workflows (`.github/workflows/build-and-test
 ## Project Structure
 
 ```
+├── firebird-odbc-driver.build.ps1  # Invoke-Build script (build, test, install, uninstall)
 ├── CMakeLists.txt          # Top-level CMake build configuration
 ├── Main.cpp                # ODBC ANSI entry points (SQLConnect, SQLExecDirect, etc.)
 ├── MainUnicode.cpp         # ODBC Unicode (W) entry points (SQLConnectW, etc.)
