@@ -661,10 +661,8 @@ const char* Value::getString(char **tempPtr)
 	if (!tempPtr)	//NOMEY +
 		throw SQLEXCEPTION (BUG_CHECK, "NULL-Pointer in Value::getString"); //NOMEY +
 
- 	if (*tempPtr)
-//	delete *tempPtr;   // NOMEY -
-	delete[] *tempPtr; // NOMEY +
-
+	if (*tempPtr)
+		delete[] *tempPtr;
 
 	*tempPtr = new char [length + 1];
 	strcpy (*tempPtr, temp);

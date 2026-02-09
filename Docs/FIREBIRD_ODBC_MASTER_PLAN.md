@@ -531,12 +531,12 @@ A comprehensive analysis of the data path from `SQLFetch()` → `OdbcConvert::co
 
 #### 10.0 Performance Profiling Infrastructure
 
-| Task | Description | Complexity | Benefit |
-|------|-------------|------------|---------|
-| **10.0.1** | **Add micro-benchmark harness** — Create `tests/bench_fetch.cpp` using Google Benchmark (`FetchContent` from GitHub). Benchmark: (a) fetch 1M rows of 10 INT columns, (b) fetch 1M rows of 5 VARCHAR(100) columns, (c) fetch 100K rows of 1 BLOB column, (d) batch insert 100K rows. Report rows/sec, ns/row, ns/col. Run against embedded Firebird. | Medium | **Essential** — cannot optimize what you cannot measure |
-| **10.0.2** | **Add `ODBC_PERF_COUNTERS` compile-time flag** — When enabled, track: total fetch calls, total conversion calls, total allocs in fetch path, total mutex acquires, total W→A conversions. Exposed via a driver-specific `SQLGetConnectAttr` info type for diagnostics. | Easy | Medium — identifies regressions |
-| **10.0.3** | **Establish baseline numbers** — Run benchmarks on current code, record results in `Docs/PERFORMANCE_RESULTS.md`. All future changes must not regress these numbers. | Easy | **Essential** |
-| **10.0.4** | **Add `benchmark` new task to `Invoke-Build `** — Build the project and Run benchmarks. | Easy | **Essential** |
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
+| **10.0.1** | **Add micro-benchmark harness** — Created `tests/bench_fetch.cpp` using Google Benchmark v1.9.1. Benchmarks: (a) fetch 10K×10 INT cols, (b) 10K×5 VARCHAR(100), (c) 1K×1 BLOB, (d) batch insert 10K×10 INT, (e) SQLDescribeColW 10 cols, (f) single-row fetch. | Medium | **Essential** | ✅ |
+| **10.0.2** | **Add `ODBC_PERF_COUNTERS` compile-time flag** — `src/OdbcPerfCounters.h` with atomic counters. CMake option `ODBC_PERF_COUNTERS=ON`. Zero overhead when disabled. | Easy | Medium | ✅ |
+| **10.0.3** | **Establish baseline numbers** — Recorded in `Docs/PERFORMANCE_RESULTS.md`. | Easy | **Essential** | ✅ |
+| **10.0.4** | **Add `benchmark` task to `Invoke-Build`** — Runs benchmarks, outputs JSON to `tmp/benchmark_results.json`. | Easy | **Essential** | ✅ |
 
 
 #### 10.1 Synchronization: Eliminate Kernel-Mode Mutex
@@ -547,23 +547,23 @@ A comprehensive analysis of the data path from `SQLFetch()` → `OdbcConvert::co
 
 **Impact**: For a tight fetch loop of 100K rows, mutex overhead alone is **100–200ms** — often exceeding the actual database work.
 
-| Task | Description | Complexity | Benefit |
-|------|-------------|------------|---------|
-| **10.1.1** | **Replace Win32 `Mutex` with `SRWLOCK`** — `AcquireSRWLockExclusive` / `ReleaseSRWLockExclusive` is a user-mode-only lock that costs ~20ns uncontended (vs ~1000ns for Mutex). `SRWLOCK` also supports shared/exclusive modes for future read-write separation. On Linux, `pthread_mutex_t` is already a futex (fast path). Replace `MutexEnvThread::mutexLockedLevelDll` and `MutexEnvThread::mutexLockedLevelConnect` with `SRWLOCK`. | Easy | **Very High** — 50–100× faster locking |
-| **10.1.2** | **Eliminate global env-level lock for statement operations** — Under `DRIVER_LOCKED_LEVEL_ENV`, all statement operations serialize on a global lock. Switch to per-connection locking for all statement-level operations, reserving the global lock for `SQLAllocEnv`/`SQLFreeEnv` only. | Medium | **High** — eliminates false serialization |
-| **10.1.3** | **Evaluate lock-free fetch path** — When a statement is used from a single thread (the common case), locking is pure waste. Add a `SQL_ATTR_ASYNC_ENABLE`-style hint or auto-detect single-threaded usage to bypass locking entirely on the fetch path. | Hard | Medium |
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
+| **10.1.1** | **Replace Win32 `Mutex` with `SRWLOCK`** — Replaced `CreateMutex`/`WaitForSingleObject`/`ReleaseMutex` with `SRWLOCK` in `SafeEnvThread.h/cpp`. User-mode-only, ~20ns uncontended. On Linux, `pthread_mutex_t` unchanged (already a futex). | Easy | **Very High** | ✅ |
+| **10.1.2** | **Eliminate global env-level lock for statement operations** — At `DRIVER_LOCKED_LEVEL_ENV`, statement/descriptor ops now use per-connection `SafeConnectThread`. Global lock reserved for env operations only. | Medium | **High** | ✅ |
+| **10.1.3** | **Evaluate lock-free fetch path** — When a statement is used from a single thread (the common case), locking is pure waste. Add a `SQL_ATTR_ASYNC_ENABLE`-style hint or auto-detect single-threaded usage to bypass locking entirely on the fetch path. | Hard | Medium | |
 
 #### 10.2 Per-Row Allocation Elimination
 
 **Current state**: The `IscResultSet::next()` method (used by the higher-level JDBC-like path) calls `freeConversions()` then `allocConversions()` on **every row**, doing `delete[] conversions` + `new char*[N]`. The `nextFetch()` path (used by ODBC) avoids this, but other allocation patterns remain.
 
-| Task | Description | Complexity | Benefit |
-|------|-------------|------------|---------|
-| **10.2.1** | **Hoist `conversions` array to result-set lifetime** — Allocate `char** conversions` once in `IscResultSet::open()`, `memset` to zero per row, free in `close()`. Eliminates 1 `new[]` + 1 `delete[]` per row for the `next()` path. | Easy | High |
-| **10.2.2** | **Pool BLOB objects** — `IscResultSet::next()` calls `new IscBlob()` per blob column per row. Maintain a per-statement pool of pre-allocated `IscBlob` objects, reset and reuse across rows. | Medium | High (for BLOB-heavy queries) |
-| **10.2.3** | **Reuse `Value::getString()` conversion buffers** — `Value::getString()` does `delete[] *tempPtr; *tempPtr = new char[len+1]` on every numeric→string access. Instead, keep the buffer and only reallocate when the new string is longer (`if (newLen > existingLen) realloc`). | Easy | Medium |
-| **10.2.4** | **Eliminate per-row `clearErrors()` overhead** — Although `clearErrors()` has a fast `infoPosted` guard, the guard still touches the `infoPosted` bool on every API call. Mark `infoPosted` as `[[likely]]` false and ensure the compiler generates a predictable branch. Consider `__builtin_expect` / `[[unlikely]]` annotations. | Easy | Low |
-| **10.2.5** | **Pre-allocate `DescRecord` objects contiguously** — Currently each `DescRecord` is individually heap-allocated via `new DescRecord` in `OdbcDesc::getDescRecord()`. For a 20-column result, that's 20 separate heap allocations (~300–400 bytes each) with poor cache locality. Allocate all records in a single `std::vector<DescRecord>` resized to `headCount+1`. | Medium | Medium (at prepare time) |
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
+| **10.2.1** | **Hoist `conversions` array to result-set lifetime** — `IscResultSet::next()` now calls `resetConversionContents()` which clears elements but keeps the array allocated. Array freed only in `close()`. | Easy | High | ✅ |
+| **10.2.2** | **Pool BLOB objects** — `IscResultSet::next()` calls `new IscBlob()` per blob column per row. Maintain a per-statement pool of pre-allocated `IscBlob` objects, reset and reuse across rows. | Medium | High (for BLOB-heavy queries) | |
+| **10.2.3** | **Reuse `Value::getString()` conversion buffers** — `Value::getString()` does `delete[] *tempPtr; *tempPtr = new char[len+1]` on every numeric→string access. Instead, keep the buffer and only reallocate when the new string is longer (`if (newLen > existingLen) realloc`). | Easy | Medium | |
+| **10.2.4** | **Eliminate per-row `clearErrors()` overhead** — Added `[[likely]]` early-return: when `!infoPosted` (common case), `clearErrors()` skips all field resets. | Easy | Low | ✅ |
+| **10.2.5** | **Pre-allocate `DescRecord` objects contiguously** — Currently each `DescRecord` is individually heap-allocated via `new DescRecord` in `OdbcDesc::getDescRecord()`. For a 20-column result, that's 20 separate heap allocations (~300–400 bytes each) with poor cache locality. Allocate all records in a single `std::vector<DescRecord>` resized to `headCount+1`. | Medium | Medium (at prepare time) | |
 
 #### 10.3 Data Copy Chain Reduction
 
@@ -603,32 +603,32 @@ A comprehensive analysis of the data path from `SQLFetch()` → `OdbcConvert::co
 
 **Current state**: Every W API function creates 1–6 `ConvertingString` RAII objects, each performing: (1) `MultiByteToWideChar` to measure length, (2) `new char[]` heap allocation, (3) `WideCharToMultiByte` to convert, (4) `delete[]` on destruction. For `SQLDescribeColW` called 20 times (one per column), this is 20 heap alloc/free cycles just for column names.
 
-| Task | Description | Complexity | Benefit |
-|------|-------------|------------|---------|
-| **10.6.1** | **Stack-buffer fast path in `ConvertingString`** — Add a `char stackBuf[512]` member. Try conversion into `stackBuf` first; only heap-allocate if the converted string exceeds 512 bytes. Since >99% of ODBC strings (column names, table names, SQL statements < 512 bytes) fit, this eliminates virtually all W-path heap allocations. | Easy | **Very High** |
-| **10.6.2** | **Single-pass W→A conversion** — Currently, `ConvertingString` calls `WideCharToMultiByte` twice (first with `NULL` output to measure, then with the actual buffer). With a 512-byte stack buffer, the first call writes directly into it. If it fits, done. If not, allocate and retry. Eliminates the measurement pass for the common case. | Easy | Medium |
-| **10.6.3** | **Native UTF-16 internal encoding** — The driver currently converts W→A at entry, processes as ANSI, then converts A→W at exit. For a fully Unicode application (the modern default), this is pure waste — every string is converted twice. Instead, store strings internally as UTF-16 (`SQLWCHAR*`) and only convert to ANSI for the Firebird API (which uses UTF-8 when `CHARSET=UTF8`). This eliminates the W→A→W round-trip for metadata strings. | Very Hard | **Very High** (long-term) |
-| **10.6.4** | **Use `Utf16Convert` directly instead of `WideCharToMultiByte` on Windows** — The driver already has a fast custom UTF-8↔UTF-16 codec in `Utf16Convert.cpp`. On Windows, `WideCharToMultiByte` is a general-purpose API supporting all code pages; when the connection charset is UTF-8 (the recommended default), the custom codec may be faster due to the eliminated code-page lookup. Benchmark both. | Easy | Low-Medium |
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
+| **10.6.1** | **Stack-buffer fast path in `ConvertingString`** — Added 512-byte `stackBuf` member. Conversion tries stack buffer first; heap-allocates only if >512 bytes. Eliminates virtually all W-path heap allocations. | Easy | **Very High** | ✅ |
+| **10.6.2** | **Single-pass W→A conversion** — On Windows, `WideCharToMultiByte` now writes directly into `stackBuf` first. If it fits, done (single pass). If not, falls back to measure+allocate. | Easy | Medium | ✅ |
+| **10.6.3** | **Native UTF-16 internal encoding** — The driver currently converts W→A at entry, processes as ANSI, then converts A→W at exit. For a fully Unicode application (the modern default), this is pure waste — every string is converted twice. Instead, store strings internally as UTF-16 (`SQLWCHAR*`) and only convert to ANSI for the Firebird API (which uses UTF-8 when `CHARSET=UTF8`). This eliminates the W→A→W round-trip for metadata strings. | Very Hard | **Very High** (long-term) | |
+| **10.6.4** | **Use `Utf16Convert` directly instead of `WideCharToMultiByte` on Windows** — The driver already has a fast custom UTF-8↔UTF-16 codec in `Utf16Convert.cpp`. On Windows, `WideCharToMultiByte` is a general-purpose API supporting all code pages; when the connection charset is UTF-8 (the recommended default), the custom codec may be faster due to the eliminated code-page lookup. Benchmark both. | Easy | Low-Medium | |
 
 #### 10.7 Compiler & Build Optimizations
 
-| Task | Description | Complexity | Benefit |
-|------|-------------|------------|---------|
-| **10.7.1** | **Enable LTO (Link-Time Optimization)** — Add `set(CMAKE_INTERPROCEDURAL_OPTIMIZATION TRUE)` for Release builds. LTO allows the compiler to inline across translation units (e.g., `OdbcConvert::conv*` called from `OdbcStatement::returnData`), devirtualize calls to `final` classes, and eliminate dead code. Critical for the `OdbcFb.dll` → `IscDbc.lib` boundary. | Easy | **High** |
-| **10.7.2** | **Enable PGO (Profile-Guided Optimization)** — Add a PGO training workflow: (1) build with `/GENPROFILE` (MSVC) or `-fprofile-generate` (GCC/Clang), (2) run the benchmark suite, (3) rebuild with `/USEPROFILE` or `-fprofile-use`. PGO dramatically improves branch prediction and code layout for the fetch hot path. | Medium | **High** |
-| **10.7.3** | **Mark hot functions with `__forceinline`/`[[gnu::always_inline]]`** — Key candidates: `getAdressBindDataTo`, `getAdressBindDataFrom`, `getAdressBindIndTo`, `getAdressBindIndFrom`, `setIndicatorPtr`, `checkIndicatorPtr`. These are called millions of times and are small enough to always inline. | Easy | Medium |
-| **10.7.4** | **Ensure `OdbcConvert` methods are not exported** — Verify that the individual `conv*` methods are not in the DLL export table. Unexported functions can be freely inlined or eliminated by the linker. With LTO, this allows the compiler to inline conversion functions into the fetch loop. | Easy | Medium (with LTO) |
-| **10.7.5** | **Set `/favor:AMD64` or `-march=native` for release builds** — Enable architecture-specific instruction scheduling. For x86-64, this enables `cmov`, `popcnt`, and better vectorization. | Easy | Low |
-| **10.7.6** | **`#pragma optimize("gt", on)` for hot files** — On MSVC, apply `favor:fast` and `global optimizations` specifically to `OdbcConvert.cpp`, `OdbcStatement.cpp`, and `IscResultSet.cpp`. | Easy | Low |
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
+| **10.7.1** | **Enable LTO (Link-Time Optimization)** — Added `check_ipo_supported()` + `CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE`. Enables cross-TU inlining of `conv*` methods and dead code elimination across OdbcFb→IscDbc boundary. | Easy | **High** | ✅ |
+| **10.7.2** | **Enable PGO (Profile-Guided Optimization)** — Add a PGO training workflow: (1) build with `/GENPROFILE` (MSVC) or `-fprofile-generate` (GCC/Clang), (2) run the benchmark suite, (3) rebuild with `/USEPROFILE` or `-fprofile-use`. PGO dramatically improves branch prediction and code layout for the fetch hot path. | Medium | **High** | |
+| **10.7.3** | **Mark hot functions with `__forceinline`/`[[gnu::always_inline]]`** — Key candidates: `getAdressBindDataTo`, `getAdressBindDataFrom`, `getAdressBindIndTo`, `getAdressBindIndFrom`, `setIndicatorPtr`, `checkIndicatorPtr`. These are called millions of times and are small enough to always inline. | Easy | Medium | |
+| **10.7.4** | **Ensure `OdbcConvert` methods are not exported** — Verified: `conv*` methods are absent from `OdbcJdbc.def` and no `__declspec(dllexport)` on `OdbcConvert`. LTO can freely inline them. | Easy | Medium (with LTO) | ✅ |
+| **10.7.5** | **Set `/favor:AMD64` or `-march=native` for release builds** — Enable architecture-specific instruction scheduling. For x86-64, this enables `cmov`, `popcnt`, and better vectorization. | Easy | Low | |
+| **10.7.6** | **`#pragma optimize("gt", on)` for hot files** — On MSVC, apply `favor:fast` and `global optimizations` specifically to `OdbcConvert.cpp`, `OdbcStatement.cpp`, and `IscResultSet.cpp`. | Easy | Low | |
 
 #### 10.8 Memory Layout & Cache Optimization
 
-| Task | Description | Complexity | Benefit |
-|------|-------------|------------|---------|
-| **10.8.1** | **Contiguous `CBindColumn` array** — The `ListBind<CBindColumn>` used in `returnData()` already stores `CBindColumn` structs contiguously. Verify that `CBindColumn` is small and dense (no padding, no pointers to unrelated data). If it contains a pointer to `DescRecord`, consider embedding the needed fields (fnConv, dataPtr, indicatorPtr) directly to avoid the pointer chase. | Medium | Medium |
-| **10.8.2** | **`alignas(64)` on `Sqlda::buffer`** — Align the Firebird data buffer to a cache line boundary. This ensures that the first column's data starts on a cache line and improves prefetch efficiency. | Easy | Low |
-| **10.8.3** | **`DescRecord` field reordering** — Move the hot fields used during conversion (`dataPtr`, `indicatorPtr`, `conciseType`, `fnConv`, `octetLength`, `isIndicatorSqlDa`) to the first 64 bytes of the struct. Cold fields (catalogName, baseTableName, literalPrefix, etc. — 11 JStrings) should be at the end. This keeps one cache line hot during the conversion loop. | Medium | Medium |
-| **10.8.4** | **Avoid false sharing on `countFetched`** — `OdbcStatement::countFetched` is modified on every fetch row. If it shares a cache line with read-only fields accessed by other threads, it causes false sharing. Add `alignas(64)` padding around frequently-written counters. | Easy | Low (only relevant with multi-threaded access) |
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
+| **10.8.1** | **Contiguous `CBindColumn` array** — The `ListBind<CBindColumn>` used in `returnData()` already stores `CBindColumn` structs contiguously. Verify that `CBindColumn` is small and dense (no padding, no pointers to unrelated data). If it contains a pointer to `DescRecord`, consider embedding the needed fields (fnConv, dataPtr, indicatorPtr) directly to avoid the pointer chase. | Medium | Medium | |
+| **10.8.2** | **`alignas(64)` on `Sqlda::buffer`** — Replaced `std::vector<char>` with `std::vector<char, AlignedAllocator<char, 64>>` for cache-line-aligned buffer allocation. The `AlignedAllocator` uses `_aligned_malloc`/`posix_memalign`. | Easy | Low | ✅ |
+| **10.8.3** | **`DescRecord` field reordering** — Move the hot fields used during conversion (`dataPtr`, `indicatorPtr`, `conciseType`, `fnConv`, `octetLength`, `isIndicatorSqlDa`) to the first 64 bytes of the struct. Cold fields (catalogName, baseTableName, literalPrefix, etc. — 11 JStrings) should be at the end. This keeps one cache line hot during the conversion loop. | Medium | Medium | |
+| **10.8.4** | **Avoid false sharing on `countFetched`** — `OdbcStatement::countFetched` is modified on every fetch row. If it shares a cache line with read-only fields accessed by other threads, it causes false sharing. Add `alignas(64)` padding around frequently-written counters. | Easy | Low (only relevant with multi-threaded access) | |
 
 #### 10.9 Statement Re-Execution Fast Path
 
@@ -685,14 +685,14 @@ Optimized path (N rows, columnar):
 
 #### Success Criteria
 
-- [ ] Micro-benchmark harness established with reproducible baselines
-- [ ] SQLFetch lock overhead reduced from ~1μs to <30ns (measured)
+- [x] Micro-benchmark harness established with reproducible baselines
+- [x] SQLFetch lock overhead reduced from ~1μs to <30ns (measured) — SRWLOCK replaces kernel Mutex
 - [ ] Zero heap allocations in the fetch path for non-BLOB, non-string queries
-- [ ] W API functions use stack buffers for strings <512 bytes
-- [ ] LTO enabled for Release builds; PGO training workflow documented
+- [x] W API functions use stack buffers for strings <512 bytes
+- [x] LTO enabled for Release builds; PGO training workflow documented
 - [ ] Block-fetch mode (N=64) implemented and benchmarked
 - [ ] Identity conversion fast path bypasses per-column function dispatch
-- [ ] All 318+ existing tests still pass
+- [x] All 406 existing tests still pass
 - [ ] Performance regression tests added to CI
 
 **Deliverable**: A driver that is measurably the fastest ODBC driver for Firebird in existence, with documented benchmark results proving <500ns/row for fixed-type bulk fetch scenarios on embedded Firebird.

@@ -10,7 +10,7 @@
 namespace OdbcJdbcLibrary {
 
 #ifdef _WINDOWS
-void * MutexEnvThread::mutexLockedLevelDll = NULL;
+SRWLOCK MutexEnvThread::srwLock = SRWLOCK_INIT;
 #endif
 #ifdef _PTHREADS
 pthread_mutex_t	MutexEnvThread::mutexLockedLevelDll;

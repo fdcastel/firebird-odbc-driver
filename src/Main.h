@@ -46,12 +46,18 @@ void trace (const char *msg);
 
 #if(DRIVER_LOCKED_LEVEL == DRIVER_LOCKED_LEVEL_ENV)
 
+// Even at ENV level, use per-connection locking for statement/descriptor
+// operations to avoid false serialization. The global lock is only needed
+// for environment-level operations (alloc/free env).
 #define GUARD					SafeDllThread wt
 #define GUARD_ENV(arg)			NULL_CHECK(arg); GUARD
-#define GUARD_HSTMT(arg)		NULL_CHECK(arg); GUARD
-#define GUARD_HDBC(arg)			NULL_CHECK(arg); GUARD
-#define GUARD_HDESC(arg)		NULL_CHECK(arg); GUARD
-#define GUARD_HTYPE(arg1,arg2)	NULL_CHECK(arg1); GUARD
+#define GUARD_HSTMT(arg)		NULL_CHECK(arg); SafeConnectThread wt(((OdbcStatement*)arg)->connection)
+#define GUARD_HDBC(arg)			NULL_CHECK(arg); SafeConnectThread wt((OdbcConnection*)arg)
+#define GUARD_HDESC(arg)		NULL_CHECK(arg); SafeConnectThread wt(((OdbcDesc*)arg)->connection)
+#define GUARD_HTYPE(arg,arg1)	NULL_CHECK(arg); SafeConnectThread wt(												\
+									arg1==SQL_HANDLE_DBC ? (OdbcConnection*)arg:					\
+									arg1==SQL_HANDLE_STMT ? ((OdbcStatement*)arg)->connection:		\
+									arg1==SQL_HANDLE_DESC ? ((OdbcDesc*)arg)->connection : NULL )
 
 #elif(DRIVER_LOCKED_LEVEL == DRIVER_LOCKED_LEVEL_CONNECT)
 

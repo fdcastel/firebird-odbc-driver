@@ -26,10 +26,46 @@
 #define _SQLDA_H_INCLUDED_
 
 #include <vector>
+#include <memory>
+#include <cstddef>
 #include "IscArray.h"
 #include <sqltypes.h>
 
 namespace IscDbcLibrary {
+
+/// Allocator that aligns memory to cache-line boundaries (64 bytes).
+/// Used for Sqlda::buffer to improve prefetch efficiency during fetch loops.
+template <typename T, std::size_t Alignment = 64>
+struct AlignedAllocator {
+    using value_type = T;
+
+    AlignedAllocator() noexcept = default;
+    template <typename U> AlignedAllocator(const AlignedAllocator<U, Alignment>&) noexcept {}
+
+    T* allocate(std::size_t n) {
+        void* ptr = nullptr;
+        std::size_t bytes = n * sizeof(T);
+#ifdef _WIN32
+        ptr = _aligned_malloc(bytes, Alignment);
+        if (!ptr) throw std::bad_alloc();
+#else
+        if (posix_memalign(&ptr, Alignment, bytes)) throw std::bad_alloc();
+#endif
+        return static_cast<T*>(ptr);
+    }
+
+    void deallocate(T* ptr, std::size_t) noexcept {
+#ifdef _WIN32
+        _aligned_free(ptr);
+#else
+        free(ptr);
+#endif
+    }
+
+    template <typename U> struct rebind { using other = AlignedAllocator<U, Alignment>; };
+    template <typename U> bool operator==(const AlignedAllocator<U, Alignment>&) const noexcept { return true; }
+    template <typename U> bool operator!=(const AlignedAllocator<U, Alignment>&) const noexcept { return false; }
+};
 
 struct SqlProperties
 {
@@ -91,7 +127,7 @@ public:
 			delete array; 
 	}
 
-	using buffer_t = std::vector<char>;
+	using buffer_t = std::vector<char, AlignedAllocator<char, 64>>;
 
 private:
 	inline void bindProperties( Firebird::ThrowStatusWrapper& status, Firebird::IMessageMetadata* _meta, unsigned _index ) {
@@ -158,7 +194,7 @@ class CDataStaticCursor;
 class Sqlda
 {
 public:
-	using buffer_t = std::vector<char>;
+	using buffer_t = std::vector<char, AlignedAllocator<char, 64>>;
 
 	enum e_sqlda_dir {
 		SQLDA_INPUT,

@@ -14,6 +14,16 @@ set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
 
 FetchContent_MakeAvailable(googletest)
 
+# Fetch Google Benchmark
+FetchContent_Declare(
+    googlebenchmark
+    GIT_REPOSITORY https://github.com/google/benchmark.git
+    GIT_TAG v1.9.1
+)
+set(BENCHMARK_ENABLE_TESTING OFF CACHE BOOL "" FORCE)
+set(BENCHMARK_ENABLE_GTEST_TESTS OFF CACHE BOOL "" FORCE)
+FetchContent_MakeAvailable(googlebenchmark)
+
 # Enable CTest
 include(GoogleTest)
 
@@ -115,3 +125,37 @@ add_custom_command(TARGET firebird_odbc_tests POST_BUILD
         $<TARGET_FILE_DIR:firebird_odbc_tests>
     COMMENT "Copying gtest/gmock DLLs next to test executable"
 )
+
+# --------------------------------------------------------------------------
+# Benchmark executable (Google Benchmark)
+# --------------------------------------------------------------------------
+add_executable(firebird_odbc_bench bench_fetch.cpp)
+
+target_link_libraries(firebird_odbc_bench PRIVATE benchmark::benchmark OdbcFb IscDbc)
+
+target_include_directories(firebird_odbc_bench PRIVATE
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/IscDbc
+)
+
+if(WIN32)
+    target_link_libraries(firebird_odbc_bench PRIVATE odbc32 odbccp32)
+else()
+    target_link_libraries(firebird_odbc_bench PRIVATE ${ODBC_LIBRARIES})
+endif()
+
+# Copy DLLs next to the benchmark executable
+add_custom_command(TARGET firebird_odbc_bench POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+        $<TARGET_FILE:OdbcFb>
+        $<TARGET_FILE_DIR:firebird_odbc_bench>
+    COMMENT "Copying driver DLL next to benchmark executable"
+)
+if(TARGET benchmark)
+    add_custom_command(TARGET firebird_odbc_bench POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            $<TARGET_FILE:benchmark>
+            $<TARGET_FILE_DIR:firebird_odbc_bench>
+        COMMENT "Copying benchmark DLL next to benchmark executable"
+    )
+endif()

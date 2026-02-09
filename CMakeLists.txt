@@ -15,6 +15,11 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(BUILD_TESTING "Build tests" ON)
 option(BUILD_SETUP "Build setup/configuration library" OFF)
+option(ODBC_PERF_COUNTERS "Enable performance counter instrumentation" OFF)
+
+if(ODBC_PERF_COUNTERS)
+    add_definitions(-DODBC_PERF_COUNTERS)
+endif()
 
 # Platform-specific settings
 if(WIN32)
@@ -30,6 +35,16 @@ else()
     # Linux/Unix
     add_definitions(-DUNIX)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+
+# Enable Link-Time Optimization (LTO) for Release builds
+# LTO allows cross-TU inlining (e.g., OdbcConvert::conv* called from OdbcStatement)
+# and dead code elimination across the OdbcFb.dll → IscDbc.lib boundary.
+include(CheckIPOSupported)
+check_ipo_supported(RESULT _ipo_supported OUTPUT _ipo_output)
+if(_ipo_supported)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE TRUE)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
 endif()
 
 # Find required packages
@@ -73,10 +88,12 @@ set(ODBCJDBC_SOURCES
     src/OdbcStatement.cpp
     src/SafeEnvThread.cpp
     src/Utf16Convert.cpp
+    src/OdbcPerfCounters.cpp
 )
 
 set(ODBCJDBC_HEADERS
     src/ConnectDialog.h
+    src/OdbcPerfCounters.h
     src/DescRecord.h
     src/InfoItems.h
     src/Main.h

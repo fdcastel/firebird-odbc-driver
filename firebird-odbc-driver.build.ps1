@@ -166,6 +166,33 @@ task uninstall {
 # Synopsis: Build the driver and tests.
 task . build
 
+# Synopsis: Run performance benchmarks.
+task benchmark build, build-test-databases, install, {
+	if (-not $env:FIREBIRD_ODBC_CONNECTION) {
+		print Yellow 'WARNING: FIREBIRD_ODBC_CONNECTION environment variable is not set. Using built-in connection strings.'
+	}
+
+	# Use the UTF8 database for benchmarks
+	$env:FIREBIRD_ODBC_CONNECTION = "Driver={$DriverName};Database=/fbodbc-tests/TEST.FB50.FDB;UID=SYSDBA;PWD=masterkey;CHARSET=UTF8;CLIENT=$script:ClientPath"
+	print Cyan "--- Running benchmarks ---"
+	print Cyan "    Connection: $env:FIREBIRD_ODBC_CONNECTION"
+
+	$benchExe = if ($IsWindowsOS) {
+		Join-Path $BuildDir "tests" $Configuration "firebird_odbc_bench.exe"
+	} else {
+		Join-Path $BuildDir "tests" "firebird_odbc_bench"
+	}
+
+	assert (Test-Path $benchExe) "Benchmark executable not found at: $benchExe"
+
+	$jsonOutput = Join-Path $BuildRoot 'tmp' 'benchmark_results.json'
+	New-Item -ItemType Directory -Path (Split-Path $jsonOutput) -Force | Out-Null
+
+	exec { & $benchExe --benchmark_format=console --benchmark_out=$jsonOutput --benchmark_out_format=json --benchmark_repetitions=3 --benchmark_min_time=2s }
+
+	print Green "Benchmark results saved to: $jsonOutput"
+}
+
 #region Windows
 
 function Install-WindowsDriver {

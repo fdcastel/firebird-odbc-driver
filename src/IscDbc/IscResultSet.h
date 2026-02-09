@@ -105,6 +105,7 @@ public:
 
 	void				deleteBlobs();
 	void				reset();
+	void				resetConversionContents();
 
 	virtual Value*		getValue (int index);
 	virtual Value*		getValue (const char *columnName);

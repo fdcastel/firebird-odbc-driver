@@ -125,8 +125,7 @@ bool IscResultSet::next()
 		throw SQLEXCEPTION (RUNTIME_ERROR, "resultset is not active");
 
 	deleteBlobs();
-	reset();
-	allocConversions();
+	resetConversionContents();
 
 	ThrowStatusWrapper status( statement->connection->GDS->_status );
 	try
@@ -320,6 +319,23 @@ void IscResultSet::reset()
 			}
 		delete[] conversions;
 		conversions = NULL;
+	}
+}
+
+void IscResultSet::resetConversionContents()
+{
+	if (conversions)
+	{
+		for (int n = 0; n < numberColumns; ++n)
+			if (conversions [n])
+			{
+				delete [] conversions [n];
+				conversions [n] = NULL;
+			}
+	}
+	else
+	{
+		allocConversions();
 	}
 }
 

@@ -47,6 +47,10 @@ class ConvertingString
 {
 	enum typestring { NONE, WIDECHARS, BYTESCHARS };
 
+	static constexpr int kStackBufSize = 512;
+	SQLCHAR		stackBuf[kStackBufSize];
+	bool		isHeapAllocated;
+
 	SQLCHAR		*byteString;
 	SQLWCHAR	*unicodeString;
 	TypeRealLen	*realLength;
@@ -64,6 +68,7 @@ public:
 	ConvertingString() 
 	{
 		isWhy = NONE;
+		isHeapAllocated = false;
 		returnCountOfBytes = true;
 		unicodeString = NULL;
 		byteString = NULL;
@@ -77,6 +82,7 @@ public:
 		connection = NULL;
 		realLength = pLength;
 		returnCountOfBytes = retCountOfBytes;
+		isHeapAllocated = false;
 
 		if ( wcString )
 		{
@@ -102,6 +108,7 @@ public:
 		unicodeString = NULL;
 		returnCountOfBytes = true;
 		isWhy = BYTESCHARS;
+		isHeapAllocated = false;
 
 		if ( wcString )
 			convUnicodeToString( wcString, length );
@@ -153,7 +160,8 @@ public:
 				}
 			}
 
-			delete[] byteString;
+			if (isHeapAllocated)
+				delete[] byteString;
 			break;
 
 		case NONE:
@@ -165,7 +173,6 @@ public:
 
 	SQLCHAR * convUnicodeToString( SQLWCHAR *wcString, int length )
 	{
-		size_t bytesNeeded;
 		wchar_t *ptEndWC = NULL;
 		wchar_t saveWC;
 
@@ -178,18 +185,49 @@ public:
 			*ptEndWC = L'\0';
 		}
 
+		// Single-pass fast path: try converting directly into stack buffer
+		size_t bytesNeeded;
 		if ( connection )
+		{
+			// Connection-specific codec — must measure first
 			bytesNeeded = connection->WcsToMbs( NULL, (const wchar_t*)wcString, length );
+		}
 		else
 		{
 #ifdef _WINDOWS
-			bytesNeeded = WideCharToMultiByte( codePage, (DWORD)0, wcString, length, NULL, (int)0, NULL, NULL );
+			// Try direct conversion into stack buffer (single pass)
+			bytesNeeded = WideCharToMultiByte( codePage, 0, wcString, length,
+				(LPSTR)stackBuf, kStackBufSize - 2, NULL, NULL );
+			if ( bytesNeeded > 0 )
+			{
+				// Fits in stack buffer — no heap allocation needed
+				byteString = stackBuf;
+				isHeapAllocated = false;
+				byteString[ bytesNeeded ] = '\0';
+				lengthString = (int)bytesNeeded;
+				if ( ptEndWC ) *ptEndWC = saveWC;
+				return byteString;
+			}
+			// GetLastError() == ERROR_INSUFFICIENT_BUFFER or conversion error
+			// Fall through: measure then heap-allocate
+			bytesNeeded = WideCharToMultiByte( codePage, (DWORD)0, wcString, length,
+				NULL, (int)0, NULL, NULL );
 #else
 			bytesNeeded = wcstombs( NULL, (const wchar_t*)wcString, length );
 #endif
 		}
 
-		byteString = new SQLCHAR[ bytesNeeded + 2 ];
+		// Allocate buffer: use stack if it fits, heap otherwise
+		if ( (int)bytesNeeded + 2 <= kStackBufSize )
+		{
+			byteString = stackBuf;
+			isHeapAllocated = false;
+		}
+		else
+		{
+			byteString = new SQLCHAR[ bytesNeeded + 2 ];
+			isHeapAllocated = true;
+		}
 
 		if ( connection )
 			bytesNeeded = connection->WcsToMbs( (char *)byteString, (const wchar_t*)wcString, bytesNeeded );
@@ -219,16 +257,30 @@ protected:
 		case BYTESCHARS:
 			if ( lengthString )
 			{
-				byteString = new SQLCHAR[ lengthString + 2 ];
-				memset(byteString, 0, lengthString + 2); 
+				if ( lengthString + 2 <= kStackBufSize )
+				{
+					byteString = stackBuf;
+					isHeapAllocated = false;
+					memset(byteString, 0, lengthString + 2);
+				}
+				else
+				{
+					byteString = new SQLCHAR[ lengthString + 2 ];
+					isHeapAllocated = true;
+					memset(byteString, 0, lengthString + 2);
+				}
 			}
 			else
+			{
 				byteString = NULL;
+				isHeapAllocated = false;
+			}
 			break;
 
 		case NONE:
 			unicodeString = NULL;
 			byteString = NULL;
+			isHeapAllocated = false;
 			lengthString = 0;
 			break;
 		}

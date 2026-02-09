@@ -13,7 +13,7 @@ class MutexEnvThread
 {
 public:
 #ifdef _WINDOWS
-	static void * mutexLockedLevelDll;
+	static SRWLOCK srwLock;
 #endif
 #ifdef _PTHREADS
 	static pthread_mutex_t	mutexLockedLevelDll;
@@ -23,7 +23,7 @@ public:
 	MutexEnvThread()
 	{
 #ifdef _WINDOWS
-		mutexLockedLevelDll = CreateMutex (NULL, false, NULL);
+		InitializeSRWLock(&srwLock);
 #endif
 #ifdef _PTHREADS
 		int ret = pthread_mutex_init (&mutexLockedLevelDll, NULL);
@@ -33,8 +33,7 @@ public:
 	~MutexEnvThread()
 	{
 #ifdef _WINDOWS
-		if(mutexLockedLevelDll)
-			CloseHandle (mutexLockedLevelDll);
+		// SRWLOCK does not need cleanup
 #endif
 #ifdef _PTHREADS
 		int ret = pthread_mutex_destroy (&mutexLockedLevelDll);
@@ -48,7 +47,7 @@ public:
 	SafeDllThread()
 	{
 #ifdef _WINDOWS
-		WaitForSingleObject (MutexEnvThread::mutexLockedLevelDll, INFINITE);
+		AcquireSRWLockExclusive(&MutexEnvThread::srwLock);
 #endif
 #ifdef _PTHREADS
 		pthread_mutex_lock (&MutexEnvThread::mutexLockedLevelDll);
@@ -57,7 +56,7 @@ public:
 	~SafeDllThread()
 	{
 #ifdef _WINDOWS
-		ReleaseMutex (MutexEnvThread::mutexLockedLevelDll);
+		ReleaseSRWLockExclusive(&MutexEnvThread::srwLock);
 #endif
 #ifdef _PTHREADS
 		pthread_mutex_unlock (&MutexEnvThread::mutexLockedLevelDll);
