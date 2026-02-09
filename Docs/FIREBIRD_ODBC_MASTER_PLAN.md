@@ -569,8 +569,8 @@ A comprehensive analysis of the data path from `SQLFetch()` → `OdbcConvert::co
 
 **Current state**: Data flows through up to 3 copies: (1) Firebird wire → `Sqlda::buffer` (unavoidable), (2) `Sqlda::buffer` → `Value` objects via `IscResultSet::next()` → `Sqlda::getValues()`, (3) `Value` → ODBC application buffer via `OdbcConvert::conv*()`. For the ODBC `nextFetch()` path, step (2) is skipped — data stays in `Sqlda::buffer` and `OdbcConvert` reads directly from SQLDA pointers. But string parameters still involve double copies.
 
-| Task | Description | Complexity | Benefit |
-|------|-------------|------------|---------|
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
 | **10.3.1** | **Optimize exec buffer copy on re-execute** — `Sqlda::checkAndRebuild()` copy loop now splits into two paths: on first execute (`overrideFlag==true`), per-column pointer equality is checked; on re-execute (`!overrideFlag`), the eff pointers are known-different, so copies are unconditional — eliminating N branch mispredictions per column. | Easy | Medium (for repeated executes) | ✅ |
 | **10.3.2** | **Eliminate `copyNextSqldaFromBufferStaticCursor()` per row** — Static (scrollable) cursors buffer all rows in memory, then each `fetchScroll` copies one row from the buffer into `Sqlda::buffer` before conversion. Instead, have `OdbcConvert` read directly from the static cursor buffer row, skipping the intermediate copy. | Hard | Medium (scrollable cursors only) |
 | **10.3.3** | **Avoid Sqlda metadata rebuild on re-execute** — `Sqlda::setValue()` now uses a `setTypeAndLen()` helper that only writes `sqltype`/`sqllen` when the new value differs from the current. This prevents `propertiesOverriden()` from detecting false changes, skipping the expensive `IMetadataBuilder` rebuild on re-execute. `sqlscale` write is similarly guarded. | Medium | Medium (for repeated executes) | ✅ |
@@ -579,8 +579,8 @@ A comprehensive analysis of the data path from `SQLFetch()` → `OdbcConvert::co
 
 **Current state**: Each column conversion is dispatched via a **member function pointer** (`ADRESS_FUNCTION = int (OdbcConvert::*)(DescRecord*, DescRecord*)`). Inside each conversion, 4 `getAdressBindData/Ind` calls perform null checks + pointer dereferences through offset pointers. The `CHECKNULL` macro branches on `isIndicatorSqlDa` per column per row.
 
-| Task | Description | Complexity | Benefit |
-|------|-------------|------------|---------|
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
 | **10.4.1** | **Replace member function pointers with regular function pointers** — Change `ADRESS_FUNCTION` from `int (OdbcConvert::*)(DescRecord*, DescRecord*)` to `int (*)(OdbcConvert*, DescRecord*, DescRecord*)`. Member function pointers on MSVC are 16 bytes (vs 8 for regular pointers) and require an extra thunk adjustment. Regular function pointers are faster to dispatch and smaller. | Medium | Medium |
 | **10.4.2** | **Cache bind offset values in `OdbcConvert` by value** — Currently `bindOffsetPtrTo` / `bindOffsetPtrFrom` are `SQLLEN*` pointers that are dereferenced in every `getAdressBindDataTo/From` call (4× per conversion). Cache the actual `SQLLEN` value at the start of each row's conversion pass, avoiding 4 pointer dereferences per column. | Easy | Medium |
 | **10.4.3** | **Split conversion functions by indicator type** — The `CHECKNULL` macro branches on `isIndicatorSqlDa` (true for Firebird internal descriptors, false for app descriptors) on every conversion. Since this property is fixed at bind time, generate two variants of each conversion function and select the correct one in `getAdressFunction()`. | Hard | Medium |
@@ -593,8 +593,8 @@ A comprehensive analysis of the data path from `SQLFetch()` → `OdbcConvert::co
 
 **Current state**: `sqlFetch()` fetches one row at a time from Firebird via `IResultSet::fetchNext()`, then converts one row at a time. For embedded Firebird, the per-row call overhead (function pointer dispatch, status check, buffer cursor advance) is significant relative to the actual data access.
 
-| Task | Description | Complexity | Benefit |
-|------|-------------|------------|---------|
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
 | **10.5.1** | **Implement N-row prefetch buffer** — `IscResultSet` allocates a 64-row prefetch buffer during `initResultSet()`. `nextFetch()` fills the buffer in batches of up to 64 rows via `IResultSet::fetchNext()`, then serves rows from the buffer via `memcpy` to `sqlda->buffer`. A `prefetchCursorDone` flag prevents re-fetching after the Firebird cursor returns `RESULT_NO_DATA`. Amortizes per-fetch overhead across 64 rows. Works correctly with static cursors (`readFromSystemCatalog`) and system catalog queries. | Medium | **High** | ✅ |
 | **10.5.2** | **Columnar conversion pass** — After fetching N rows into a multi-row buffer, convert all N values of column 1, then all N values of column 2, etc. This maximizes L1/L2 cache utilization because: (a) the conversion function pointer is loaded once per column, not once per row; (b) source data for each column is at a fixed stride in the buffer; (c) destination data in column-wise bound arrays is contiguous. | Hard | **Very High** |
 | **10.5.3** | **Prefetch hints** — When fetching N rows, issue `__builtin_prefetch()` / `_mm_prefetch()` on the next row's source data while converting the current row. For multi-row buffers with known stride, prefetch 2–3 rows ahead. | Medium | Medium (hardware-dependent) |
@@ -632,16 +632,16 @@ A comprehensive analysis of the data path from `SQLFetch()` → `OdbcConvert::co
 
 #### 10.9 Statement Re-Execution Fast Path
 
-| Task | Description | Complexity | Benefit |
-|------|-------------|------------|---------|
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
 | **10.9.1** | **Skip `SQLPrepare` re-parse when SQL unchanged** — Cache the last SQL string hash. If `SQLPrepare` is called with the same SQL, skip the Firebird `IStatement::prepare()` call entirely and reuse the existing prepared statement. | Easy | **High** (for ORM-style repeated prepares) |
 | **10.9.2** | **Skip `getUpdateCount()` for SELECT statements** — `IscStatement::execute()` always calls `statement->getAffectedRecords()` after execute. For SELECTs (which return a result set, not an update count), this is a wasted Firebird API call. Guard with `statementType == isc_info_sql_stmt_select`. | Easy | Medium |
 | **10.9.3** | **Avoid conversion function re-resolution on re-execute** — `getAdressFunction()` (the 860-line switch) is called once per column at bind time and cached in `DescRecord::fnConv`. Verify this cache is preserved across re-executions of the same prepared statement with the same bindings. If `OdbcDesc::getDescRecord()` reinitializes `fnConv`, add a dirty flag. | Easy | Low |
 
 #### 10.10 Advanced: Asynchronous & Pipelined Fetch
 
-| Task | Description | Complexity | Benefit |
-|------|-------------|------------|---------|
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
 | **10.10.1** | **Double-buffered fetch** — Allocate two `Sqlda::buffer` slots. While `OdbcConvert` processes buffer A, issue `IResultSet::fetchNext()` into buffer B on a worker thread (or via async I/O). When conversion of A completes, swap buffers. This hides Firebird fetch latency behind conversion work. Only beneficial when Firebird is not embedded (i.e., client/server mode with network latency). | Very Hard | High (client/server mode) |
 | **10.10.2** | **Evaluate Firebird `IResultSet::fetchNext()` with pre-allocated multi-row buffer** — Investigate whether the Firebird OO API supports fetching N rows at once into a contiguous buffer (like ODBC's `SQL_ATTR_ROW_ARRAY_SIZE`). If so, this eliminates the per-row API call overhead entirely. | Research | **Very High** (if available) | ✅ Researched — see findings below |
 
