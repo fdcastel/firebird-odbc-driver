@@ -528,15 +528,20 @@ With correctness, compliance, and feature completeness substantially achieved (P
 
 A comprehensive analysis of the data path from `SQLFetch()` → `OdbcConvert::conv*()` → `IscResultSet::nextFetch()` → `Sqlda::buffer` reveals **12 categories of overhead** that, when eliminated, can reduce per-row driver cost from ~2–5μs to ~200–500ns — a 5–10× improvement.
 
+
 #### 10.0 Performance Profiling Infrastructure
 
 | Task | Description | Complexity | Benefit |
 |------|-------------|------------|---------|
 | **10.0.1** | **Add micro-benchmark harness** — Create `tests/bench_fetch.cpp` using Google Benchmark (`FetchContent` from GitHub). Benchmark: (a) fetch 1M rows of 10 INT columns, (b) fetch 1M rows of 5 VARCHAR(100) columns, (c) fetch 100K rows of 1 BLOB column, (d) batch insert 100K rows. Report rows/sec, ns/row, ns/col. Run against embedded Firebird. | Medium | **Essential** — cannot optimize what you cannot measure |
 | **10.0.2** | **Add `ODBC_PERF_COUNTERS` compile-time flag** — When enabled, track: total fetch calls, total conversion calls, total allocs in fetch path, total mutex acquires, total W→A conversions. Exposed via a driver-specific `SQLGetConnectAttr` info type for diagnostics. | Easy | Medium — identifies regressions |
-| **10.0.3** | **Establish baseline numbers** — Run benchmarks on current code, record results in `Docs/PERFORMANCE_BASELINE.md`. All future changes must not regress these numbers. | Easy | **Essential** |
+| **10.0.3** | **Establish baseline numbers** — Run benchmarks on current code, record results in `Docs/PERFORMANCE_RESULTS.md`. All future changes must not regress these numbers. | Easy | **Essential** |
+| **10.0.4** | **Add `benchmark` new task to `Invoke-Build `** — Build the project and Run benchmarks. | Easy | **Essential** |
+
 
 #### 10.1 Synchronization: Eliminate Kernel-Mode Mutex
+
+
 
 **Current state**: `SafeEnvThread.cpp` uses Win32 `CreateMutex` / `WaitForSingleObject` / `ReleaseMutex` for all locking. This is a **kernel-mode mutex** that requires a ring-3→ring-0 transition on every acquire, even when uncontended. Cost: ~1–2μs per lock/unlock pair on modern hardware. Every `SQLFetch` call acquires this lock once.
 
