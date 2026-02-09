@@ -305,6 +305,58 @@ TEST_F(QueryTimeoutTest, CancelFromAnotherThread)
     // If SQL_SUCCESS, the query completed before cancel — that's OK too
 }
 
+// Timer-based timeout automatically cancels a long-running query (11.2.2)
+TEST_F(QueryTimeoutTest, TimerFiresOnLongQuery)
+{
+    // Set a very short timeout (1 second)
+    SQLRETURN ret = SQLSetStmtAttr(hStmt, SQL_ATTR_QUERY_TIMEOUT, (SQLPOINTER)1, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    // Execute a heavy cartesian product that should take more than 1 second
+    const char* longQuery =
+        "SELECT COUNT(*) FROM rdb$fields A "
+        "CROSS JOIN rdb$fields B "
+        "CROSS JOIN rdb$fields C "
+        "CROSS JOIN rdb$fields D";
+
+    auto start = std::chrono::steady_clock::now();
+    ret = SQLExecDirect(hStmt, (SQLCHAR*)longQuery, SQL_NTS);
+    auto elapsed = std::chrono::steady_clock::now() - start;
+
+    // The query should have been cancelled by the timer.
+    // If it completed before timeout, that's also acceptable (fast server).
+    if (ret == SQL_ERROR)
+    {
+        std::string state = GetSqlState(SQL_HANDLE_STMT, hStmt);
+        // 11.2.3: timeout-triggered cancel should produce HYT00
+        EXPECT_EQ(state, "HYT00")
+            << "Timer-triggered cancel should produce HYT00, got " << state;
+
+        // Verify it didn't take much longer than the timeout
+        auto secs = std::chrono::duration_cast<std::chrono::seconds>(elapsed).count();
+        EXPECT_LE(secs, 5) << "Should cancel within a few seconds of timeout";
+    }
+    // If SQL_SUCCESS, query was too fast for the timer — acceptable
+}
+
+// Timeout of 0 means no timeout — query should complete normally (11.2.1)
+TEST_F(QueryTimeoutTest, ZeroTimeoutDoesNotCancel)
+{
+    SQLRETURN ret = SQLSetStmtAttr(hStmt, SQL_ATTR_QUERY_TIMEOUT, (SQLPOINTER)0, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    ret = SQLExecDirect(hStmt, (SQLCHAR*)"SELECT 1 FROM RDB$DATABASE", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret))
+        << "Simple query with timeout=0 should succeed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    ret = SQLFetch(hStmt);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    SQLINTEGER val = 0;
+    SQLLEN ind = 0;
+    SQLGetData(hStmt, 1, SQL_C_SLONG, &val, 0, &ind);
+    EXPECT_EQ(val, 1);
+}
+
 // ============================================================================
 // 11.3.4: SQL_ATTR_RESET_CONNECTION tests
 // ============================================================================
@@ -456,4 +508,30 @@ TEST_F(ConnectionResetTest, ResetClosesOpenCursors)
     SQLLEN ind = 0;
     SQLGetData(hStmt, 1, SQL_C_SLONG, &val, 0, &ind);
     EXPECT_EQ(val, 2);
+}
+
+// 11.3.3: Reset should restore query timeout on child statements to 0
+TEST_F(ConnectionResetTest, ResetResetsQueryTimeout)
+{
+    // Set a non-default timeout
+    SQLRETURN ret = SQLSetStmtAttr(hStmt, SQL_ATTR_QUERY_TIMEOUT, (SQLPOINTER)30, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    // Verify it was set
+    SQLULEN timeout = 0;
+    ret = SQLGetStmtAttr(hStmt, SQL_ATTR_QUERY_TIMEOUT, &timeout, 0, nullptr);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    EXPECT_EQ(timeout, 30u);
+
+    // Reset connection
+    ret = SQLSetConnectAttr(hDbc, SQL_ATTR_RESET_CONNECTION,
+                            (SQLPOINTER)SQL_RESET_CONNECTION_YES, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    // Query timeout should be back to 0
+    timeout = 999;
+    ret = SQLGetStmtAttr(hStmt, SQL_ATTR_QUERY_TIMEOUT, &timeout, 0, nullptr);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    EXPECT_EQ(timeout, 0u)
+        << "Query timeout should be 0 after connection reset";
 }

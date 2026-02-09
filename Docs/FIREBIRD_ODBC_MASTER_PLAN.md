@@ -711,13 +711,13 @@ A detailed audit against three Microsoft ODBC specification documents and the Fi
 
 The Firebird OO API exposes `IAttachment::cancelOperation(StatusType*, int option)` with `fb_cancel_raise` as the option to interrupt an in-flight operation. This can be called from any thread. The driver can use this to implement functional `SQL_ATTR_QUERY_TIMEOUT`.
 
-| Task | Description | Complexity | Benefit |
-|------|-------------|------------|---------|
-| **11.2.1** | **Implement `SQL_ATTR_QUERY_TIMEOUT` setter/getter** — Store the timeout value (in seconds) in `OdbcStatement`. If the driver cannot support the exact value, return `SQL_SUCCESS_WITH_INFO` with SQLSTATE 01S02 and report the actual supported value. A value of `0` means no timeout (default). | Easy | Medium |
-| **11.2.2** | **Implement timer-based cancellation thread** — When `SQL_ATTR_QUERY_TIMEOUT > 0` and a statement begins execution (`SQLExecute`/`SQLExecDirect`/`SQLFetch`), start a platform timer (Win32 `CreateTimerQueueTimer` / POSIX `timer_create` or `std::jthread` with `std::condition_variable::wait_for`). On timeout expiry, call `attachment->cancelOperation(&status, fb_cancel_raise)` on the connection's `IAttachment*`. The timer is cancelled when the operation completes normally. | Medium | **High** — unique feature |
-| **11.2.3** | **Handle `isc_cancelled` error gracefully** — When `cancelOperation()` fires, the in-flight Firebird call raises `isc_cancelled`. The driver must catch this, map it to SQLSTATE HYT00 (Timeout expired), and return `SQL_ERROR` to the application. | Easy | Medium |
-| **11.2.4** | **Implement `SQLCancel` using `cancelOperation(fb_cancel_raise)`** — The existing `SQLCancel` stub should call `attachment->cancelOperation(&status, fb_cancel_raise)` to cancel the currently-executing statement on another thread. This makes `SQLCancel` actually functional instead of a no-op. | Easy | **High** |
-| **11.2.5** | **Add tests for query timeout** — Test: (a) timeout fires on a long-running query (use `SELECT * FROM rdb$relations CROSS JOIN rdb$relations` or PG-style `pg_sleep` equivalent), (b) timeout of 0 means no timeout, (c) `SQLCancel` from another thread interrupts execution, (d) SQLSTATE HYT00 returned on timeout. | Medium | Medium |
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
+| ✅ **11.2.1** | **Implement `SQL_ATTR_QUERY_TIMEOUT` setter/getter** — Store the timeout value (in seconds) in `OdbcStatement`. If the driver cannot support the exact value, return `SQL_SUCCESS_WITH_INFO` with SQLSTATE 01S02 and report the actual supported value. A value of `0` means no timeout (default). | Easy | Medium | Completed Feb 8, 2026: `queryTimeout` member in OdbcStatement; getter/setter store and return value |
+| ✅ **11.2.2** | **Implement timer-based cancellation thread** — When `SQL_ATTR_QUERY_TIMEOUT > 0` and a statement begins execution (`SQLExecute`/`SQLExecDirect`/`SQLFetch`), start a platform timer (Win32 `CreateTimerQueueTimer` / POSIX `timer_create` or `std::jthread` with `std::condition_variable::wait_for`). On timeout expiry, call `attachment->cancelOperation(&status, fb_cancel_raise)` on the connection's `IAttachment*`. The timer is cancelled when the operation completes normally. | Medium | **High** — unique feature | Completed Feb 8, 2026: `startQueryTimer()`/`cancelQueryTimer()` using `std::thread` + `std::condition_variable::wait_for`; fires `cancelOperation(fb_cancel_raise)` on expiry; wired into `sqlExecute()`/`sqlExecDirect()` |
+| ✅ **11.2.3** | **Handle `isc_cancelled` error gracefully** — When `cancelOperation()` fires, the in-flight Firebird call raises `isc_cancelled`. The driver must catch this, map it to SQLSTATE HYT00 (Timeout expired), and return `SQL_ERROR` to the application. | Easy | Medium | Completed Feb 8, 2026: `cancelledByTimeout` flag distinguishes timer-triggered vs manual cancel; timeout produces HYT00, manual cancel produces HY008 |
+| ✅ **11.2.4** | **Implement `SQLCancel` using `cancelOperation(fb_cancel_raise)`** — The existing `SQLCancel` stub should call `attachment->cancelOperation(&status, fb_cancel_raise)` to cancel the currently-executing statement on another thread. This makes `SQLCancel` actually functional instead of a no-op. | Easy | **High** | Completed Feb 8, 2026: `sqlCancel()` calls `connection->cancelOperation()` which uses `IAttachment::cancelOperation(fb_cancel_raise)` |
+| ✅ **11.2.5** | **Add tests for query timeout** — Test: (a) timeout fires on a long-running query (use `SELECT * FROM rdb$relations CROSS JOIN rdb$relations` or PG-style `pg_sleep` equivalent), (b) timeout of 0 means no timeout, (c) `SQLCancel` from another thread interrupts execution, (d) SQLSTATE HYT00 returned on timeout. | Medium | Medium | Completed Feb 8, 2026: `QueryTimeoutTest` fixture (7 tests): default=0, set/get, set-to-zero, cancel-idle, cancel-from-thread, timer-fires, zero-no-cancel |
 
 **Firebird API**: `IAttachment::cancelOperation(StatusType* status, int option)` — see [Using_OO_API](https://github.com/FirebirdSQL/firebird/blob/master/doc/Using_OO_API.md)
 
@@ -727,12 +727,12 @@ True driver-aware connection pooling (the SPI with `SQLPoolConnect`, `SQLRateCon
 
 However, the existing `SQL_ATTR_RESET_CONNECTION` handler is incomplete and can be improved to make the DM's default string-matching pool work correctly:
 
-| Task | Description | Complexity | Benefit |
-|------|-------------|------------|---------|
-| **11.3.1** | **Rollback pending transactions on reset** — The current reset handler does not roll back uncommitted work. A pooled connection returned to the pool with an open transaction can cause lock contention or data corruption when reused. **Fix**: call `connection->rollbackTransaction()` (or `ITransaction::rollback()`) if a transaction is active. | Easy | **High** — correctness |
-| **11.3.2** | **Close open cursors/statements on reset** — Open cursors hold server resources and may block other connections. Iterate all child statement handles and call `sqlCloseCursor()` / free prepared statements. | Medium | **High** — resource cleanup |
-| **11.3.3** | **Reset additional attributes** — Reset `SQL_ATTR_METADATA_ID`, `SQL_ATTR_LOGIN_TIMEOUT`, character set (if changed post-connect), and any driver-specific attributes to their post-connect defaults. | Easy | Medium — completeness |
-| **11.3.4** | **Add tests for connection reset** — Test: (a) uncommitted INSERT is rolled back after reset, (b) open cursor is closed after reset, (c) autocommit is restored to ON, (d) transaction isolation is restored to default, (e) connection is reusable after reset. | Medium | Medium |
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
+| ✅ **11.3.1** | **Rollback pending transactions on reset** — The current reset handler does not roll back uncommitted work. A pooled connection returned to the pool with an open transaction can cause lock contention or data corruption when reused. **Fix**: call `connection->rollbackTransaction()` (or `ITransaction::rollback()`) if a transaction is active. | Easy | **High** — correctness | Completed Feb 8, 2026: Checks `getTransactionPending()` and calls `rollback()` in `SQL_ATTR_RESET_CONNECTION` handler |
+| ✅ **11.3.2** | **Close open cursors/statements on reset** — Open cursors hold server resources and may block other connections. Iterate all child statement handles and call `sqlCloseCursor()` / free prepared statements. | Medium | **High** — resource cleanup | Completed Feb 8, 2026: Iterates child statements, calls `releaseResultSet()` on any with open `resultSet` |
+| ✅ **11.3.3** | **Reset additional attributes** — Reset `SQL_ATTR_QUERY_TIMEOUT` on child statements, connection timeout, and other driver-specific attributes to their post-connect defaults. Note: `SQL_ATTR_METADATA_ID` and character set are not tracked as mutable state by this driver — no reset needed. | Easy | Medium — completeness | Completed Feb 8, 2026: Child statement `queryTimeout` reset to 0; `connectionTimeout` reset to 0; autocommit, access mode, transaction isolation already reset |
+| ✅ **11.3.4** | **Add tests for connection reset** — Test: (a) uncommitted INSERT is rolled back after reset, (b) open cursor is closed after reset, (c) autocommit is restored to ON, (d) transaction isolation is restored to default, (e) connection is reusable after reset, (f) query timeout reset to 0. | Medium | Medium | Completed Feb 8, 2026: `ConnectionResetTest` fixture (6 tests): autocommit, isolation, rollback, reusable, cursor-close, queryTimeout-reset |
 
 **Reference**: [Developing Connection-Pool Awareness in an ODBC Driver](https://learn.microsoft.com/en-us/sql/odbc/reference/develop-driver/developing-connection-pool-awareness-in-an-odbc-driver)
 
@@ -776,8 +776,8 @@ True async execution is **not feasible** with the current Firebird OO API, which
 - [x] `SQLCancel` calls `IAttachment::cancelOperation(fb_cancel_raise)`
 - [x] Long-running queries are interruptible from another thread
 - [x] `SQL_ATTR_RESET_CONNECTION` rolls back pending transactions and closes cursors
-- [x] All 385+ existing tests still pass (403 total with new Phase 11 tests)
-- [x] 18 new tests cover type info correctness, timeout, cancellation, and connection reset
+- [x] All 385+ existing tests still pass (406 total with new Phase 11 tests)
+- [x] 21 new tests cover type info correctness, timeout, cancellation, and connection reset
 
 **Deliverable**: A spec-compliant `SQLGetTypeInfo` with correct ordering and thread-safety; functional query timeout and cancellation using Firebird's native API; robust connection reset for pool environments. These improvements target real-world correctness issues that affect ORM frameworks (Entity Framework, Hibernate) and connection pool managers (HikariCP, ADO.NET pool).
 
@@ -790,7 +790,7 @@ True async execution is **not feasible** with the current Firebird OO API, which
 | Metric | Current | Target | Notes |
 |--------|---------|--------|-------|
 | Test pass rate | **100%** | 100% | ✅ All tests pass; connection tests skip gracefully without database |
-| Test count | **403** | 150+ | ✅ Target far exceeded — 403 tests covering 36 test suites |
+| Test count | **406** | 150+ | ✅ Target far exceeded — 406 tests covering 38 test suites |
 | SQLSTATE mapping coverage | **90%+ (121 kSqlStates, 100+ ISC mappings)** | 90%+ | ✅ All common Firebird errors map to correct SQLSTATEs |
 | Crash on invalid input | **Never (NULL handles return SQL_INVALID_HANDLE)** | Never | ✅ Phase 0 complete — 65 GTest (direct-DLL) + 28 null handle tests |
 | Cross-platform tests | **Windows + Linux (x64 + ARM64)** | Windows + Linux + macOS | ✅ CI passes on all platforms |

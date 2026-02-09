@@ -454,6 +454,7 @@ SQLRETURN OdbcConnection::sqlSetConnectAttr( SQLINTEGER attribute, SQLPOINTER va
 
 			// 11.3.2: Close all open cursors on child statements to release
 			// server-side resources (prepared statements are kept for reuse).
+			// 11.3.3: Reset statement-level attributes (queryTimeout) to defaults.
 			for (OdbcStatement* stmt = statements; stmt; stmt = (OdbcStatement*)stmt->next)
 			{
 				if (stmt->resultSet)
@@ -461,6 +462,7 @@ SQLRETURN OdbcConnection::sqlSetConnectAttr( SQLINTEGER attribute, SQLPOINTER va
 					try { stmt->releaseResultSet(); }
 					catch (SQLException&) { /* ignore */ }
 				}
+				stmt->queryTimeout = 0;
 			}
 
 			// Reset connection attributes to post-connect defaults

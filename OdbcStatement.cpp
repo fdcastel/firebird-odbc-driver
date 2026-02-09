@@ -132,6 +132,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <vector>
+#include <mutex>
+#include <condition_variable>
+#include <thread>
+#include <chrono>
 #include "IscDbc/Connection.h"
 #include "IscDbc/SQLException.h"
 #include "OdbcEnv.h"
@@ -219,8 +223,55 @@ OdbcStatement::OdbcStatement(OdbcConnection *connect, int statementNumber)
 	listBindGetData = NULL;
 }
 
+void OdbcStatement::startQueryTimer()
+{
+	// Only start if queryTimeout > 0 and no timer is already running.
+	if (queryTimeout == 0)
+		return;
+
+	cancelQueryTimer();  // Cancel any previous timer
+
+	cancelledByTimeout = false;
+
+	{
+		std::lock_guard<std::mutex> lock(timerMutex_);
+		timerRunning_ = true;
+	}
+
+	SQLUINTEGER timeoutSeconds = queryTimeout;
+	timerThread_ = std::thread([this, timeoutSeconds]() {
+		std::unique_lock<std::mutex> lock(timerMutex_);
+		bool expired = !timerCv_.wait_for(lock,
+			std::chrono::seconds(timeoutSeconds),
+			[this]() { return !timerRunning_; });
+
+		if (expired && timerRunning_)
+		{
+			// Timer expired — fire cancel
+			timerRunning_ = false;
+			cancelledByTimeout = true;
+			cancel = true;
+			if (connection && connection->connection)
+				connection->connection->cancelOperation();
+		}
+	});
+}
+
+void OdbcStatement::cancelQueryTimer()
+{
+	{
+		std::lock_guard<std::mutex> lock(timerMutex_);
+		timerRunning_ = false;
+	}
+	timerCv_.notify_all();
+
+	if (timerThread_.joinable())
+		timerThread_.join();
+}
+
 OdbcStatement::~OdbcStatement()
 {
+	cancelQueryTimer();
 	releaseBindings();
 	releaseParameters();
 	try
@@ -1929,6 +1980,9 @@ SQLRETURN OdbcStatement::sqlExecute()
 		enFetch = NoneFetch;
 		releaseResultSet();
 		parameterNeedData = 0;
+		cancelledByTimeout = false;
+
+		startQueryTimer();
 
 		// Check at execute-time whether to use array execution (ODBC spec
 		// allows SQL_ATTR_PARAMSET_SIZE to be set after SQLPrepare)
@@ -1937,10 +1991,16 @@ SQLRETURN OdbcStatement::sqlExecute()
 			retcode = executeStatementParamArray();
 		else
 			retcode = (this->*execute)();
+
+		cancelQueryTimer();
 	}
 	catch ( SQLException &exception )
 	{
-		postError ("HY000", exception);
+		cancelQueryTimer();
+		if (cancelledByTimeout)
+			postError("HYT00", "Query timeout expired");
+		else
+			postError ("HY000", exception);
 		retcode = SQL_ERROR;
 	}
 
@@ -1959,6 +2019,9 @@ SQLRETURN OdbcStatement::sqlExecDirect(SQLCHAR * sql, int sqlLength)
 	{
 		enFetch = NoneFetch;
 		parameterNeedData = 0;
+		cancelledByTimeout = false;
+
+		startQueryTimer();
 
 		// Check at execute-time whether to use array execution
 		if ( statement->isActiveModify() && applicationParamDescriptor->headArraySize > 1
@@ -1966,10 +2029,16 @@ SQLRETURN OdbcStatement::sqlExecDirect(SQLCHAR * sql, int sqlLength)
 			retcode = executeStatementParamArray();
 		else
 			retcode = (this->*execute)();
+
+		cancelQueryTimer();
 	}
 	catch ( SQLException &exception )
 	{
-		postError ("HY000", exception);
+		cancelQueryTimer();
+		if (cancelledByTimeout)
+			postError("HYT00", "Query timeout expired");
+		else
+			postError ("HY000", exception);
 		return SQL_ERROR;
 	}
 

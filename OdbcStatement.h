@@ -32,6 +32,10 @@
 #define _ODBCSTATEMENT_H_
 
 #include "OdbcObject.h"
+#include <mutex>
+#include <condition_variable>
+#include <thread>
+#include <atomic>
 
 namespace OdbcJdbcLibrary {
 
@@ -197,7 +201,15 @@ public:
 	int					maxRows;
 	int					maxLength;
 	SQLUINTEGER			queryTimeout;		// SQL_ATTR_QUERY_TIMEOUT (seconds, 0 = no timeout)
-};
+	// Timer-based query timeout (11.2.2)
+	void startQueryTimer();
+	void cancelQueryTimer();
+	std::atomic<bool>	cancelledByTimeout{false};	// true if cancel was triggered by timer (for HYT00 mapping)
+private:
+	std::mutex			timerMutex_;
+	std::condition_variable	timerCv_;
+	std::thread			timerThread_;
+	bool				timerRunning_ = false;};
 
 }; // end namespace OdbcJdbcLibrary
 
