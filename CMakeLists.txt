@@ -44,12 +44,14 @@ else()
     endif()
 endif()
 
+# Fetch Firebird public headers from GitHub (replaces vendored FBClient.Headers)
+include(cmake/FetchFirebirdHeaders.cmake)
+
 # Include directories
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}
     ${CMAKE_CURRENT_SOURCE_DIR}/IscDbc
-    ${CMAKE_CURRENT_SOURCE_DIR}/FBClient.Headers
-    ${CMAKE_CURRENT_SOURCE_DIR}/Headers
+    ${FIREBIRD_INCLUDE_DIR}
 )
 
 # Add subdirectories

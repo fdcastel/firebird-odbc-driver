@@ -408,7 +408,7 @@ psqlodbc wraps every ODBC entry point with a consistent 5-step pattern (lock →
 | ✅ 8.3 Add `SQL_ATTR_RESET_CONNECTION` support for connection pool reset | ODBC 3.8 (§Upgrading a 3.5 Driver to 3.8) | 0.5 day | Completed Feb 8, 2026: Resets autocommit, access mode, transaction isolation, connection timeout to defaults |
 | ✅ 8.4 Add `SQL_GD_OUTPUT_PARAMS` to `SQL_GETDATA_EXTENSIONS` bitmask | ODBC 3.8 streamed output params | 0.25 day | Completed Feb 8, 2026: InfoItems.h updated to include SQL_GD_OUTPUT_PARAMS |
 | ✅ 8.5 Add `SQL_ASYNC_DBC_FUNCTIONS` info type (reports `SQL_ASYNC_DBC_NOT_CAPABLE`) | ODBC 3.8 async DBC capability | 0.25 day | Completed Feb 8, 2026: InfoItems.h adds SQL_ASYNC_DBC_FUNCTIONS returning NOT_CAPABLE |
-| ✅ 8.6 Add ODBC 3.8 constants to Headers/SQLEXT.H | Build infrastructure | 0.25 day | Completed Feb 8, 2026: Added SQL_OV_ODBC3_80, SQL_ATTR_RESET_CONNECTION, SQL_ASYNC_DBC_FUNCTIONS, SQL_GD_OUTPUT_PARAMS with proper guards |
+| ✅ 8.6 Add ODBC 3.8 constants to SQLEXT.H | Build infrastructure | 0.25 day | Completed Feb 8, 2026: Added SQL_OV_ODBC3_80, SQL_ATTR_RESET_CONNECTION, SQL_ASYNC_DBC_FUNCTIONS, SQL_GD_OUTPUT_PARAMS with proper guards. Note: Headers/ directory later removed (vendored ODBC SDK headers replaced by system headers). |
 | ✅ 8.7 Implement SQL_GUID type mapping from `CHAR(16) CHARACTER SET OCTETS` (FB3) and `BINARY(16)` (FB4+) | SQL_GUID support | 1 day | Completed Feb 8, 2026: IscSqlType::buildType and Sqlda::getSqlType/getSqlTypeName detect 16-byte OCTETS columns and map to JDBC_GUID (-11 = SQL_GUID); TypesResultSet reports SQL_GUID in SQLGetTypeInfo |
 | ✅ 8.8 Add GUID conversion methods (GUID↔string, GUID↔binary, binary→GUID, string→GUID) | SQL_GUID conversions | 0.5 day | Completed Feb 8, 2026: OdbcConvert.cpp adds convGuidToBinary, convGuidToGuid, convBinaryToGuid, convStringToGuid; added SQL_C_GUID target in SQL_C_BINARY and SQL_C_CHAR converters |
 | ✅ 8.9 Add `BINARY`/`VARBINARY` types to TypesResultSet for Firebird 4+ | FB4+ type completeness | 0.25 day | Completed Feb 8, 2026: ALPHA_V entries for BINARY and VARBINARY (version-gated to server ≥ 4) |
@@ -489,6 +489,17 @@ However, several significant opportunities remain:
 6. Handle `TAG_MULTIERROR` based on `SQL_ATTR_PARAMS_PROCESSED_PTR` requirements
 
 **Deliverable**: Legacy ISC API usage reduced from ~50 function pointers to ~5 (array only). `IBatch` implemented for PARAMSET_SIZE > 1 on FB4+ (single server roundtrip). `isc_vax_integer` replaced inline. Concrete IscDbc classes marked `final`. Dead commented-out ISC code removed. Sqlda data copy optimized. All 318 existing tests pass.
+
+### Build Infrastructure: Vendored Header Removal ✅ (Completed — February 8, 2026)
+**Goal**: Eliminate 60 vendored third-party header files committed to the repository.
+
+| Change | Details |
+|--------|---------|
+| ✅ Removed `FBClient.Headers/` directory | 60 vendored Firebird/Boost header files (ibase.h, firebird/Interface.h, firebird/impl/*, firebird/impl/boost/*, firebird/impl/msg/*) deleted from the repository |
+| ✅ Removed `Headers/` directory | Vendored Microsoft ODBC SDK headers (SQL.H, SQLEXT.H) deleted — system SDK headers used instead (Windows SDK / unixODBC-dev) |
+| ✅ Created `cmake/FetchFirebirdHeaders.cmake` | Uses CMake `FetchContent` to download Firebird public headers from `FirebirdSQL/firebird` GitHub repo at pinned tag (v5.0.2). `SOURCE_SUBDIR` trick prevents configuring Firebird as a sub-project. Headers cached in build tree. |
+| ✅ Moved `OdbcUserEvents.h` to project root | Custom Firebird ODBC extension header — the only non-vendored file in `Headers/` — moved to root alongside other project headers |
+| ✅ Updated `CMakeLists.txt` + `IscDbc/CMakeLists.txt` | Include paths now reference `${FIREBIRD_INCLUDE_DIR}` (fetched from GitHub) instead of vendored `FBClient.Headers` |
 
 ### Phase 10: Performance Engineering — World-Class Throughput
 **Priority**: High  
@@ -732,5 +743,5 @@ A first-class ODBC driver should:
 
 ---
 
-*Document version: 2.4 — February 8, 2026*
+*Document version: 2.5 — February 8, 2026*
 *This is the single authoritative reference for all Firebird ODBC driver improvements.*
