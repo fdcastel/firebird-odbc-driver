@@ -4,7 +4,7 @@
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
 **Last Updated**: February 8, 2026  
-**Version**: 2.5
+**Version**: 2.6
 
 > This document consolidates all known issues and newly identified architectural deficiencies.
 > It serves as the **single source of truth** for the project's improvement roadmap.
@@ -676,6 +676,111 @@ Optimized path (N rows, columnar):
 
 **Deliverable**: A driver that is measurably the fastest ODBC driver for Firebird in existence, with documented benchmark results proving <500ns/row for fixed-type bulk fetch scenarios on embedded Firebird.
 
+### Phase 11: SQLGetTypeInfo Correctness, Connection Pool Awareness & Statement Timeout
+**Priority**: Medium-High  
+**Duration**: 3–5 weeks  
+**Goal**: Fix spec violations and thread-safety bugs in `SQLGetTypeInfo`; implement driver-aware connection pooling SPI; add functional `SQL_ATTR_QUERY_TIMEOUT` using Firebird's `cancelOperation()`; correct async capability reporting
+
+#### Background
+
+A detailed audit against three Microsoft ODBC specification documents and the Firebird OO API (`Using_OO_API.html`) reveals three categories of implementable improvements:
+
+1. **SQLGetTypeInfo** ([spec](https://learn.microsoft.com/en-us/sql/odbc/reference/syntax/sqlgettypeinfo-function)) — The current `TypesResultSet` has a thread-safety bug (global mutable static array), result set ordering that violates the ODBC spec, duplicate type entries that confuse applications on FB4+, and a `findType()` that returns only the first matching row when multiple rows share a `DATA_TYPE` code.
+
+2. **Connection Pool Awareness** ([spec](https://learn.microsoft.com/en-us/sql/odbc/reference/develop-driver/developing-connection-pool-awareness-in-an-odbc-driver)) — The driver currently relies on the Driver Manager's default string-matching pool. ODBC 3.81 defines a Service Provider Interface (SPI) with 7 functions that allow the driver to participate in intelligent pooling — rating reusable connections, computing pool IDs from connection parameters, and handling `SQL_HANDLE_DBC_INFO_TOKEN`. Additionally, the existing `SQL_ATTR_RESET_CONNECTION` handler is incomplete (no transaction rollback, no cursor cleanup).
+
+3. **Statement Timeout / `SQL_ATTR_QUERY_TIMEOUT`** — The setter currently no-ops silently. The Firebird OO API provides `IAttachment::cancelOperation(fb_cancel_raise)`, which can cancel in-flight queries from a separate thread. A timer-based implementation is feasible and would make the driver the only Firebird ODBC driver with functional query timeout support.
+
+4. **Async capability misreport** — `SQL_ASYNC_MODE` reports `SQL_AM_STATEMENT` but the driver rejects `SQL_ATTR_ASYNC_ENABLE = SQL_ASYNC_ENABLE_ON` with HYC00. True async execution is **not feasible** because the Firebird OO API is entirely synchronous (no non-blocking calls, no completion callbacks). However, the notification-based async model (ODBC 3.8 `SQLAsyncNotificationCallback`) could theoretically be built on top of a worker-thread approach — this is deferred to a future phase as the cost/benefit ratio is unfavorable.
+
+#### 11.1 SQLGetTypeInfo — Fix Spec Violations & Thread-Safety
+
+| Task | Description | Complexity | Benefit |
+|------|-------------|------------|---------|
+| **11.1.1** | **Fix thread-safety: eliminate mutation of static `alphaV` array** — The `TypesResultSet` constructor modifies the global `static AlphaV alphaV[]` in-place (adjusting `sqlType`/`sqlSubType` for ODBC 2.x/3.x date/time codes and `columnSize` for charset). Two concurrent `SQLGetTypeInfo` calls with different ODBC versions or character sets corrupt each other. **Fix**: copy the static array into a per-instance `std::vector<AlphaV>` in the constructor and mutate the copy. The static array becomes `const`. | Easy | **High** — eliminates data race |
+| **11.1.2** | **Sort result set by DATA_TYPE ascending** — The ODBC spec mandates ordering by `DATA_TYPE` first, then by closeness of mapping. The current static array is in an arbitrary order. **Fix**: after copying into the per-instance vector (11.1.1), sort by `DATA_TYPE` ascending, then by `TYPE_NAME` ascending as tie-breaker. | Easy | Medium — spec compliance |
+| **11.1.3** | **Fix `findType()` to return all matching rows** — When a specific `DataType` is requested (not `SQL_ALL_TYPES`), the current code returns only the first matching row. On FB4+, `SQL_NUMERIC` matches both NUMERIC and INT128; `SQL_DOUBLE` matches both DOUBLE PRECISION and DECFLOAT. The spec requires all matching rows be returned. **Fix**: change the iteration to continue past the first match and return all rows with the matching `DATA_TYPE`. | Easy | Medium — spec compliance |
+| **11.1.4** | **Remove duplicate BINARY/VARBINARY BLOB entries on FB4+** — Pre-FB4, `BLOB SUB_TYPE 0` is aliased to `SQL_BINARY` (-2) and `SQL_VARBINARY` (-3) as a fallback. On FB4+ servers, native `BINARY` and `VARBINARY` types exist and are reported. This creates duplicate entries. **Fix**: version-gate the BLOB-as-BINARY/VARBINARY entries to `server < 4` so they don't appear alongside the real FB4 types. | Easy | Medium — cleaner type info |
+| **11.1.5** | **Fix SQL_GUID metadata** — `SEARCHABLE` is `3` (SQL_SEARCHABLE, implies LIKE works) but GUID/binary data can't use LIKE. Change to `2` (SQL_ALL_EXCEPT_LIKE). Also review `LITERAL_PREFIX`/`SUFFIX` — GUID types don't use quote literals in standard ODBC; set to NULL. | Easy | Low — minor correctness |
+| **11.1.6** | **Fix SQL_ASYNC_MODE misreport** — `InfoItems.h` declares `NITEM(SQL_ASYNC_MODE, SQL_AM_STATEMENT)` but the driver rejects async enable with HYC00. Change to `NITEM(SQL_ASYNC_MODE, SQL_AM_NONE)`. | Easy | **High** — eliminates DM confusion |
+| **11.1.7** | **Add tests for SQLGetTypeInfo fixes** — Test result set ordering, multi-row returns for duplicate `DATA_TYPE` codes, version-gated type visibility, SQL_GUID searchability, thread-safety under concurrent access. | Medium | Medium |
+
+**Reference**: [SQLGetTypeInfo Function](https://learn.microsoft.com/en-us/sql/odbc/reference/syntax/sqlgettypeinfo-function)
+
+#### 11.2 Statement Timeout via `IAttachment::cancelOperation()`
+
+The Firebird OO API exposes `IAttachment::cancelOperation(StatusType*, int option)` with `fb_cancel_raise` as the option to interrupt an in-flight operation. This can be called from any thread. The driver can use this to implement functional `SQL_ATTR_QUERY_TIMEOUT`.
+
+| Task | Description | Complexity | Benefit |
+|------|-------------|------------|---------|
+| **11.2.1** | **Implement `SQL_ATTR_QUERY_TIMEOUT` setter/getter** — Store the timeout value (in seconds) in `OdbcStatement`. If the driver cannot support the exact value, return `SQL_SUCCESS_WITH_INFO` with SQLSTATE 01S02 and report the actual supported value. A value of `0` means no timeout (default). | Easy | Medium |
+| **11.2.2** | **Implement timer-based cancellation thread** — When `SQL_ATTR_QUERY_TIMEOUT > 0` and a statement begins execution (`SQLExecute`/`SQLExecDirect`/`SQLFetch`), start a platform timer (Win32 `CreateTimerQueueTimer` / POSIX `timer_create` or `std::jthread` with `std::condition_variable::wait_for`). On timeout expiry, call `attachment->cancelOperation(&status, fb_cancel_raise)` on the connection's `IAttachment*`. The timer is cancelled when the operation completes normally. | Medium | **High** — unique feature |
+| **11.2.3** | **Handle `isc_cancelled` error gracefully** — When `cancelOperation()` fires, the in-flight Firebird call raises `isc_cancelled`. The driver must catch this, map it to SQLSTATE HYT00 (Timeout expired), and return `SQL_ERROR` to the application. | Easy | Medium |
+| **11.2.4** | **Implement `SQLCancel` using `cancelOperation(fb_cancel_raise)`** — The existing `SQLCancel` stub should call `attachment->cancelOperation(&status, fb_cancel_raise)` to cancel the currently-executing statement on another thread. This makes `SQLCancel` actually functional instead of a no-op. | Easy | **High** |
+| **11.2.5** | **Add tests for query timeout** — Test: (a) timeout fires on a long-running query (use `SELECT * FROM rdb$relations CROSS JOIN rdb$relations` or PG-style `pg_sleep` equivalent), (b) timeout of 0 means no timeout, (c) `SQLCancel` from another thread interrupts execution, (d) SQLSTATE HYT00 returned on timeout. | Medium | Medium |
+
+**Firebird API**: `IAttachment::cancelOperation(StatusType* status, int option)` — see [Using_OO_API](https://github.com/FirebirdSQL/firebird/blob/master/doc/Using_OO_API.md)
+
+#### 11.3 Connection Pool Awareness — `SQL_ATTR_RESET_CONNECTION` Improvements
+
+True driver-aware connection pooling (the SPI with `SQLPoolConnect`, `SQLRateConnection`, `SQLGetPoolID`, etc.) is a large undertaking that requires a new handle type (`SQL_HANDLE_DBC_INFO_TOKEN`), 7 new exported functions, and careful integration with the Driver Manager's pool lifecycle. This is deferred to a future phase.
+
+However, the existing `SQL_ATTR_RESET_CONNECTION` handler is incomplete and can be improved to make the DM's default string-matching pool work correctly:
+
+| Task | Description | Complexity | Benefit |
+|------|-------------|------------|---------|
+| **11.3.1** | **Rollback pending transactions on reset** — The current reset handler does not roll back uncommitted work. A pooled connection returned to the pool with an open transaction can cause lock contention or data corruption when reused. **Fix**: call `connection->rollbackTransaction()` (or `ITransaction::rollback()`) if a transaction is active. | Easy | **High** — correctness |
+| **11.3.2** | **Close open cursors/statements on reset** — Open cursors hold server resources and may block other connections. Iterate all child statement handles and call `sqlCloseCursor()` / free prepared statements. | Medium | **High** — resource cleanup |
+| **11.3.3** | **Reset additional attributes** — Reset `SQL_ATTR_METADATA_ID`, `SQL_ATTR_LOGIN_TIMEOUT`, character set (if changed post-connect), and any driver-specific attributes to their post-connect defaults. | Easy | Medium — completeness |
+| **11.3.4** | **Add tests for connection reset** — Test: (a) uncommitted INSERT is rolled back after reset, (b) open cursor is closed after reset, (c) autocommit is restored to ON, (d) transaction isolation is restored to default, (e) connection is reusable after reset. | Medium | Medium |
+
+**Reference**: [Developing Connection-Pool Awareness in an ODBC Driver](https://learn.microsoft.com/en-us/sql/odbc/reference/develop-driver/developing-connection-pool-awareness-in-an-odbc-driver)
+
+#### 11.4 Future: Driver-Aware Connection Pool SPI (Deferred)
+
+The full SPI implementation requires exporting 7 new functions from the driver DLL and handling the `SQL_HANDLE_DBC_INFO_TOKEN` lifecycle. This is architecturally significant and should be a standalone phase. Documented here for reference:
+
+| SPI Function | Purpose | Feasibility |
+|---|---|---|
+| `SQLSetConnectAttrForDbcInfo` | Set attributes on info token before connect | ✅ Straightforward — store in a map |
+| `SQLSetConnectInfo` | Set DSN/UID/PWD on info token | ✅ Straightforward |
+| `SQLSetDriverConnectInfo` | Set connection string on info token | ✅ Straightforward |
+| `SQLGetPoolID` | Compute pool ID from info token (server + credentials + charset + dialect) | ✅ Hash of key attributes |
+| `SQLRateConnection` | Rate pooled connection match (0–100) | ✅ Compare key attrs, rate mismatches |
+| `SQLPoolConnect` | Reuse or create connection from pool | ✅ Call reset + reconnect if needed |
+| `SQLCleanupConnectionPoolID` | Free pool ID resources | ✅ Free hash |
+
+**Prerequisites**: Phase 11.3 (complete reset) must be done first. Pool-aware drivers must correctly reset all state when reusing connections.
+
+#### 11.5 Future: Async Execution (Deferred — Pending Firebird Async API)
+
+True async execution is **not feasible** with the current Firebird OO API, which is entirely synchronous. The notification-based async model (ODBC 3.8's `SQL_ATTR_ASYNC_DBC_NOTIFICATION_CALLBACK` / `SQL_ATTR_ASYNC_STMT_NOTIFICATION_CALLBACK`) could be emulated using worker threads, but the complexity is high and the benefit is low — applications that need async typically use connection-per-thread patterns.
+
+| Constraint | Detail |
+|---|---|
+| Firebird OO API | All operations are synchronous/blocking. No `IStatement::executeAsync()` or completion callback exists. |
+| Worker-thread emulation | Possible but complex: spawn a thread per async call, call `SQLAsyncNotificationCallback` when done. Requires careful thread-safety for all driver state. |
+| `SQLCompleteAsync` | Would need to be implemented to retrieve the final return code from the worker thread. |
+| Cost/Benefit | High implementation cost, low benefit — few applications use ODBC async. `SQL_ATTR_QUERY_TIMEOUT` (11.2) covers the most important use case (interruptible queries). |
+
+**Decision**: Fix the `SQL_ASYNC_MODE` misreport to `SQL_AM_NONE` (task 11.1.6). Defer full async to a future phase if/when Firebird adds non-blocking API support.
+
+#### Success Criteria
+
+- [ ] `SQLGetTypeInfo` result set sorted by `DATA_TYPE` ascending (spec compliant)
+- [ ] Static `alphaV` array is `const`; per-instance copies used for mutation (thread-safe)
+- [ ] `findType()` returns all rows matching a given `DATA_TYPE` (multi-row)
+- [ ] No duplicate BINARY/VARBINARY entries on FB4+ servers
+- [ ] `SQL_ASYNC_MODE` correctly reports `SQL_AM_NONE`
+- [ ] `SQL_ATTR_QUERY_TIMEOUT` stores the timeout and fires `cancelOperation()` on expiry
+- [ ] `SQLCancel` calls `IAttachment::cancelOperation(fb_cancel_raise)`
+- [ ] Long-running queries are interruptible from another thread
+- [ ] `SQL_ATTR_RESET_CONNECTION` rolls back pending transactions and closes cursors
+- [ ] All 385+ existing tests still pass
+- [ ] New tests cover type info correctness, timeout, cancellation, and connection reset
+
+**Deliverable**: A spec-compliant `SQLGetTypeInfo` with correct ordering and thread-safety; functional query timeout and cancellation using Firebird's native API; robust connection reset for pool environments. These improvements target real-world correctness issues that affect ORM frameworks (Entity Framework, Hibernate) and connection pool managers (HikariCP, ADO.NET pool).
+
 ---
 
 ## 6. Success Criteria
@@ -739,9 +844,13 @@ A first-class ODBC driver should:
 - [Firebird New OO API Reference](https://github.com/FirebirdSQL/firebird/blob/master/doc/Using_OO_API.md)
 - [Firebird OO API Summary for Driver Authors](firebird-api.MD)
 - [Firebird IBatch Interface](https://github.com/FirebirdSQL/firebird/blob/master/doc/Using_OO_API.md#modifying-data-in-a-batch)
+- [SQLGetTypeInfo Function](https://learn.microsoft.com/en-us/sql/odbc/reference/syntax/sqlgettypeinfo-function)
+- [Developing Connection-Pool Awareness in an ODBC Driver](https://learn.microsoft.com/en-us/sql/odbc/reference/develop-driver/developing-connection-pool-awareness-in-an-odbc-driver)
+- [Notification of Asynchronous Function Completion](https://learn.microsoft.com/en-us/sql/odbc/reference/develop-driver/notification-of-asynchronous-function-completion)
+- [SQLAsyncNotificationCallback Function](https://learn.microsoft.com/en-us/sql/odbc/reference/develop-driver/sqlasyncnotificationcallback-function)
 
 
 ---
 
-*Document version: 2.5 — February 8, 2026*
+*Document version: 2.6 — February 8, 2026*
 *This is the single authoritative reference for all Firebird ODBC driver improvements.*
