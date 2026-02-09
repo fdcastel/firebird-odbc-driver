@@ -29,6 +29,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <math.h>
+#include <charconv>
 #include "OdbcJdbc.h"
 #include "OdbcEnv.h"
 #include "OdbcDesc.h"
@@ -100,7 +101,7 @@ int init()
 	return 0;
 }
 
-inline void setIndicatorPtr(SQLLEN* ptr, SQLLEN value, DescRecord* rec)
+ODBC_FORCEINLINE void setIndicatorPtr(SQLLEN* ptr, SQLLEN value, DescRecord* rec)
 {
 	if (!ptr)
 		return;
@@ -115,7 +116,7 @@ inline void setIndicatorPtr(SQLLEN* ptr, SQLLEN value, DescRecord* rec)
 	}
 }
 
-inline bool checkIndicatorPtr(SQLLEN* ptr, SQLLEN value, DescRecord* rec)
+ODBC_FORCEINLINE bool checkIndicatorPtr(SQLLEN* ptr, SQLLEN value, DescRecord* rec)
 {
 	if (!ptr) return false;
 	return rec->isIndicatorSqlDa ? *(short*)ptr == (short)value : *ptr == value;
@@ -1033,25 +1034,25 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 	return NULL;
 }
 
-inline 
+ODBC_FORCEINLINE
 SQLPOINTER OdbcConvert::getAdressBindDataFrom(char * pointer)
 {
 	return pointer ? (SQLPOINTER)(pointer + *bindOffsetPtrFrom) : NULL;
 }
 
-inline
+ODBC_FORCEINLINE
 SQLLEN * OdbcConvert::getAdressBindIndFrom(char * pointer)
 {
 	return pointer ? (SQLLEN *)(pointer + *bindOffsetPtrIndFrom) : NULL; 
 }
 
-inline 
+ODBC_FORCEINLINE
 SQLPOINTER OdbcConvert::getAdressBindDataTo(char * pointer)
 {
 	return pointer ? (SQLPOINTER)(pointer + *bindOffsetPtrTo) : NULL;
 }
 
-inline
+ODBC_FORCEINLINE
 SQLLEN * OdbcConvert::getAdressBindIndTo(char * pointer)
 {
 	return pointer ? (SQLLEN *)(pointer + *bindOffsetPtrIndTo) : NULL;
@@ -1891,7 +1892,17 @@ int OdbcConvert::convFloatToString(DescRecord * from, DescRecord * to)
 	int len = to->length;
 
 	if ( len )
-		ConvertFloatToString<char>(*(float*)getAdressBindDataFrom((char*)from->dataPtr), pointerTo, len, &len);
+	{
+		float val = *(float*)getAdressBindDataFrom((char*)from->dataPtr);
+		auto [ptr, ec] = std::to_chars(pointerTo, pointerTo + len - 1, val);
+		if (ec == std::errc()) {
+			*ptr = '\0';
+			len = static_cast<int>(ptr - pointerTo);
+		} else {
+			// Fallback to legacy conversion on overflow
+			ConvertFloatToString<char>(val, pointerTo, len, &len);
+		}
+	}
 
 	if ( to->isIndicatorSqlDa ) {
 		to->headSqlVarPtr->setSqlLen(len);
@@ -1998,7 +2009,17 @@ int OdbcConvert::convDoubleToString(DescRecord * from, DescRecord * to)
 	int len = to->length;
 
 	if ( len )	// MAX_DOUBLE_DIGIT_LENGTH = 15
-		ConvertFloatToString<char>(*(double*)getAdressBindDataFrom((char*)from->dataPtr), pointerTo, len, &len);
+	{
+		double val = *(double*)getAdressBindDataFrom((char*)from->dataPtr);
+		auto [ptr, ec] = std::to_chars(pointerTo, pointerTo + len - 1, val);
+		if (ec == std::errc()) {
+			*ptr = '\0';
+			len = static_cast<int>(ptr - pointerTo);
+		} else {
+			// Fallback to legacy conversion on overflow
+			ConvertFloatToString<char>(val, pointerTo, len, &len);
+		}
+	}
 
 	if ( to->isIndicatorSqlDa ) {
 		to->headSqlVarPtr->setSqlLen(len);

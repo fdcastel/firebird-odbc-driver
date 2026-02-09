@@ -30,6 +30,7 @@
 #include "OdbcStatement.h"
 #include "SafeEnvThread.h"
 #include "Main.h"
+#include "Utf16Convert.h"
 
 #define GETCONNECT_STMT( hStmt ) (((OdbcStatement*)hStmt)->connection)
 #define GETCONNECT_DESC( hDesc ) (((OdbcDesc*)hDesc)->connection)
@@ -137,10 +138,16 @@ public:
 				else
 				{
 #ifdef _WINDOWS
-					len = MultiByteToWideChar( codePage, 0, (const char*)byteString, -1,
-											  unicodeString, lengthString );
-					if ( len > 0 )
-						len--;
+					// 10.6.4: Use Utf16Convert for UTF-8 codepage
+					if ( codePage == CP_UTF8 )
+						len = Utf8ToUtf16( (const char*)byteString, unicodeString, lengthString + 1 );
+					else
+					{
+						len = MultiByteToWideChar( codePage, 0, (const char*)byteString, -1,
+												  unicodeString, lengthString );
+						if ( len > 0 )
+							len--;
+					}
 #else
 					len = mbstowcs( (wchar_t*)unicodeString, (const char*)byteString, lengthString );
 #endif
@@ -195,23 +202,45 @@ public:
 		else
 		{
 #ifdef _WINDOWS
-			// Try direct conversion into stack buffer (single pass)
-			bytesNeeded = WideCharToMultiByte( codePage, 0, wcString, length,
-				(LPSTR)stackBuf, kStackBufSize - 2, NULL, NULL );
-			if ( bytesNeeded > 0 )
+			// 10.6.4: When codePage is UTF-8 (65001), use the custom Utf16ToUtf8
+			// codec directly. It avoids the WideCharToMultiByte code-page lookup
+			// overhead and is purpose-built for the UTF-8 ↔ UTF-16 conversion
+			// that ODBC W-APIs require.
+			if ( codePage == CP_UTF8 )
 			{
-				// Fits in stack buffer — no heap allocation needed
-				byteString = stackBuf;
-				isHeapAllocated = false;
-				byteString[ bytesNeeded ] = '\0';
-				lengthString = (int)bytesNeeded;
-				if ( ptEndWC ) *ptEndWC = saveWC;
-				return byteString;
+				bytesNeeded = Utf16ToUtf8( wcString, (char*)stackBuf, kStackBufSize - 2 );
+				if ( bytesNeeded > 0 && (int)bytesNeeded + 2 <= kStackBufSize )
+				{
+					byteString = stackBuf;
+					isHeapAllocated = false;
+					byteString[ bytesNeeded ] = '\0';
+					lengthString = (int)bytesNeeded;
+					if ( ptEndWC ) *ptEndWC = saveWC;
+					return byteString;
+				}
+				// Didn't fit or error — measure needed size
+				bytesNeeded = Utf16ToUtf8Length( wcString );
 			}
-			// GetLastError() == ERROR_INSUFFICIENT_BUFFER or conversion error
-			// Fall through: measure then heap-allocate
-			bytesNeeded = WideCharToMultiByte( codePage, (DWORD)0, wcString, length,
-				NULL, (int)0, NULL, NULL );
+			else
+			{
+				// Try direct conversion into stack buffer (single pass)
+				bytesNeeded = WideCharToMultiByte( codePage, 0, wcString, length,
+					(LPSTR)stackBuf, kStackBufSize - 2, NULL, NULL );
+				if ( bytesNeeded > 0 )
+				{
+					// Fits in stack buffer — no heap allocation needed
+					byteString = stackBuf;
+					isHeapAllocated = false;
+					byteString[ bytesNeeded ] = '\0';
+					lengthString = (int)bytesNeeded;
+					if ( ptEndWC ) *ptEndWC = saveWC;
+					return byteString;
+				}
+				// GetLastError() == ERROR_INSUFFICIENT_BUFFER or conversion error
+				// Fall through: measure then heap-allocate
+				bytesNeeded = WideCharToMultiByte( codePage, (DWORD)0, wcString, length,
+					NULL, (int)0, NULL, NULL );
+			}
 #else
 			bytesNeeded = wcstombs( NULL, (const wchar_t*)wcString, length );
 #endif
@@ -234,7 +263,10 @@ public:
 		else
 		{
 #ifdef _WINDOWS
-			bytesNeeded = WideCharToMultiByte( codePage, 0, wcString, length, (LPSTR)byteString, (int)bytesNeeded, NULL, NULL );
+			if ( codePage == CP_UTF8 )
+				bytesNeeded = Utf16ToUtf8( wcString, (char*)byteString, bytesNeeded + 1 );
+			else
+				bytesNeeded = WideCharToMultiByte( codePage, 0, wcString, length, (LPSTR)byteString, (int)bytesNeeded, NULL, NULL );
 #else
 			bytesNeeded = wcstombs( (char *)byteString, (const wchar_t*)wcString, bytesNeeded );
 #endif

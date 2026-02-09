@@ -87,6 +87,23 @@ void IscResultSet::initResultSet(IscStatement *iscStatement)
 		numberColumns = sqlda->getColumnCount();
 		values.alloc (numberColumns);
 		allocConversions();
+
+		// 10.2.2: Pre-allocate IscBlob pool for blob columns.
+		blobColumnPool.resize(numberColumns);
+		for (int n = 0; n < numberColumns; ++n)
+		{
+			auto* var = sqlda->Var(n + 1);
+			if (var->sqltype == SQL_BLOB)
+				blobColumnPool[n] = std::make_unique<IscBlob>();
+		}
+
+		// 10.5.1: Initialize N-row prefetch buffer.
+		prefetchRowSize = static_cast<int>(sqlda->buffer.size());
+		if (prefetchRowSize > 0)
+			prefetchBuffer.resize(static_cast<size_t>(kPrefetchRows) * prefetchRowSize);
+		prefetchCount = 0;
+		prefetchIndex = 0;
+		prefetchCursorDone = false;
 	}
 
 	nextSimulateForProcedure = false;
@@ -101,6 +118,65 @@ bool IscResultSet::nextFetch()
 	if (!statement || !statement->fbResultSet)
 		throw SQLEXCEPTION (RUNTIME_ERROR, "resultset is not active");
 
+	// 10.5.1: N-row prefetch — serve from the local buffer when possible,
+	// otherwise fill a new batch from the Firebird cursor.
+	if (prefetchRowSize > 0 && !prefetchBuffer.empty())
+	{
+		// Return next buffered row if available.
+		if (prefetchIndex < prefetchCount)
+		{
+			memcpy(sqlda->buffer.data(),
+				   prefetchBuffer.data() + static_cast<size_t>(prefetchIndex) * prefetchRowSize,
+				   prefetchRowSize);
+			++prefetchIndex;
+			return true;
+		}
+
+		// Buffer exhausted. If the cursor already returned RESULT_NO_DATA
+		// during the previous batch fill, we're done — no more rows.
+		if (prefetchCursorDone)
+		{
+			close();
+			return false;
+		}
+
+		// Fill a new batch from the Firebird cursor.
+		prefetchCount = 0;
+		prefetchIndex = 0;
+
+		ThrowStatusWrapper status( statement->connection->GDS->_status );
+		try
+		{
+			for (int i = 0; i < kPrefetchRows; ++i)
+			{
+				char* rowPtr = prefetchBuffer.data() + static_cast<size_t>(i) * prefetchRowSize;
+				auto fetch_stat = statement->fbResultSet->fetchNext( &status, rowPtr );
+				if ( fetch_stat == IStatus::RESULT_NO_DATA )
+				{
+					prefetchCursorDone = true;
+					break;
+				}
+				++prefetchCount;
+			}
+		}
+		catch( const FbException& error )
+		{
+			THROW_ISC_EXCEPTION( statement->connection, error.getStatus() );
+		}
+
+		if (prefetchCount == 0)
+		{
+			close();
+			return false;
+		}
+
+		// Copy first row of the new batch into the sqlda buffer.
+		memcpy(sqlda->buffer.data(), prefetchBuffer.data(), prefetchRowSize);
+		prefetchIndex = 1;
+		return true;
+	}
+
+	// Fallback: single-row fetch when prefetch buffer was not allocated.
 	ThrowStatusWrapper status( statement->connection->GDS->_status );
 	try
 	{
@@ -145,7 +221,29 @@ bool IscResultSet::next()
     Value *value = values.values;
 
 	for (int n = 0; n < numberColumns; ++n, ++value)
-		statement->setValue (value, n + 1, *sqlda);
+	{
+		// 10.2.2: For blob columns, reuse the pooled IscBlob instead of
+		// allocating a new one in IscStatement::setValue.
+		if (n < (int)blobColumnPool.size() && blobColumnPool[n])
+		{
+			auto* var = sqlda->Var(n + 1);
+			if (sqlda->isNull(n + 1))
+			{
+				value->setNull();
+			}
+			else
+			{
+				IscBlob* pooledBlob = blobColumnPool[n].get();
+				pooledBlob->bind(statement, var->sqldata);
+				pooledBlob->setType(var->sqlsubtype);
+				value->setValue(static_cast<Blob*>(pooledBlob));
+			}
+		}
+		else
+		{
+			statement->setValue(value, n + 1, *sqlda);
+		}
+	}
 
 	return true;
 }
@@ -262,6 +360,9 @@ void IscResultSet::close()
 {
 	deleteBlobs();
 	reset();
+
+	// 10.2.2: Release pooled blob objects before releasing statement
+	blobColumnPool.clear();
 
 	if (statement)
 	{

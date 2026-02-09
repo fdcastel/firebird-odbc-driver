@@ -661,8 +661,19 @@ const char* Value::getString(char **tempPtr)
 	if (!tempPtr)	//NOMEY +
 		throw SQLEXCEPTION (BUG_CHECK, "NULL-Pointer in Value::getString"); //NOMEY +
 
+	// 10.2.3: Reuse existing buffer when new string fits (avoid delete+new per row).
+	// Numeric→string conversions produce at most ~24 chars; buffers are typically
+	// 64 bytes. Only reallocate when the new string is strictly longer.
 	if (*tempPtr)
+	{
+		int existingLen = (int)strlen(*tempPtr);
+		if (length <= existingLen)
+		{
+			strcpy(*tempPtr, temp);
+			return *tempPtr;
+		}
 		delete[] *tempPtr;
+	}
 
 	*tempPtr = new char [length + 1];
 	strcpy (*tempPtr, temp);

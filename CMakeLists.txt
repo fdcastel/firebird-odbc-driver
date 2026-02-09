@@ -47,6 +47,17 @@ if(_ipo_supported)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELWITHDEBINFO TRUE)
 endif()
 
+# 10.7.5: Architecture-specific instruction scheduling for Release builds
+if(MSVC)
+    # /favor:AMD64 — optimize scheduling for AMD64 (x86-64) processors
+    add_compile_options($<$<CONFIG:Release>:/favor:AMD64>)
+    add_compile_options($<$<CONFIG:RelWithDebInfo>:/favor:AMD64>)
+elseif(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    # -march=native — enable all instruction sets supported by the build host
+    add_compile_options($<$<CONFIG:Release>:-march=native>)
+    add_compile_options($<$<CONFIG:RelWithDebInfo>:-march=native>)
+endif()
+
 # Find required packages
 if(WIN32)
     # On Windows, ODBC is typically part of the system

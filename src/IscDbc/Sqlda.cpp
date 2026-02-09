@@ -482,16 +482,28 @@ bool Sqlda::checkAndRebuild()
 	// Only copy data when we have a separate exec buffer (i.e., metadata was rebuilt)
 	if (useExecBufferMeta)
 	{
-		for (const auto& var : sqlvar)
+		// 10.3.1: On re-execute (!overrideFlag), the eff pointers are known-different
+		// from the original pointers (they were set during a prior rebuild). Skip the
+		// per-column pointer comparison and copy unconditionally — the branch prediction
+		// savings outweigh the cost of a small unconditional memcpy.
+		if (!overrideFlag)
 		{
-			if (var.eff_sqlind != var.sqlind)
+			for (const auto& var : sqlvar)
 			{
 				memcpy(var.eff_sqlind, var.sqlind, sizeof(short));
+				if (*var.eff_sqlind != sqlNull)
+					memcpy(var.eff_sqldata, var.sqldata, var.sqllen);
 			}
-
-			if (var.eff_sqldata != var.sqldata && *var.eff_sqlind != sqlNull)
+		}
+		else
+		{
+			for (const auto& var : sqlvar)
 			{
-				memcpy(var.eff_sqldata, var.sqldata, var.sqllen);
+				if (var.eff_sqlind != var.sqlind)
+					memcpy(var.eff_sqlind, var.sqlind, sizeof(short));
+
+				if (var.eff_sqldata != var.sqldata && *var.eff_sqlind != sqlNull)
+					memcpy(var.eff_sqldata, var.sqldata, var.sqllen);
 			}
 		}
 	}
@@ -1032,7 +1044,10 @@ void Sqlda::setValue(int slot, Value * value, IscStatement	*stmt)
 			return;
 		}
 
-	var->sqlscale = 0;
+	// 10.3.3: Only write sqlscale if changed. Avoids cache-line dirtying and
+	// prevents propertiesOverriden() from returning true on re-execute with same types.
+	if (var->sqlscale != 0)
+		var->sqlscale = 0;
 	
 	if( value->type == Null ) {
 		setNull( index );
@@ -1043,75 +1058,63 @@ void Sqlda::setValue(int slot, Value * value, IscStatement	*stmt)
 	char * src_buf = (char*) &value->data;
 	char * dst_buf = var->sqldata;
 
-	//var->sqldata = (char*) &value->data;
-	//*var->sqlind = 0;
+	// 10.3.3: Helper to avoid redundant writes to sqltype/sqllen.
+	// Only modifies var members when the new value differs, preventing
+	// propertiesOverriden() from detecting false changes on re-execute.
+	auto setTypeAndLen = [](CAttrSqlVar* v, short type, unsigned len) {
+		if (v->sqltype != type) v->sqltype = type;
+		if (v->sqllen != len) v->sqllen = len;
+	};
 
 	switch (value->type)
 		{
-/*
-		case Null:
-			
-			var->sqltype |= 1;
-			*var->sqlind = sqlNull;
-			break;
-*/
 		case String:
-			var->sqltype = SQL_TEXT;
-			var->sqllen = value->data.string.length;
+			setTypeAndLen(var, SQL_TEXT, value->data.string.length);
 			memcpy( dst_buf, value->data.string.string, var->sqllen );
 			break;
 
 		case Boolean:
-			var->sqltype = SQL_BOOLEAN;
-			var->sqllen = sizeof (TYPE_BOOLEAN);
+			setTypeAndLen(var, SQL_BOOLEAN, sizeof(TYPE_BOOLEAN));
 			memcpy( dst_buf, src_buf, var->sqllen );
 			break;
 
 		case Short:
-			var->sqltype = SQL_SHORT;
-			var->sqllen = sizeof (short);
+			setTypeAndLen(var, SQL_SHORT, sizeof(short));
 			memcpy( dst_buf, src_buf, var->sqllen );
 			break;
 
 		case Long:
-			var->sqltype = SQL_LONG;
-			var->sqllen = sizeof (int);
+			setTypeAndLen(var, SQL_LONG, sizeof(int));
 			memcpy( dst_buf, src_buf, var->sqllen );
 			break;
 
 		case Quad:
-			var->sqltype = SQL_INT64;
-			var->sqllen = sizeof (QUAD);
+			setTypeAndLen(var, SQL_INT64, sizeof(QUAD));
 			memcpy( dst_buf, src_buf, var->sqllen );
 			break;
 
 		case Float:
-			var->sqltype = SQL_FLOAT;
-			var->sqllen = sizeof (float);
+			setTypeAndLen(var, SQL_FLOAT, sizeof(float));
 			memcpy( dst_buf, src_buf, var->sqllen );
 			break;
 
 		case Double:
-			var->sqltype = SQL_DOUBLE;
-			var->sqllen = sizeof (double);
+			setTypeAndLen(var, SQL_DOUBLE, sizeof(double));
 			memcpy( dst_buf, src_buf, var->sqllen );
 			break;
 
 		case Date:
-			var->sqltype = SQL_TYPE_DATE;
-			var->sqllen = sizeof (ISC_DATE);
+			setTypeAndLen(var, SQL_TYPE_DATE, sizeof(ISC_DATE));
 			*(ISC_DATE*)dst_buf = IscStatement::getIscDate (value->data.date);
 			break;
 									
 		case TimeType:
-			var->sqltype = SQL_TYPE_TIME;
-			var->sqllen = sizeof (ISC_TIME);
+			setTypeAndLen(var, SQL_TYPE_TIME, sizeof(ISC_TIME));
 			*(ISC_TIME*)dst_buf = IscStatement::getIscTime (value->data.time);
 			break;
 									
 		case Timestamp:
-			var->sqltype = SQL_TIMESTAMP;
-			var->sqllen = sizeof (ISC_TIMESTAMP);
+			setTypeAndLen(var, SQL_TIMESTAMP, sizeof(ISC_TIMESTAMP));
 			*(ISC_TIMESTAMP*)dst_buf = IscStatement::getIscTimeStamp (value->data.timestamp);
 			break;
 									

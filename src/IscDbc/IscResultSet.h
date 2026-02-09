@@ -26,12 +26,14 @@
 #define _ISCRESULTSET_H_
 
 #include <vector>
+#include <memory>
 #include "Connection.h"
 #include "Values.h"
 #include "DateTime.h"	// Added by ClassView
 #include "SqlTime.h"
 #include "TimeStamp.h"	// Added by ClassView
 #include "IscStatementMetaData.h"
+#include "IscBlob.h"
 #include "Sqlda.h"
 
 namespace IscDbcLibrary {
@@ -196,6 +198,18 @@ public:
 	bool			valueWasNull;
 	bool			nextSimulateForProcedure;
 	std::vector<Blob*>	blobs;
+
+	/// 10.2.2: Pool of pre-allocated IscBlob objects for blob columns.
+	std::vector<std::unique_ptr<IscBlob>> blobColumnPool;
+
+	/// 10.5.1: N-row prefetch buffer for nextFetch().
+	static constexpr int kPrefetchRows = 64;
+	std::vector<char> prefetchBuffer;
+	int prefetchCount = 0;
+	int prefetchIndex = 0;
+	int prefetchRowSize = 0;
+	bool prefetchCursorDone = false;  ///< True once the Firebird cursor returned RESULT_NO_DATA
+
 	int				activePosRowInSet;
 	size_t			sqldataOffsetPtr;
 	enStatysActivePositionRow statysPositionRow;

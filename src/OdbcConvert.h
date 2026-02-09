@@ -85,10 +85,18 @@ public:
 	void setBindOffsetPtrTo(SQLLEN *bindOffsetPtr, SQLLEN *bindOffsetPtrInd);
 	void setBindOffsetPtrFrom(SQLLEN *bindOffsetPtr, SQLLEN *bindOffsetPtrInd);
 	ADRESS_FUNCTION getAdressFunction(DescRecord * from, DescRecord * to);
-	inline SQLPOINTER getAdressBindDataFrom(char * pointer);
-	inline SQLLEN *getAdressBindIndFrom(char * pointer);
-	inline SQLPOINTER getAdressBindDataTo(char * pointer);
-	inline SQLLEN *getAdressBindIndTo(char * pointer);
+#ifdef _MSC_VER
+#define ODBC_FORCEINLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+#define ODBC_FORCEINLINE inline __attribute__((always_inline))
+#else
+#define ODBC_FORCEINLINE inline
+#endif
+
+	ODBC_FORCEINLINE SQLPOINTER getAdressBindDataFrom(char * pointer);
+	ODBC_FORCEINLINE SQLLEN *getAdressBindIndFrom(char * pointer);
+	ODBC_FORCEINLINE SQLPOINTER getAdressBindDataTo(char * pointer);
+	ODBC_FORCEINLINE SQLLEN *getAdressBindIndTo(char * pointer);
 
 public:
 	bool isIdentity(){ return bIdentity; }
