@@ -226,7 +226,7 @@ void OdbcObject::operator <<(OdbcObject * obj)
 
 void OdbcObject::clearErrors()
 {
-	if (!infoPosted) [[likely]]
+	if (!infoPosted)
 		return;
 
 	errors.clear();

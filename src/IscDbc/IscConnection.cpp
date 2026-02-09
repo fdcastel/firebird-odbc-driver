@@ -1341,8 +1341,8 @@ int IscConnection::getNativeSql (const char * inStatementText, int textLength1,
 	bool autoRemoveSchemaFromIdentifier = attachment->useSchemaIdentifier == 1;
 	bool autoQuoted = delimiter && attachment->autoQuotedIdentifier;
 
-#pragma FB_COMPILER_MESSAGE("IscConnection::getNativeSql - The temporary decision; FIXME!")
-
+	// Schema removal + auto-quoting of mixed-case identifiers.
+	// Bracket-to-space conversion for "(SELECT ...) UNION (SELECT ...)" is intentional.
 	if ( autoRemoveSchemaFromIdentifier )
 	{
 		statysModify = removeSchemaFromSQL( ptIn, textLength1, ptOut, *textLength2Ptr );

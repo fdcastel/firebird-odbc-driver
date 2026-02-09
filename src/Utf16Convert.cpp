@@ -13,10 +13,16 @@
 #include "Utf16Convert.h"
 #include <string.h>
 
-// Helper macros for UTF-16 surrogate pairs
+// Helper macros for UTF-16 surrogate pairs (guarded — windows.h may define these)
+#ifndef IS_HIGH_SURROGATE
 #define IS_HIGH_SURROGATE(wc) ((wc) >= 0xD800 && (wc) <= 0xDBFF)
+#endif
+#ifndef IS_LOW_SURROGATE
 #define IS_LOW_SURROGATE(wc) ((wc) >= 0xDC00 && (wc) <= 0xDFFF)
+#endif
+#ifndef IS_SURROGATE
 #define IS_SURROGATE(wc) ((wc) >= 0xD800 && (wc) <= 0xDFFF)
+#endif
 
 // Calculate code point from surrogate pair
 #define SURROGATE_TO_CODEPOINT(hi, lo) \

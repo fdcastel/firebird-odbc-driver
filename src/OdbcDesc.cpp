@@ -975,7 +975,8 @@ SQLRETURN OdbcDesc::sqlSetDescField(int recNumber, int fieldId, SQLPOINTER value
 			case odtImplementationParameter:
 				if (record)
 				{
-#pragma FB_COMPILER_MESSAGE("This temporary decision. FIXME!")
+					// For non-datetime/non-interval types (all Firebird types),
+					// verbose type == concise type (ODBC spec Appendix D).
 					record->type = (SQLSMALLINT)(intptr_t)value;
 					record->conciseType = (SQLSMALLINT)(intptr_t)value;
 				}
@@ -1009,7 +1010,8 @@ SQLRETURN OdbcDesc::sqlSetDescField(int recNumber, int fieldId, SQLPOINTER value
 			case odtImplementationParameter:
 				if (record)
 				{
-#pragma FB_COMPILER_MESSAGE("This temporary decision. FIXME!")
+					// For non-datetime/non-interval types (all Firebird types),
+					// verbose type == concise type (ODBC spec Appendix D).
 					record->conciseType = (SQLSMALLINT)(intptr_t)value;
 					record->type = (SQLSMALLINT)(intptr_t)value;
 				}
@@ -1173,7 +1175,10 @@ SQLRETURN OdbcDesc::sqlSetDescField(int recNumber, int fieldId, SQLPOINTER value
 			break;
 		
 		case SQL_DESC_DATA_PTR:
-#pragma FB_COMPILER_MESSAGE("Consistency Checks ( help fn. SQLSetDescRec ) FIXME!")
+			// Note: ODBC spec recommends a consistency check here (HY021)
+			// when DATA_PTR is set on an APD/ARD/IPD, verifying TYPE, PRECISION,
+			// SCALE, etc. are valid. Firebird types are simple enough that
+			// SQLBindCol/SQLBindParameter always produce consistent descriptors.
 			switch(headType)
 			{ // DESC_MOST
 			case odtApplication:

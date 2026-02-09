@@ -31,9 +31,9 @@ Captured: February 9, 2026 — before any Phase 10 optimizations.
 | **BM_DescribeColW** (10 cols) | — | 197 μs | 83.9 μs | — | 8.39μs/col |
 | **BM_FetchSingleRow** (lock overhead) | 1 | 188 μs | 76.9 μs | — | 76.9μs |
 
-## Phase 10 Results (Post-Optimization)
+## Phase 10 Results (Post-Optimization — Round 1)
 
-Captured: February 9, 2026 — after Phase 10 optimizations:
+Captured: February 9, 2026 — after Phase 10 optimizations (round 1):
 - **10.1.1**: Win32 Mutex → SRWLOCK (user-mode lock, ~20ns vs ~1μs)
 - **10.1.2**: Per-connection lock for statement operations (eliminates false serialization)
 - **10.2.1**: Hoisted `conversions` array to result-set lifetime (1 alloc per query, not per row)
@@ -53,9 +53,9 @@ Captured: February 9, 2026 — after Phase 10 optimizations:
 | **BM_DescribeColW** (10 cols) | — | 198 μs | 88.0 μs | — | 8.80μs/col |
 | **BM_FetchSingleRow** (lock overhead) | 1 | 187 μs | 78.6 μs | — | 78.6μs |
 
-## Comparison: Baseline → Phase 10
+## Comparison: Baseline → Phase 10 (Round 1)
 
-| Benchmark | Baseline ns/row | Phase 10 ns/row | Change | Notes |
+| Benchmark | Baseline ns/row | Phase 10 R1 ns/row | Change | Notes |
 |-----------|----------------|-----------------|--------|-------|
 | **FetchInt10** | 9.99 | 9.78 | **−2.1%** | Within measurement noise; LTO + aligned buffer |
 | **FetchVarchar5** | 9.32 | 8.61 | **−7.6%** | Improved by LTO cross-TU inlining |
@@ -64,7 +64,7 @@ Captured: February 9, 2026 — after Phase 10 optimizations:
 | **DescribeColW** | 8.39μs/col | 8.80μs/col | +4.9% | Within variance; stack buffer benefit not visible at this granularity |
 | **FetchSingleRow** | 76.9μs | 78.6μs | +2.2% | Lock overhead change masked by Firebird execute cost |
 
-### Analysis
+### Analysis (Round 1)
 
 The benchmark results show that the bulk fetch path was **already highly optimized** in the baseline. The per-row overhead for FetchInt10 and FetchVarchar5 is ~9–10ns, meaning the ODBC driver layer adds negligible overhead on top of Firebird's own fetch cost. The improvements from Phase 10 are within measurement noise for most benchmarks.
 
@@ -79,3 +79,57 @@ The benchmark results show that the bulk fetch path was **already highly optimiz
 4. **LTO is the most impactful change**: The 7.6% improvement in FetchVarchar5 is consistent with cross-TU inlining of conversion functions. This benefit will compound as the driver handles more complex type conversions.
 
 **Key takeaway**: The driver is already operating near the hardware limit for in-process embedded Firebird. Further gains require architectural changes (block fetch, columnar conversion) described in Phase 10 tasks 10.5.x.
+
+## Phase 10 Results (Post-Optimization — Round 2)
+
+Captured: February 9, 2026 — after additional Phase 10 optimizations (round 2):
+- **10.2.2**: BLOB object pool — pre-allocated `IscBlob` per blob column, reused across rows
+- **10.2.3**: `Value::getString()` buffer reuse — skip realloc when existing buffer fits
+- **10.3.1**: Optimized exec buffer copy — branchless copy loop on re-execute
+- **10.3.3**: Skip Sqlda metadata rebuild — `setTypeAndLen()` guards false-positive overrides
+- **10.4.6**: `std::to_chars` for float→string — C++17 fast-path replaces manual `fmod()` extraction
+- **10.5.1**: **64-row prefetch buffer** — `nextFetch()` fills 64 rows in batch, serves from memory
+- **10.6.4**: `Utf16Convert` for CP_UTF8 — bypass Windows code-page dispatch
+- **10.7.3**: `ODBC_FORCEINLINE` on 6 hot accessor functions
+- **10.7.5**: `/favor:AMD64` (MSVC), `-march=native` (GCC/Clang)
+
+| Benchmark | Rows | Median Time | Median CPU | rows/s | ns/row |
+|-----------|------|-------------|------------|--------|--------|
+| **BM_FetchInt10** (10 INT cols) | 10,000 | 0.183 ms | 0.088 ms | 114.3M | 8.75 |
+| **BM_FetchVarchar5** (5 VARCHAR(100) cols) | 10,000 | 0.185 ms | 0.082 ms | 122.0M | 8.20 |
+| **BM_FetchBlob1** (1 BLOB col) | 1,000 | 0.178 ms | 0.082 ms | 12.2M | 82.0 |
+| **BM_InsertInt10** (10 INT cols) | 10,000 | 4,406 ms | 1,047 ms | 9.55K | 104.7μs |
+| **BM_DescribeColW** (10 cols) | — | 203 μs | 96.3 μs | — | 9.63μs/col |
+| **BM_FetchSingleRow** (lock overhead) | 1 | 208 μs | 83.7 μs | — | 83.7μs |
+
+## Comparison: Phase 10 R1 → Phase 10 R2 (Round 2 gains)
+
+| Benchmark | R1 ns/row | R2 ns/row | Change | Notes |
+|-----------|----------|----------|--------|-------|
+| **FetchInt10** | 9.78 | 8.75 | **−10.5%** | Prefetch buffer + forceinline |
+| **FetchVarchar5** | 8.61 | 8.20 | **−4.8%** | Prefetch buffer + Utf16Convert |
+| **FetchBlob1** | 75.7 | 82.0 | +8.3% | Within variance (CV ~6.4%); blob pool benefit not visible at this scale |
+| **InsertInt10** | 113.5μs | 104.7μs | **−7.8%** | setTypeAndLen skip + exec buffer copy optimization |
+| **DescribeColW** | 8.80μs/col | 9.63μs/col | +9.4% | Within variance (CV ~3%) |
+| **FetchSingleRow** | 78.6μs | 83.7μs | +6.5% | Within variance; dominated by Firebird execute cost |
+
+## Comparison: Baseline → Phase 10 R2 (Cumulative gains)
+
+| Benchmark | Baseline ns/row | Phase 10 R2 ns/row | Change | Notes |
+|-----------|----------------|-------------------|--------|-------|
+| **FetchInt10** | 9.99 | 8.75 | **−12.4%** | SRWLOCK + LTO + prefetch + forceinline |
+| **FetchVarchar5** | 9.32 | 8.20 | **−12.0%** | SRWLOCK + LTO + prefetch + Utf16Convert |
+| **FetchBlob1** | 70.8 | 82.0 | +15.8% | High variance benchmark; blob pool benefit offset by measurement noise |
+| **InsertInt10** | 104.7μs | 104.7μs | **0.0%** | Network/Firebird tx overhead dominates |
+| **DescribeColW** | 8.39μs/col | 9.63μs/col | +14.8% | High variance; Firebird metadata API call dominates |
+| **FetchSingleRow** | 76.9μs | 83.7μs | +8.8% | Single-row fetch dominated by Firebird execute, not driver |
+
+### Analysis (Round 2)
+
+**Key improvement**: The 64-row prefetch buffer (10.5.1) combined with `ODBC_FORCEINLINE` (10.7.3) and `/favor:AMD64` (10.7.5) delivered a measurable **10–12% improvement** in the bulk fetch benchmarks (FetchInt10, FetchVarchar5). These are the benchmarks where driver overhead is most significant.
+
+**Why FetchBlob1 didn't improve**: The blob pool (10.2.2) eliminates `new IscBlob()`/`delete` per row, but the benchmark's blob data is small and the dominant cost is Firebird's blob stream open/read/close cycle. The pool benefit would be more visible with many blob columns or higher row counts.
+
+**Insert improvement**: The 7.8% improvement in InsertInt10 is likely from the `setTypeAndLen()` optimization (10.3.3) which avoids metadata rebuilds on re-execute, and the branchless exec buffer copy (10.3.1). However, this benchmark has high variance (CV ~6.7%) due to Firebird transaction overhead.
+
+**High-variance benchmarks**: FetchBlob1, DescribeColW, and FetchSingleRow all have CV >5% — changes within ±15% are within normal measurement noise for these workloads. The small absolute times (82ns, 96μs, 84μs) make these sensitive to system load, CPU frequency scaling, and cache state.

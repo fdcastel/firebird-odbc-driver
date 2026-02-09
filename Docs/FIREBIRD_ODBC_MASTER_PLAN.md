@@ -643,7 +643,47 @@ A comprehensive analysis of the data path from `SQLFetch()` → `OdbcConvert::co
 | Task | Description | Complexity | Benefit |
 |------|-------------|------------|---------|
 | **10.10.1** | **Double-buffered fetch** — Allocate two `Sqlda::buffer` slots. While `OdbcConvert` processes buffer A, issue `IResultSet::fetchNext()` into buffer B on a worker thread (or via async I/O). When conversion of A completes, swap buffers. This hides Firebird fetch latency behind conversion work. Only beneficial when Firebird is not embedded (i.e., client/server mode with network latency). | Very Hard | High (client/server mode) |
-| **10.10.2** | **Evaluate Firebird `IResultSet::fetchNext()` with pre-allocated multi-row buffer** — Investigate whether the Firebird OO API supports fetching N rows at once into a contiguous buffer (like ODBC's `SQL_ATTR_ROW_ARRAY_SIZE`). If so, this eliminates the per-row API call overhead entirely. | Research | **Very High** (if available) |
+| **10.10.2** | **Evaluate Firebird `IResultSet::fetchNext()` with pre-allocated multi-row buffer** — Investigate whether the Firebird OO API supports fetching N rows at once into a contiguous buffer (like ODBC's `SQL_ATTR_ROW_ARRAY_SIZE`). If so, this eliminates the per-row API call overhead entirely. | Research | **Very High** (if available) | ✅ Researched — see findings below |
+
+##### 10.10.2 Research Findings: Firebird Multi-Row Fetch API
+
+**Conclusion**: The Firebird OO API does **not** expose a multi-row fetch method. However, the wire protocol already performs transparent batch prefetching, making the per-`fetchNext()` overhead near-zero for sequential access.
+
+**1. OO API: Single-row only**
+
+`IResultSet::fetchNext(StatusType* status, void* message)` accepts a single row buffer. There is no count parameter, no array size, no batch flag. The same applies to `fetchPrior`, `fetchFirst`, `fetchLast`, `fetchAbsolute`, `fetchRelative` — all take a single `void* message` buffer. (`src/include/firebird/FirebirdApi.idl`)
+
+**2. Commented-out `Pipe` interface — the unrealized multi-row API**
+
+In `src/include/firebird/FirebirdApi.idl` (lines 598–604), there is a **commented-out** `Pipe` interface that would have provided exactly this capability:
+
+```idl
+/* interface Pipe : ReferenceCounted {
+    uint add(Status status, uint count, void* inBuffer);
+    uint fetch(Status status, uint count, void* outBuffer);  // Multi-row!
+    void close(Status status);
+} */
+```
+
+`IStatement::createPipe()` and `IAttachment::createPipe()` are also commented out. This API was designed but never implemented. It would allow fetching `count` rows into a contiguous `outBuffer` in a single call.
+
+**3. Wire protocol already does transparent batch prefetch**
+
+The Firebird remote client (`src/remote/client/interface.cpp`, lines 5085–5155) transparently requests up to **1000 rows per network round-trip**:
+
+- `REMOTE_compute_batch_size()` (`src/remote/remote.cpp`, lines 174–250) computes the batch size: `MAX_ROWS_PER_BATCH = 1000` for protocol ≥ v13, clamped to `MAX_BATCH_CACHE_SIZE / row_size` (1 MB cache limit), with `MIN_ROWS_PER_BATCH = 10` as floor.
+- The client sets `p_sqldata_messages = batch_size` in the `op_fetch` packet (`src/remote/protocol.h`, line 652).
+- The server streams up to `batch_size` rows in the response, and the client caches them in a linked-list buffer (`rsr_message`).
+- Subsequent `fetchNext()` calls return from cache with **zero network I/O**.
+- When rows drop below `rsr_reorder_level` (= `batch_size / 2`), the client pipelines another batch request — overlapping network fetch with row consumption.
+
+**4. Implications for the ODBC driver**
+
+Since the wire protocol already prefetches up to 1000 rows, calling `fetchNext()` in a tight loop (as the ODBC driver does in task 10.5.1 with 64-row batches) is efficient — after the first call triggers the network batch, the next 63 calls return from the client's local cache. The per-call overhead is just a function pointer dispatch + buffer pointer copy, measured at **~8.75 ns/row** in benchmarks.
+
+**5. No action needed — but future opportunity exists**
+
+The `Pipe` interface, if Firebird ever implements it, would let us eliminate the per-row function call overhead entirely. Until then, the ODBC driver's 64-row prefetch buffer (10.5.1) combined with the wire protocol's 1000-row prefetch provides excellent throughput. The measured 8.75 ns/row is already well below the 500 ns/row target.
 
 #### Architecture Diagram: Optimized Fetch Path
 
@@ -717,15 +757,15 @@ A detailed audit against three Microsoft ODBC specification documents and the Fi
 
 #### 11.1 SQLGetTypeInfo — Fix Spec Violations & Thread-Safety
 
-| Task | Description | Complexity | Benefit |
-|------|-------------|------------|---------|
-| **11.1.1** | **Fix thread-safety: eliminate mutation of static `alphaV` array** — The `TypesResultSet` constructor modifies the global `static AlphaV alphaV[]` in-place (adjusting `sqlType`/`sqlSubType` for ODBC 2.x/3.x date/time codes and `columnSize` for charset). Two concurrent `SQLGetTypeInfo` calls with different ODBC versions or character sets corrupt each other. **Fix**: copy the static array into a per-instance `std::vector<AlphaV>` in the constructor and mutate the copy. The static array becomes `const`. | Easy | **High** — eliminates data race |
-| **11.1.2** | **Sort result set by DATA_TYPE ascending** — The ODBC spec mandates ordering by `DATA_TYPE` first, then by closeness of mapping. The current static array is in an arbitrary order. **Fix**: after copying into the per-instance vector (11.1.1), sort by `DATA_TYPE` ascending, then by `TYPE_NAME` ascending as tie-breaker. | Easy | Medium — spec compliance |
-| **11.1.3** | **Fix `findType()` to return all matching rows** — When a specific `DataType` is requested (not `SQL_ALL_TYPES`), the current code returns only the first matching row. On FB4+, `SQL_NUMERIC` matches both NUMERIC and INT128; `SQL_DOUBLE` matches both DOUBLE PRECISION and DECFLOAT. The spec requires all matching rows be returned. **Fix**: change the iteration to continue past the first match and return all rows with the matching `DATA_TYPE`. | Easy | Medium — spec compliance |
-| **11.1.4** | **Remove duplicate BINARY/VARBINARY BLOB entries on FB4+** — Pre-FB4, `BLOB SUB_TYPE 0` is aliased to `SQL_BINARY` (-2) and `SQL_VARBINARY` (-3) as a fallback. On FB4+ servers, native `BINARY` and `VARBINARY` types exist and are reported. This creates duplicate entries. **Fix**: version-gate the BLOB-as-BINARY/VARBINARY entries to `server < 4` so they don't appear alongside the real FB4 types. | Easy | Medium — cleaner type info |
-| **11.1.5** | **Fix SQL_GUID metadata** — `SEARCHABLE` is `3` (SQL_SEARCHABLE, implies LIKE works) but GUID/binary data can't use LIKE. Change to `2` (SQL_ALL_EXCEPT_LIKE). Also review `LITERAL_PREFIX`/`SUFFIX` — GUID types don't use quote literals in standard ODBC; set to NULL. | Easy | Low — minor correctness |
-| **11.1.6** | **Fix SQL_ASYNC_MODE misreport** — `InfoItems.h` declares `NITEM(SQL_ASYNC_MODE, SQL_AM_STATEMENT)` but the driver rejects async enable with HYC00. Change to `NITEM(SQL_ASYNC_MODE, SQL_AM_NONE)`. | Easy | **High** — eliminates DM confusion |
-| **11.1.7** | **Add tests for SQLGetTypeInfo fixes** — Test result set ordering, multi-row returns for duplicate `DATA_TYPE` codes, version-gated type visibility, SQL_GUID searchability, thread-safety under concurrent access. | Medium | Medium |
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
+| ✅ **11.1.1** | **Fix thread-safety: eliminate mutation of static `alphaV` array** — The `TypesResultSet` constructor modifies the global `static AlphaV alphaV[]` in-place (adjusting `sqlType`/`sqlSubType` for ODBC 2.x/3.x date/time codes and `columnSize` for charset). Two concurrent `SQLGetTypeInfo` calls with different ODBC versions or character sets corrupt each other. **Fix**: copy the static array into a per-instance `std::vector<AlphaV>` in the constructor and mutate the copy. The static array becomes `const`. | Easy | **High** — eliminates data race | Completed Feb 8, 2026 |
+| ✅ **11.1.2** | **Sort result set by DATA_TYPE ascending** — The ODBC spec mandates ordering by `DATA_TYPE` first, then by closeness of mapping. The current static array is in an arbitrary order. **Fix**: after copying into the per-instance vector (11.1.1), sort by `DATA_TYPE` ascending, then by `TYPE_NAME` ascending as tie-breaker. | Easy | Medium — spec compliance | Completed Feb 8, 2026 |
+| ✅ **11.1.3** | **Fix `findType()` to return all matching rows** — When a specific `DataType` is requested (not `SQL_ALL_TYPES`), the current code returns only the first matching row. On FB4+, `SQL_NUMERIC` matches both NUMERIC and INT128; `SQL_DOUBLE` matches both DOUBLE PRECISION and DECFLOAT. The spec requires all matching rows be returned. **Fix**: change the iteration to continue past the first match and return all rows with the matching `DATA_TYPE`. | Easy | Medium — spec compliance | Completed Feb 8, 2026 |
+| ✅ **11.1.4** | **Remove duplicate BINARY/VARBINARY BLOB entries on FB4+** — Pre-FB4, `BLOB SUB_TYPE 0` is aliased to `SQL_BINARY` (-2) and `SQL_VARBINARY` (-3) as a fallback. On FB4+ servers, native `BINARY` and `VARBINARY` types exist and are reported. This creates duplicate entries. **Fix**: version-gate the BLOB-as-BINARY/VARBINARY entries to `server < 4` so they don't appear alongside the real FB4 types. | Easy | Medium — cleaner type info | Completed Feb 8, 2026 |
+| ✅ **11.1.5** | **Fix SQL_GUID metadata** — `SEARCHABLE` is `3` (SQL_SEARCHABLE, implies LIKE works) but GUID/binary data can't use LIKE. Change to `2` (SQL_ALL_EXCEPT_LIKE). Also review `LITERAL_PREFIX`/`SUFFIX` — GUID types don't use quote literals in standard ODBC; set to NULL. | Easy | Low — minor correctness | Completed Feb 8, 2026 |
+| ✅ **11.1.6** | **Fix SQL_ASYNC_MODE misreport** — `InfoItems.h` declares `NITEM(SQL_ASYNC_MODE, SQL_AM_STATEMENT)` but the driver rejects async enable with HYC00. Change to `NITEM(SQL_ASYNC_MODE, SQL_AM_NONE)`. | Easy | **High** — eliminates DM confusion | Completed Feb 8, 2026 |
+| ✅ **11.1.7** | **Add tests for SQLGetTypeInfo fixes** — Test result set ordering, multi-row returns for duplicate `DATA_TYPE` codes, version-gated type visibility, SQL_GUID searchability, thread-safety under concurrent access. | Medium | Medium | Completed Feb 8, 2026 |
 
 **Reference**: [SQLGetTypeInfo Function](https://learn.microsoft.com/en-us/sql/odbc/reference/syntax/sqlgettypeinfo-function)
 
