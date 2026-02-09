@@ -31,79 +31,8 @@ extern HINSTANCE m_hInstance;
 
 namespace OdbcJdbcLibrary {
 
-int currentCP;
-
-#define _TR( id, msg ) ( currentCP == -1 ? msg : translate[currentCP].table[id].string )
-
-struct TranslateString 
-{
-	int		userLCID;
-	struct 
-	{
-		int		id;
-		char	*string;
-	} table[6];
-};
-
-TranslateString translate[] = 
-{
-	#include "Res/resource.en"
-,	
-	#include "Res/resource.ru"
-,	
-	#include "Res/resource.uk"
-,	
-	#include "Res/resource.es"
-,	
-	#include "Res/resource.it"
-};
-
-int selectUserLCID( int userLCID )
-{
-	switch ( userLCID )
-	{
-	case 0x080a: //     esmx      // Spanish(Mexican)               //
- 	case 0x0c0a: //     es        // Spanish(Spain - Modern Sort)   //
- 	case 0x100a: //     esgt      // Spanish(Guatemala)             //
- 	case 0x140a: //     escr      // Spanish(Costa Rica)            //
- 	case 0x180a: //     espa      // Spanish(Panama)                //
- 	case 0x1c0a: //     esdo      // Spanish(Dominican Republic)    //
- 	case 0x200a: //     esve      // Spanish(Venezuela)             //
- 	case 0x240a: //     esco      // Spanish(Colombia)              //
- 	case 0x280a: //     espe      // Spanish(Peru)                  //
- 	case 0x2c0a: //     esar      // Spanish(Argentina)             //
- 	case 0x300a: //     esec      // Spanish(Ecuador)               //
- 	case 0x340a: //     escl      // Spanish(Chile)                 //
- 	case 0x380a: //     esuy      // Spanish(Uruguay)               //
- 	case 0x3c0a: //     espy      // Spanish(Paraguay)              //
- 	case 0x400a: //     esbo      // Spanish(Bolivia)               //
- 	case 0x440a: //     essv      // Spanish(El Salvador)           //
- 	case 0x480a: //     eshn      // Spanish(Honduras)              //
- 	case 0x4c0a: //     esni      // Spanish(Nicaragua)             //
- 	case 0x500a: //     espr      // Spanish(Puerto Rico)           //
-			return 0x040a; // es  // Spanish(Spain-Traditional Sort)//
-
-	case 0x0810: //     itch	  // Italian(Swiss)                 //
-			return 0x0410; // it  // Italian(Standard)              //
-	}
-
-	return userLCID;
-}
-
-void initCodePageTranslate( int userLCID )
-{
-	int i;
-	int count = sizeof ( translate ) / sizeof ( *translate );
-
-	userLCID = selectUserLCID( userLCID );
-
-	for( currentCP = -1, i = 0; i < count; i++ )
-		if ( translate[i].userLCID == userLCID )
-		{
-			currentCP = i;
-			break;
-		}
-}
+// Internationalization removed — English only.
+#define _TR( id, msg ) msg
 
 CConnectDialog * m_ptConnectDialog = NULL;
 

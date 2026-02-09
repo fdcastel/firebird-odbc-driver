@@ -122,8 +122,8 @@ jobs:
         cp ${{github.workspace}}/build/libOdbcFb.so "$packageDir/"
         
         # Copy IscDbc library if built separately
-        if [ -f "${{github.workspace}}/build/IscDbc/libIscDbc.a" ]; then
-          cp ${{github.workspace}}/build/IscDbc/libIscDbc.a "$packageDir/"
+        if [ -f "${{github.workspace}}/build/src/IscDbc/libIscDbc.a" ]; then
+          cp ${{github.workspace}}/build/src/IscDbc/libIscDbc.a "$packageDir/"
         fi
         
         # Copy README and license files

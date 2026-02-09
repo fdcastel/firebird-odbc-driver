@@ -1,10 +1,10 @@
 # Firebird ODBC Driver — Master Plan
 
-**Date**: February 8, 2026  
+**Date**: February 9, 2026  
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
-**Last Updated**: February 8, 2026  
-**Version**: 2.7
+**Last Updated**: February 9, 2026  
+**Version**: 2.8
 
 > This document consolidates all known issues and newly identified architectural deficiencies.
 > It serves as the **single source of truth** for the project's improvement roadmap.
@@ -500,6 +500,22 @@ However, several significant opportunities remain:
 | ✅ Created `cmake/FetchFirebirdHeaders.cmake` | Uses CMake `FetchContent` to download Firebird public headers from `FirebirdSQL/firebird` GitHub repo at pinned tag (v5.0.2). `SOURCE_SUBDIR` trick prevents configuring Firebird as a sub-project. Headers cached in build tree. |
 | ✅ Moved `OdbcUserEvents.h` to project root | Custom Firebird ODBC extension header — the only non-vendored file in `Headers/` — moved to root alongside other project headers |
 | ✅ Updated `CMakeLists.txt` + `IscDbc/CMakeLists.txt` | Include paths now reference `${FIREBIRD_INCLUDE_DIR}` (fetched from GitHub) instead of vendored `FBClient.Headers` |
+
+### Build Infrastructure: Source Reorganization & i18n Removal ✅ (Completed — February 9, 2026)
+**Goal**: Move all source code into `src/` subdirectory; remove unused internationalization support.
+
+| Change | Details |
+|--------|---------|
+| ✅ Removed `Res/` directory | 5 locale resource files (resource.en, resource.es, resource.it, resource.ru, resource.uk) deleted — internationalization not supported |
+| ✅ Removed i18n code from `ConnectDialog.cpp` | `TranslateString translate[]`, `selectUserLCID()`, `initCodePageTranslate()` removed; `_TR()` macro simplified to always return English string |
+| ✅ Removed `initCodePageTranslate` call from `Main.cpp` | `DllMain` no longer calls the i18n initialization function |
+| ✅ Moved all `.cpp`/`.h` from root to `src/` | 30+ source/header files moved to `src/` subdirectory |
+| ✅ Moved `IscDbc/` to `src/IscDbc/` | IscDbc static library sources relocated under `src/` |
+| ✅ Moved `.def`/`.rc`/`.manifest` to `src/` | Build-support files co-located with source |
+| ✅ Removed `OdbcJdbc.exp` build artifact | Was accidentally committed; already in `.gitignore` |
+| ✅ Updated `CMakeLists.txt` | Include dirs: `src/`, `src/IscDbc/`; source paths: `src/*.cpp`; .def path: `src/OdbcJdbc.def`; `add_subdirectory(src/IscDbc)` |
+| ✅ Updated `tests/CMakeLists.txt` | Include dirs updated to `src/` and `src/IscDbc/` |
+| ✅ Updated `.github/workflows/release.yml` | IscDbc artifact path updated to `build/src/IscDbc/libIscDbc.a` |
 
 ### Phase 10: Performance Engineering — World-Class Throughput
 **Priority**: High  

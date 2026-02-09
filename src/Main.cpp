@@ -106,17 +106,12 @@ using namespace OdbcJdbcLibrary;
 HINSTANCE m_hInstance = NULL;
 UINT codePage = CP_ACP;
 
-namespace OdbcJdbcLibrary {
-void initCodePageTranslate(  int userLCID );
-};
-
 BOOL APIENTRY DllMain(  HINSTANCE hinstDLL, DWORD fdwReason, LPVOID lpvReserved )
 {
 	if ( fdwReason == DLL_PROCESS_ATTACH )
 	{
 		m_hInstance = hinstDLL;
 		codePage = GetACP();
-		initCodePageTranslate( GetUserDefaultLCID() );
 		setlocale( LC_ALL, ".ACP" );
 	}
 

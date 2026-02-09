@@ -49,52 +49,52 @@ include(cmake/FetchFirebirdHeaders.cmake)
 
 # Include directories
 include_directories(
-    ${CMAKE_CURRENT_SOURCE_DIR}
-    ${CMAKE_CURRENT_SOURCE_DIR}/IscDbc
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/src/IscDbc
     ${FIREBIRD_INCLUDE_DIR}
 )
 
 # Add subdirectories
-add_subdirectory(IscDbc)
+add_subdirectory(src/IscDbc)
 
 # Main ODBC driver library sources
 set(ODBCJDBC_SOURCES
-    ConnectDialog.cpp
-    DescRecord.cpp
-    Main.cpp
-    MainUnicode.cpp
-    MbsAndWcs.cpp
-    OdbcConnection.cpp
-    OdbcConvert.cpp
-    OdbcDesc.cpp
-    OdbcEnv.cpp
-    OdbcError.cpp
-    OdbcObject.cpp
-    OdbcStatement.cpp
-    SafeEnvThread.cpp
-    Utf16Convert.cpp
+    src/ConnectDialog.cpp
+    src/DescRecord.cpp
+    src/Main.cpp
+    src/MainUnicode.cpp
+    src/MbsAndWcs.cpp
+    src/OdbcConnection.cpp
+    src/OdbcConvert.cpp
+    src/OdbcDesc.cpp
+    src/OdbcEnv.cpp
+    src/OdbcError.cpp
+    src/OdbcObject.cpp
+    src/OdbcStatement.cpp
+    src/SafeEnvThread.cpp
+    src/Utf16Convert.cpp
 )
 
 set(ODBCJDBC_HEADERS
-    ConnectDialog.h
-    DescRecord.h
-    InfoItems.h
-    Main.h
-    OdbcConnection.h
-    OdbcConvert.h
-    OdbcDesc.h
-    OdbcEnv.h
-    OdbcError.h
-    OdbcJdbc.h
-    OdbcObject.h
-    OdbcStatement.h
-    SafeEnvThread.h
-    SecurityPassword.h
-    SetupAttributes.h
-    TemplateConvert.h
-    Utf16Convert.h
-    WriteBuildNo.h
-    resource.h
+    src/ConnectDialog.h
+    src/DescRecord.h
+    src/InfoItems.h
+    src/Main.h
+    src/OdbcConnection.h
+    src/OdbcConvert.h
+    src/OdbcDesc.h
+    src/OdbcEnv.h
+    src/OdbcError.h
+    src/OdbcJdbc.h
+    src/OdbcObject.h
+    src/OdbcStatement.h
+    src/SafeEnvThread.h
+    src/SecurityPassword.h
+    src/SetupAttributes.h
+    src/TemplateConvert.h
+    src/Utf16Convert.h
+    src/WriteBuildNo.h
+    src/resource.h
 )
 
 # Create the main ODBC driver library
@@ -124,10 +124,10 @@ if(WIN32)
     # Set the .def file for exports
     if(CMAKE_SIZEOF_VOID_P EQUAL 8)
         # 64-bit
-        set_target_properties(OdbcFb PROPERTIES LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/OdbcJdbc.def")
+        set_target_properties(OdbcFb PROPERTIES LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/src/OdbcJdbc.def")
     else()
         # 32-bit
-        set_target_properties(OdbcFb PROPERTIES LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/OdbcJdbc.def")
+        set_target_properties(OdbcFb PROPERTIES LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/src/OdbcJdbc.def")
     endif()
 else()
     target_link_libraries(OdbcFb PRIVATE 

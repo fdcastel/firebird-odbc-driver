@@ -67,9 +67,8 @@ target_link_libraries(firebird_odbc_tests
 
 # Include directories
 target_include_directories(firebird_odbc_tests PRIVATE
-    ${CMAKE_SOURCE_DIR}
-    ${CMAKE_SOURCE_DIR}/IscDbc
-    ${CMAKE_SOURCE_DIR}/Headers
+    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/src/IscDbc
 )
 
 # Platform-specific settings
