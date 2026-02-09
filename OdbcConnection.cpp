@@ -434,9 +434,36 @@ SQLRETURN OdbcConnection::sqlSetConnectAttr( SQLINTEGER attribute, SQLPOINTER va
 
 	case SQL_ATTR_RESET_CONNECTION:
 		// ODBC 3.8: Driver Manager sets this when returning a connection to the pool.
-		// Reset connection attributes to defaults.
+		// Reset connection attributes to defaults and clean up transient state.
 		if ( (intptr_t) value == SQL_RESET_CONNECTION_YES )
 		{
+			// 11.3.1: Rollback any pending transaction to avoid lock contention
+			// when the connection is reused from the pool.
+			if (connection)
+			{
+				try
+				{
+					if (connection->getTransactionPending())
+						connection->rollback();
+				}
+				catch (SQLException&)
+				{
+					// Best-effort rollback — ignore errors during reset
+				}
+			}
+
+			// 11.3.2: Close all open cursors on child statements to release
+			// server-side resources (prepared statements are kept for reuse).
+			for (OdbcStatement* stmt = statements; stmt; stmt = (OdbcStatement*)stmt->next)
+			{
+				if (stmt->resultSet)
+				{
+					try { stmt->releaseResultSet(); }
+					catch (SQLException&) { /* ignore */ }
+				}
+			}
+
+			// Reset connection attributes to post-connect defaults
 			autoCommit = true;
 			accessMode = SQL_MODE_READ_WRITE;
 			transactionIsolation = 0;

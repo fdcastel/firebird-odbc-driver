@@ -153,6 +153,7 @@ public:
 	virtual bool getTransactionPending();
 	Firebird::IAttachment* getHandleDb();
 	virtual bool isMsAccess() override { return GDS ? GDS->isMsAccess() : false; }
+	virtual void cancelOperation() override;
 
 public:
 	CNodeParamTransaction *tmpParamTransaction;

@@ -264,6 +264,23 @@ bool IscConnection::getTransactionPending()
 	return 	transactionInfo.transactionPending;
 }
 
+void IscConnection::cancelOperation()
+{
+	if (databaseHandle)
+	{
+		ThrowStatusWrapper status(GDS->_status);
+		try
+		{
+			databaseHandle->cancelOperation(&status, fb_cancel_raise);
+		}
+		catch (const FbException& /*ignored*/)
+		{
+			// cancelOperation may fail if the connection is idle or
+			// if the operation already completed. Ignore errors.
+		}
+	}
+}
+
 Firebird::IAttachment* IscConnection::getHandleDb()
 {	
 	return attachment->databaseHandle;

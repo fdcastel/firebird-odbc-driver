@@ -53,6 +53,7 @@ add_executable(firebird_odbc_tests
     test_bindcol.cpp
     test_wchar.cpp
     test_cursor_name.cpp
+    test_phase11_typeinfo_timeout_pool.cpp
 )
 
 # Link with Google Test and the ODBC library

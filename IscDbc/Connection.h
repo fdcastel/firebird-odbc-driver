@@ -278,6 +278,10 @@ public:
 	virtual void		addRef() = 0;
 	virtual int			release() = 0;
 
+	/// Cancel an in-flight operation on this connection (callable from any thread).
+	/// Uses Firebird's IAttachment::cancelOperation() with fb_cancel_raise.
+	virtual void		cancelOperation() = 0;
+
 	virtual bool		isMsAccess() = 0;
 };
 

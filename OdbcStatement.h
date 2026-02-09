@@ -75,7 +75,7 @@ public:
 	SQLRETURN sqlExtendedFetch (int orientation, int offset, SQLULEN *rowCountPointer, SQLUSMALLINT *rowStatusArray);
 	SQLRETURN sqlRowCount (SQLLEN *rowCount);
 	SQLRETURN sqlSetStmtAttr (int attribute, SQLPOINTER ptr, int length);
-	SQLRETURN sqlParamData(SQLPOINTER *ptr);	// Carlos Guzmán Álvarez
+	SQLRETURN sqlParamData(SQLPOINTER *ptr);	// Carlos Guzmï¿½n ï¿½lvarez
 	SQLRETURN	sqlPutData (SQLPOINTER value, SQLLEN valueSize);
 	SQLRETURN sqlGetTypeInfo (int dataType);
 	bool 	registerOutParameter();
@@ -196,6 +196,7 @@ public:
 	SQLLEN				indicatorRowNumber;
 	int					maxRows;
 	int					maxLength;
+	SQLUINTEGER			queryTimeout;		// SQL_ATTR_QUERY_TIMEOUT (seconds, 0 = no timeout)
 };
 
 }; // end namespace OdbcJdbcLibrary

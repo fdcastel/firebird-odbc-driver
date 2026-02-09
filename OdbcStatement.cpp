@@ -183,6 +183,7 @@ OdbcStatement::OdbcStatement(OdbcConnection *connect, int statementNumber)
     parameterNeedData = 0;	
 	maxRows = 0;
 	maxLength = 0;
+	queryTimeout = 0;
 	applicationRowDescriptor = connection->allocDescriptor (odtApplicationRow);
 	saveApplicationRowDescriptor = applicationRowDescriptor;
 	applicationParamDescriptor = connection->allocDescriptor (odtApplicationParameter);
@@ -2324,6 +2325,9 @@ SQLRETURN OdbcStatement::sqlCancel()
 	try
 	{
 		cancel = true;
+		// Actually cancel the in-flight Firebird operation (safe to call from any thread).
+		if (connection && connection->connection)
+			connection->connection->cancelOperation();
 	}
 	catch ( SQLException &exception )
 	{
@@ -2501,7 +2505,7 @@ SQLRETURN OdbcStatement::sqlGetStmtAttr(int attribute, SQLPOINTER ptr, int buffe
 			break;
 
 		case SQL_ATTR_QUERY_TIMEOUT:
-			value = 0;							// driver doesn't timeout
+			value = queryTimeout;
 			TRACE02(SQL_ATTR_QUERY_TIMEOUT,value);
 			break;
 
@@ -3546,7 +3550,8 @@ SQLRETURN OdbcStatement::sqlSetStmtAttr(int attribute, SQLPOINTER ptr, int lengt
 		switch (attribute)
 		{
 		case SQL_QUERY_TIMEOUT:				// 0
-			TRACE(SQL_QUERY_TIMEOUT);
+			queryTimeout = (SQLUINTEGER)(intptr_t)ptr;
+			TRACE02(SQL_QUERY_TIMEOUT, queryTimeout);
 			break;
 
 		case SQL_ATTR_RETRIEVE_DATA:

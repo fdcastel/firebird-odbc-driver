@@ -28,8 +28,11 @@
 
 #include "IscResultSet.h"
 #include "Sqlda.h"
+#include <vector>
 
 namespace IscDbcLibrary {
+
+struct Types;  // forward declaration
 
 class TypesResultSet : public IscResultSet
 {
@@ -42,13 +45,13 @@ public:
 
 	virtual bool nextFetch();
 	virtual bool next();
-	int findType();
 
 	int			recordNumber;
 	int			dataTypes;
 	int			serverMajorVersion;
 	Sqlda		outputSqlda;
 	std::vector<SQLLEN> indicators;
+	std::vector<Types> typesInstance;  // per-instance copy of the type info (thread-safe)
 };
 
 }; // end namespace IscDbcLibrary

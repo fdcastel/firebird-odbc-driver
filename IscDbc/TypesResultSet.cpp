@@ -27,6 +27,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <algorithm>
 
 #include "IscDbc.h"
 #include "TypesResultSet.h"
@@ -109,8 +110,13 @@ struct Types {
 #define NUMERIC_V(ver,type,code,prec,attr,min,max,numprecradix) ver,sizeof(type)-1,type,code,prec,0,"",0,"",sizeof(attr)-1,attr,NULLABLE,CASE_INSENSITIVE,SEARCHABLE_EXCEPT_LIKE,NOT_SIGNED,NOT_MONEY,NOT_AUTO_INCR,sizeof(type)-1,type,min,max,code,NOT_NUMERIC,numprecradix,NOT_NUMERIC
 #define DATETIME_V(ver,type,code,prec,prefix,suffix,datetimesub) ver,sizeof(type)-1,type,code,prec,sizeof(prefix)-1,prefix,sizeof(suffix)-1,suffix,0,"",NULLABLE,CASE_INSENSITIVE,SEARCHABLE_EXCEPT_LIKE,NOT_NUMERIC,NOT_MONEY,NOT_NUMERIC,sizeof(type)-1,type,0,4,TYPE_SQL_DATETIME,datetimesub,NOT_NUMERIC,NOT_NUMERIC
 #define ALPHA_V(ver,type,code,prec) ver,sizeof(type)-1,type,code,prec,1,"'",1,"'",6,"length",NULLABLE,CASE_SENSITIVE,SEARCHABLE,NOT_NUMERIC,NOT_MONEY,NOT_NUMERIC,sizeof(type)-1,type,UNSCALED,UNSCALED,code,NOT_NUMERIC,NOT_NUMERIC,NOT_NUMERIC
+// GUID: binary type — cannot use LIKE, no literal quotes
+#define GUID_TYPE(type,code,prec) 0,sizeof(type)-1,type,code,prec,0,"",0,"",0,"",NULLABLE,CASE_INSENSITIVE,SEARCHABLE_EXCEPT_LIKE,NOT_NUMERIC,NOT_MONEY,NOT_NUMERIC,sizeof(type)-1,type,UNSCALED,UNSCALED,code,NOT_NUMERIC,NOT_NUMERIC,NOT_NUMERIC
+// BLOB_V: version-gated BLOB entry (negative label = only for servers with major version < abs(label))
+#define BLOB_V(ver,type,code,prec,prefix,suffix,casesensitive) ver,sizeof(type)-1,type,code,prec,sizeof(prefix)-1,prefix,sizeof(suffix)-1,suffix,0,"",NULLABLE,casesensitive,UNSEARCHABLE,NOT_NUMERIC,NOT_MONEY,NOT_NUMERIC,sizeof(type)-1,type,UNSCALED,UNSCALED,code,NOT_NUMERIC,NOT_NUMERIC,NOT_NUMERIC
 
-static Types types [] = 
+// The static array is const — per-instance copies are made in the constructor (thread-safe).
+static const Types typesTemplate[] = 
 {
 	ALPHA ("CHAR", JDBC_CHAR, MAX_CHAR_LENGTH),
 	ALPHA ("VARCHAR", JDBC_VARCHAR, MAX_VARCHAR_LENGTH),
@@ -119,8 +125,9 @@ static Types types [] =
 	ALPHA ("VARCHAR(x) CHARACTER SET UNICODE_FSS", JDBC_WVARCHAR, MAX_WVARCHAR_LENGTH),
 	BLOB ("BLOB SUB_TYPE TEXT CHARACTER SET UNICODE_FSS", JDBC_WLONGVARCHAR, MAX_WLONGVARCHAR_LENGTH, "'","'",CASE_SENSITIVE),
 	BLOB ("BLOB SUB_TYPE 0", JDBC_LONGVARBINARY, MAX_BLOB_LENGTH, "","",CASE_INSENSITIVE),
-	BLOB ("BLOB SUB_TYPE 0", JDBC_VARBINARY, MAX_BLOB_LENGTH, "","",CASE_INSENSITIVE),
-	BLOB ("BLOB SUB_TYPE 0", JDBC_BINARY, MAX_BLOB_LENGTH, "","",CASE_INSENSITIVE),
+	// BLOB-as-VARBINARY/BINARY: only for servers < FB4 (label = -4)
+	BLOB_V (-4, "BLOB SUB_TYPE 0", JDBC_VARBINARY, MAX_BLOB_LENGTH, "","",CASE_INSENSITIVE),
+	BLOB_V (-4, "BLOB SUB_TYPE 0", JDBC_BINARY, MAX_BLOB_LENGTH, "","",CASE_INSENSITIVE),
 	NUMERIC ("NUMERIC", JDBC_NUMERIC, MAX_NUMERIC_LENGTH, "precision,scale", 0, MAX_NUMERIC_LENGTH, 10),
 	NUMERIC ("DECIMAL", JDBC_DECIMAL, MAX_DECIMAL_LENGTH, "precision,scale", 0, MAX_DECIMAL_LENGTH, 10),
 	NUMERIC ("INTEGER", JDBC_INTEGER, MAX_INT_LENGTH, "", 0, 0, 10),
@@ -138,8 +145,8 @@ static Types types [] =
 	DATETIME_V (4, "TIMESTAMP WITH TIME ZONE", JDBC_TIMESTAMP, MAX_TIMESTAMP_LENGTH, "{ts'","'}", 3),
 	ALPHA_V (4, "BINARY", JDBC_BINARY, MAX_CHAR_LENGTH),
 	ALPHA_V (4, "VARBINARY", JDBC_VARBINARY, MAX_VARCHAR_LENGTH),
-	// SQL_GUID: mapped from CHAR(16) CHARACTER SET OCTETS (3.0) or BINARY(16) (4.0+)
-	ALPHA ("CHAR(16) CHARACTER SET OCTETS", JDBC_GUID, 16),
+	// SQL_GUID: mapped from CHAR(16) CHARACTER SET OCTETS — binary type, no LIKE, no quotes
+	GUID_TYPE ("CHAR(16) CHARACTER SET OCTETS", JDBC_GUID, 16),
 	// Date/time types must remain at the end (adjusted for ODBC 2.x/3.x in constructor)
 	DATE("DATE",JDBC_DATE,MAX_DATE_LENGTH,"{d'","'}",1),
 	DATETIME("TIME",JDBC_TIME,MAX_TIME_LENGTH,"{t'","'}",2),
@@ -157,7 +164,15 @@ TypesResultSet::TypesResultSet(int dataType, int appOdbcVersion, int bytesPerCha
 	dataTypes = dataType;
 	serverMajorVersion = conn ? conn->getServerMajorVersion() : 3;
 
-	int endRow = sizeof (types) / sizeof (types [0]);
+	// Copy the const template into a per-instance mutable vector (thread-safe).
+	int templateCount = sizeof(typesTemplate) / sizeof(typesTemplate[0]);
+	typesInstance.assign(typesTemplate, typesTemplate + templateCount);
+
+	// Adjust date/time type codes for ODBC 2.x vs 3.x
+	// The last 3 entries are DATE, TIME, TIMESTAMP.
+	int dateIdx = (int)typesInstance.size() - 3;
+	int timeIdx = (int)typesInstance.size() - 2;
+	int tsIdx   = (int)typesInstance.size() - 1;
 
 	if ( appOdbcVersion == 3 || appOdbcVersion == 380 ) // SQL_OV_ODBC3 or SQL_OV_ODBC3_80
 	{
@@ -176,9 +191,9 @@ TypesResultSet::TypesResultSet(int dataType, int appOdbcVersion, int bytesPerCha
 			break;
 		}
 
-		types[--endRow].typeType = JDBC_TIMESTAMP;
-		types[--endRow].typeType = JDBC_TIME;
-		types[--endRow].typeType = JDBC_DATE;
+		typesInstance[dateIdx].typeType = JDBC_DATE;
+		typesInstance[timeIdx].typeType = JDBC_TIME;
+		typesInstance[tsIdx].typeType   = JDBC_TIMESTAMP;
 	}
 	else
 	{
@@ -197,14 +212,47 @@ TypesResultSet::TypesResultSet(int dataType, int appOdbcVersion, int bytesPerCha
 			break;
 		}
 
-		types[--endRow].typeType = JDBC_SQL_TIMESTAMP;
-		types[--endRow].typeType = JDBC_SQL_TIME;
-		types[--endRow].typeType = JDBC_SQL_DATE;
+		typesInstance[dateIdx].typeType = JDBC_SQL_DATE;
+		typesInstance[timeIdx].typeType = JDBC_SQL_TIME;
+		typesInstance[tsIdx].typeType   = JDBC_SQL_TIMESTAMP;
 	}
 
-	types[0].typePrecision = MAX_CHAR_LENGTH / bytesPerCharacter;
-	types[1].typePrecision = MAX_VARCHAR_LENGTH / bytesPerCharacter;
-	types[2].typePrecision = MAX_BLOB_LENGTH / bytesPerCharacter;
+	typesInstance[0].typePrecision = MAX_CHAR_LENGTH / bytesPerCharacter;
+	typesInstance[1].typePrecision = MAX_VARCHAR_LENGTH / bytesPerCharacter;
+	typesInstance[2].typePrecision = MAX_BLOB_LENGTH / bytesPerCharacter;
+
+	// Remove version-gated entries not applicable to this server.
+	// Positive label = minimum server version required.
+	// Negative label = only for servers with major version < abs(label).
+	typesInstance.erase(
+		std::remove_if(typesInstance.begin(), typesInstance.end(), [this](const Types& t) {
+			int ver = t.label;
+			if (ver > 0 && serverMajorVersion < ver)
+				return true;  // server too old
+			if (ver < 0 && serverMajorVersion >= -ver)
+				return true;  // server too new (pre-FB4 fallback on FB4+ server)
+			return false;
+		}),
+		typesInstance.end()
+	);
+
+	// Sort by DATA_TYPE ascending, then TYPE_NAME ascending (ODBC spec requirement).
+	std::sort(typesInstance.begin(), typesInstance.end(), [](const Types& a, const Types& b) {
+		if (a.typeType != b.typeType)
+			return a.typeType < b.typeType;
+		return strcmp(a.typeName, b.typeName) < 0;
+	});
+
+	// If a specific type was requested, filter to only matching rows.
+	if (dataTypes != 0)
+	{
+		typesInstance.erase(
+			std::remove_if(typesInstance.begin(), typesInstance.end(), [this](const Types& t) {
+				return t.typeType != dataTypes;
+			}),
+			typesInstance.end()
+		);
+	}
 
 	recordNumber = 0;
 	numberColumns = 19;
@@ -214,7 +262,7 @@ TypesResultSet::TypesResultSet(int dataType, int appOdbcVersion, int bytesPerCha
 	indicators.resize( numberColumns );
 	sqlda = &outputSqlda;
 	sqlda->columnsCount = numberColumns;
-	sqldataOffsetPtr = (uintptr_t)types - sizeof (*types);
+	sqldataOffsetPtr = typesInstance.empty() ? 0 : (uintptr_t)typesInstance.data() - sizeof(Types);
 	sqlda->sqlvar.resize( numberColumns );
 
 	SET_SQLVAR( 1, "TYPE_NAME"			, SQL_VARYING	,	52  , OFFSET(Types,lenTypeName)				)
@@ -242,35 +290,13 @@ TypesResultSet::~TypesResultSet() {}
 
 bool TypesResultSet::nextFetch()
 {
-	int totalRows = sizeof (types) / sizeof (types [0]);
+	int totalRows = (int)typesInstance.size();
 
-	if (dataTypes != 0)
-	{
-		if ( recordNumber != 0 )
-			return false;
-
-		recordNumber = findType();
-		if( recordNumber == -1 )
-		{
-			recordNumber = 1;
-			return false;
-		}
-		sqldataOffsetPtr = (uintptr_t)types + (recordNumber - 1) * sizeof (*types);
-	}
-
-	// Advance to next row, skipping version-gated types not supported by this server
-	while (true)
-	{
-		if (++recordNumber > totalRows)
-			return false;
-
-		int minVersion = types[recordNumber - 1].label;
-		if (minVersion == 0 || serverMajorVersion >= minVersion)
-			break;
-	}
+	if (++recordNumber > totalRows)
+		return false;
 
 	auto & var = sqlda->sqlvar;
-	sqldataOffsetPtr = (uintptr_t)types + (recordNumber - 1) * sizeof (*types);
+	sqldataOffsetPtr = (uintptr_t)typesInstance.data() + (recordNumber - 1) * sizeof(Types);
 
 	SET_INDICATOR_STR(0);						// TYPE_NAME
 	SET_INDICATOR_VAL(1,short,false);			// DATA_TYPE
@@ -314,20 +340,6 @@ bool TypesResultSet::next()
 		statement->setValue (value, n + 1, *sqlda);
 
 	return true;
-}
-
-int TypesResultSet::findType()
-{	
-	for(int i=0; i<sizeof (types)/sizeof (types [0]) ; i++)
-	{
-		int minVersion = types[i].label;
-		if (minVersion != 0 && serverMajorVersion < minVersion)
-			continue;
-		if (types[i].typeType == dataTypes)
-			return i;
-	}
-
-	return -1;
 }
 
 }; // end namespace IscDbcLibrary

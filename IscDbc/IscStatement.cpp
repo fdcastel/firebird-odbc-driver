@@ -482,7 +482,8 @@ int	IscStatement::getQueryTimeout()
 
 void IscStatement::cancel()
 {
-	NOT_YET_IMPLEMENTED;
+	if (connection)
+		connection->cancelOperation();
 }
 
 ResultList* IscStatement::search(const char * searchString)
