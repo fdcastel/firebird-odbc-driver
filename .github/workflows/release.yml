@@ -25,31 +25,6 @@ jobs:
           draft: false
           prerelease: false
           generate_release_notes: true
-          body: |
-            ## Firebird ODBC Driver v${{ steps.get_version.outputs.version }}
-
-            ### Downloads
-            | Platform | Installer | Archive |
-            |----------|-----------|---------|
-            | Windows x64 | `firebird-odbc-driver-${{ steps.get_version.outputs.version }}-win-x64.msi` | `firebird-odbc-driver-${{ steps.get_version.outputs.version }}-win-x64.zip` |
-            | Linux x64 | — | `firebird-odbc-driver-${{ steps.get_version.outputs.version }}-linux-x64.tar.gz` |
-
-            ### Installation
-
-            #### Windows (MSI Installer — Recommended)
-            1. Download the `.msi` file
-            2. Double-click to install, or use `msiexec /i firebird-odbc-driver-${{ steps.get_version.outputs.version }}-win-x64.msi /quiet`
-            3. The driver will be registered automatically in the ODBC Data Source Administrator
-
-            #### Windows (ZIP — Manual)
-            1. Extract the ZIP file
-            2. Copy `FirebirdODBC.dll` to `C:\Windows\System32`
-            3. Register the driver manually via the ODBC Data Source Administrator
-
-            #### Linux
-            1. Extract the TAR.GZ file
-            2. Copy `libOdbcFb.so` to `/usr/local/lib/odbc/`
-            3. Register the driver in `/etc/odbcinst.ini` (see included `odbcinst.ini.sample`)
 
   build-windows:
     needs: create-release
