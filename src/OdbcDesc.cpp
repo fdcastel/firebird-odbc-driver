@@ -36,6 +36,7 @@
 #include "OdbcEnv.h"
 #include "OdbcConnection.h"
 #include "OdbcStatement.h"
+#include "OdbcError.h"
 
 namespace OdbcJdbcLibrary {
 
@@ -282,6 +283,19 @@ void OdbcDesc::defFromMetaDataIn(int recNumber, DescRecord * record)
 	metaDataIn->getSqlData(recNumber, record->dataBlobPtr, record->headSqlVarPtr);
 	record->dataPtr = (SQLPOINTER)record->headSqlVarPtr->getSqlData();
 	record->indicatorPtr = (SQLLEN*)record->headSqlVarPtr->getSqlInd();
+
+	// Phase 12.2.3: Cache UTF-16 copies for zero-conversion W-API output
+	record->wBaseColumnName = OdbcString::from_utf8(record->baseColumnName.getString());
+	record->wBaseTableName  = OdbcString::from_utf8(record->baseTableName.getString());
+	record->wCatalogName    = OdbcString::from_utf8(record->catalogName.getString());
+	record->wLabel          = OdbcString::from_utf8(record->label.getString());
+	record->wLiteralPrefix  = OdbcString::from_utf8(record->literalPrefix.getString());
+	record->wLiteralSuffix  = OdbcString::from_utf8(record->literalSuffix.getString());
+	record->wLocalTypeName  = OdbcString::from_utf8(record->localTypeName.getString());
+	record->wName           = OdbcString::from_utf8(record->name.getString());
+	record->wSchemaName     = OdbcString::from_utf8(record->schemaName.getString());
+	record->wTableName      = OdbcString::from_utf8(record->tableName.getString());
+	record->wTypeName       = OdbcString::from_utf8(record->typeName.getString());
 }
 
 void OdbcDesc::defFromMetaDataOut(int recNumber, DescRecord * record)
@@ -323,6 +337,19 @@ void OdbcDesc::defFromMetaDataOut(int recNumber, DescRecord * record)
 	metaDataOut->getSqlData(recNumber, record->dataBlobPtr, record->headSqlVarPtr);
 	record->dataPtr = (SQLPOINTER)record->headSqlVarPtr->getSqlData();
 	record->indicatorPtr = (SQLLEN*)record->headSqlVarPtr->getSqlInd();
+
+	// Phase 12.2.3: Cache UTF-16 copies for zero-conversion W-API output
+	record->wBaseColumnName = OdbcString::from_utf8(record->baseColumnName.getString());
+	record->wBaseTableName  = OdbcString::from_utf8(record->baseTableName.getString());
+	record->wCatalogName    = OdbcString::from_utf8(record->catalogName.getString());
+	record->wLabel          = OdbcString::from_utf8(record->label.getString());
+	record->wLiteralPrefix  = OdbcString::from_utf8(record->literalPrefix.getString());
+	record->wLiteralSuffix  = OdbcString::from_utf8(record->literalSuffix.getString());
+	record->wLocalTypeName  = OdbcString::from_utf8(record->localTypeName.getString());
+	record->wName           = OdbcString::from_utf8(record->name.getString());
+	record->wSchemaName     = OdbcString::from_utf8(record->schemaName.getString());
+	record->wTableName      = OdbcString::from_utf8(record->tableName.getString());
+	record->wTypeName       = OdbcString::from_utf8(record->typeName.getString());
 }
 
 OdbcConnection* OdbcDesc::getConnection()
@@ -816,6 +843,127 @@ SQLRETURN OdbcDesc::sqlGetDescField(int recNumber, int fieldId, SQLPOINTER ptr, 
 	catch ( SQLException &exception )
 	{
 		postError ("HY000", exception);
+		return SQL_ERROR;
+	}
+
+	return sqlSuccess();
+}
+
+// Phase 12.2.6: Direct UTF-16 output for W-API descriptor field access.
+// Reads from the cached OdbcString w-fields — zero conversion for string attributes.
+SQLRETURN OdbcDesc::sqlGetDescFieldW(int recNumber, int fieldId, SQLPOINTER ptr, int bufferLength, SQLINTEGER *lengthPtr)
+{
+	// For non-string fields, delegate to the A version (no encoding involved)
+	switch (fieldId) {
+	case SQL_DESC_BASE_COLUMN_NAME:
+	case SQL_DESC_BASE_TABLE_NAME:
+	case SQL_DESC_CATALOG_NAME:
+	case SQL_DESC_LABEL:
+	case SQL_DESC_LITERAL_PREFIX:
+	case SQL_DESC_LITERAL_SUFFIX:
+	case SQL_DESC_LOCAL_TYPE_NAME:
+	case SQL_DESC_NAME:
+	case SQL_DESC_SCHEMA_NAME:
+	case SQL_DESC_TABLE_NAME:
+	case SQL_DESC_TYPE_NAME:
+		break;  // Handle string fields below
+	default:
+		return sqlGetDescField(recNumber, fieldId, ptr, bufferLength, lengthPtr);
+	}
+
+	clearErrors();
+
+	if (bDefined == false)
+		return sqlReturn(SQL_ERROR, "HY091", "Invalid descriptor field identifier");
+
+	if (recNumber > headCount)
+		return sqlReturn(SQL_NO_DATA_FOUND, "HY021", "Inconsistent descriptor information");
+
+	if (!recNumber && headType == odtImplementationParameter)
+		return sqlReturn(SQL_ERROR, "HY091", "Invalid descriptor field identifier");
+
+	DescRecord *record = getDescRecord(recNumber);
+	if (!record)
+		return sqlReturn(SQL_ERROR, "HY091", "Invalid descriptor field identifier");
+
+	const OdbcString& wstr = record->getWString(fieldId);
+
+	// Write UTF-16 directly to the output buffer
+	SQLSMALLINT charCount = wstr.length();
+
+	if (lengthPtr)
+		*lengthPtr = (SQLINTEGER)(charCount * sizeof(SQLWCHAR));
+
+	if (ptr && bufferLength > 0)
+	{
+		int maxChars = (bufferLength / (int)sizeof(SQLWCHAR)) - 1;
+		if (maxChars < 0) maxChars = 0;
+		int copyChars = (charCount <= maxChars) ? charCount : maxChars;
+
+		if (copyChars > 0)
+			memcpy(ptr, wstr.data(), copyChars * sizeof(SQLWCHAR));
+		((SQLWCHAR*)ptr)[copyChars] = (SQLWCHAR)0;
+
+		if (copyChars < charCount)
+			return sqlReturn(SQL_SUCCESS_WITH_INFO, "01004", "String data, right truncated");
+	}
+
+	return sqlSuccess();
+}
+
+// Phase 12.2.6: Direct UTF-16 output for SQLGetDescRecW.
+SQLRETURN OdbcDesc::sqlGetDescRecW(SQLSMALLINT recNumber, SQLWCHAR *name,
+								   SQLSMALLINT bufferLength, SQLSMALLINT *stringLengthPtr,
+								   SQLSMALLINT *typePtr, SQLSMALLINT *subTypePtr,
+								   SQLLEN *lengthPtr, SQLSMALLINT *precisionPtr,
+								   SQLSMALLINT *scalePtr, SQLSMALLINT *nullablePtr)
+{
+	clearErrors();
+
+	if (bDefined == false)
+		return sqlReturn(SQL_ERROR, "HY091", "Invalid descriptor field identifier");
+
+	if (recNumber > headCount)
+		return sqlReturn(SQL_NO_DATA_FOUND, "HY021", "Inconsistent descriptor information");
+
+	if (!recNumber && headType == odtImplementationParameter)
+		return sqlReturn(SQL_ERROR, "HY091", "Invalid descriptor field identifier");
+
+	DescRecord *record = getDescRecord(recNumber);
+
+	try
+	{
+		// Write name directly as UTF-16
+		const OdbcString& wName = record->wName;
+		SQLSMALLINT charCount = wName.length();
+
+		if (stringLengthPtr)
+			*stringLengthPtr = charCount;
+
+		if (name && bufferLength > 0)
+		{
+			int maxChars = bufferLength - 1;  // bufferLength is in SQLWCHAR units for GetDescRec
+			if (maxChars < 0) maxChars = 0;
+			int copyChars = (charCount <= maxChars) ? charCount : maxChars;
+
+			if (copyChars > 0)
+				memcpy(name, wName.data(), copyChars * sizeof(SQLWCHAR));
+			name[copyChars] = (SQLWCHAR)0;
+
+			if (copyChars < charCount)
+				postError(new OdbcError(0, "01004", "String data, right truncated"));
+		}
+
+		if (typePtr) *typePtr = record->type;
+		if (subTypePtr) *subTypePtr = record->datetimeIntervalCode;
+		if (lengthPtr) *lengthPtr = record->octetLength;
+		if (precisionPtr) *precisionPtr = record->precision;
+		if (scalePtr) *scalePtr = record->scale;
+		if (nullablePtr) *nullablePtr = record->nullable;
+	}
+	catch (SQLException &exception)
+	{
+		postError("HY000", exception);
 		return SQL_ERROR;
 	}
 

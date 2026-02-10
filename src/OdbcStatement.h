@@ -105,6 +105,12 @@ public:
 	SQLRETURN sqlExecute();
 	SQLRETURN sqlGetData (int column, int cType, PTR value, SQLLEN bufferLength, SQLLEN *length);
 	SQLRETURN sqlDescribeCol (int col, SQLCHAR *colName, int nameSize, SWORD *nameLength,SWORD*sqlType,SQLULEN*precision,SWORD*scale,SWORD *nullable);
+	SQLRETURN sqlDescribeColW(int col, SQLWCHAR *colName, SQLSMALLINT bufferLength, SQLSMALLINT *nameLength, SQLSMALLINT *sqlType, SQLULEN *precision, SQLSMALLINT *scale, SQLSMALLINT *nullable);
+#ifdef _WIN64
+	SQLRETURN sqlColAttributeW(int column, int fieldId, SQLPOINTER attrPtr, SQLSMALLINT bufferLength, SQLSMALLINT *strLengthPtr, SQLLEN *numericAttrPtr);
+#else
+	SQLRETURN sqlColAttributeW(int column, int fieldId, SQLPOINTER attrPtr, SQLSMALLINT bufferLength, SQLSMALLINT *strLengthPtr, SQLPOINTER numericAttrPtr);
+#endif
 	SQLRETURN sqlNumResultCols (SWORD *columns);
 	SQLRETURN sqlNumParams (SWORD *params);
 	SQLRETURN sqlForeignKeys (SQLCHAR *pkCatalog, int pkCatLength, SQLCHAR*pkSchema, int pkSchemaLength,SQLCHAR*pkTable,int pkTableLength, SQLCHAR* fkCatalog,int fkCatalogLength, SQLCHAR*fkSchema, int fkSchemaLength,SQLCHAR*fkTable,int fkTableLength);

@@ -27,6 +27,7 @@
 #define _DESCRECORD_H_
 
 #include "OdbcConvert.h"
+#include "OdbcString.h"
 
 namespace OdbcJdbcLibrary {
 
@@ -51,6 +52,10 @@ public:
 	{ 
 		return ( octetLength + 1 ) * headSqlVarPtr->getSqlMultiple();
 	}
+
+	// Phase 12.2.3: Get UTF-16 cached string for a given field identifier.
+	// Returns the cached OdbcString for W-API output (zero-conversion path).
+	const OdbcString& getWString(int fieldId) const;
 
 public:
 	bool			isDefined;
@@ -106,6 +111,21 @@ public:
 	SQLPOINTER		dataPtr;
 	WCSTOMBS		WcsToMbs;
 	MBSTOWCS		MbsToWcs;
+
+	// Phase 12.2.3: UTF-16 cached copies of metadata strings.
+	// Populated once during defFromMetaDataIn/defFromMetaDataOut (at prepare time).
+	// Used by W-API functions for zero-conversion direct output.
+	OdbcString		wBaseColumnName;
+	OdbcString		wBaseTableName;
+	OdbcString		wCatalogName;
+	OdbcString		wLabel;
+	OdbcString		wLiteralPrefix;
+	OdbcString		wLiteralSuffix;
+	OdbcString		wLocalTypeName;
+	OdbcString		wName;
+	OdbcString		wSchemaName;
+	OdbcString		wTableName;
+	OdbcString		wTypeName;
 
 public:
 

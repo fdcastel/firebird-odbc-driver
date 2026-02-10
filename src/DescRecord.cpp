@@ -211,6 +211,19 @@ void DescRecord::initZeroColumn()
 	unNamed = SQL_UNNAMED;
 	unSigned = SQL_FALSE;
 	updaTable = SQL_ATTR_READONLY;
+
+	// Phase 12.2.3: Clear w-fields for zero column
+	wBaseColumnName.clear();
+	wBaseTableName.clear();
+	wCatalogName.clear();
+	wLabel.clear();
+	wLiteralPrefix.clear();
+	wLiteralSuffix.clear();
+	wLocalTypeName.clear();
+	wName.clear();
+	wSchemaName.clear();
+	wTableName.clear();
+	wTypeName.clear();
 }
 
 void DescRecord::beginBlobDataTransfer()
@@ -227,6 +240,29 @@ void DescRecord::putBlobSegmentData (int length, const void *bytes)
 void DescRecord::endBlobDataTransfer()
 {
 	startedTransfer = false;
+}
+
+// Phase 12.2.3: Return the cached UTF-16 string for a given descriptor field identifier.
+// This provides zero-conversion output for W-API functions.
+static const OdbcString kEmptyOdbcString;
+
+const OdbcString& DescRecord::getWString(int fieldId) const
+{
+	switch (fieldId) {
+	case SQL_DESC_BASE_COLUMN_NAME: return wBaseColumnName;
+	case SQL_DESC_BASE_TABLE_NAME:  return wBaseTableName;
+	case SQL_DESC_CATALOG_NAME:     return wCatalogName;
+	case SQL_DESC_LABEL:            return wLabel;
+	case SQL_DESC_LITERAL_PREFIX:   return wLiteralPrefix;
+	case SQL_DESC_LITERAL_SUFFIX:   return wLiteralSuffix;
+	case SQL_DESC_LOCAL_TYPE_NAME:  return wLocalTypeName;
+	case SQL_DESC_NAME:
+	case SQL_COLUMN_NAME:           return wName;
+	case SQL_DESC_SCHEMA_NAME:      return wSchemaName;
+	case SQL_DESC_TABLE_NAME:       return wTableName;
+	case SQL_DESC_TYPE_NAME:        return wTypeName;
+	default:                        return kEmptyOdbcString;
+	}
 }
 
 }; // end namespace OdbcJdbcLibrary

@@ -88,9 +88,13 @@ class OdbcDesc : public OdbcObject
 public:
 	inline DescRecord*	getDescRecord(int number, bool bCashe = true);
 	SQLRETURN sqlGetDescField(int recNumber, int fieldId, SQLPOINTER value, int length, SQLINTEGER *lengthPtr);
+	SQLRETURN sqlGetDescFieldW(int recNumber, int fieldId, SQLPOINTER value, int bufferLength, SQLINTEGER *lengthPtr);
 	SQLRETURN sqlSetDescField (int recNumber, int fieldId, SQLPOINTER value, int length);
 	SQLRETURN sqlGetDescRec(SQLSMALLINT recNumber, SQLCHAR *Name, SQLSMALLINT BufferLength, SQLSMALLINT *StringLengthPtr, 
 							SQLSMALLINT *TypePtr, SQLSMALLINT *SubTypePtr, SQLLEN *LengthPtr, SQLSMALLINT *PrecisionPtr, 
+							SQLSMALLINT *ScalePtr, SQLSMALLINT *NullablePtr);
+	SQLRETURN sqlGetDescRecW(SQLSMALLINT recNumber, SQLWCHAR *Name, SQLSMALLINT BufferLength, SQLSMALLINT *StringLengthPtr,
+							SQLSMALLINT *TypePtr, SQLSMALLINT *SubTypePtr, SQLLEN *LengthPtr, SQLSMALLINT *PrecisionPtr,
 							SQLSMALLINT *ScalePtr, SQLSMALLINT *NullablePtr);
 	SQLRETURN sqlSetDescRec( SQLSMALLINT recNumber, SQLSMALLINT type, SQLSMALLINT subType, SQLINTEGER length,
 							SQLSMALLINT	precision, SQLSMALLINT scale, SQLPOINTER dataPtr, 

@@ -1845,6 +1845,91 @@ SQLRETURN OdbcStatement::sqlDescribeCol(int col,
 	return sqlSuccess();
 }
 
+// Phase 12.2.6: Direct UTF-16 output for SQLDescribeColW.
+// Reads cached OdbcString from IRD DescRecord — zero-conversion W-API path.
+SQLRETURN OdbcStatement::sqlDescribeColW(int col, SQLWCHAR *colName, SQLSMALLINT bufferLength,
+										 SQLSMALLINT *nameLength, SQLSMALLINT *sqlType,
+										 SQLULEN *precision, SQLSMALLINT *scale, SQLSMALLINT *nullable)
+{
+	clearErrors();
+
+	try
+	{
+		int realSqlType;
+		StatementMetaData *metaData = getStatementMetaDataIRD();
+
+		if (col > metaData->getColumnCount())
+			return sqlReturn(SQL_ERROR, "07009", "Invalid descriptor index");
+
+		// Get the IRD DescRecord for this column to access the cached OdbcString
+		DescRecord *record = implementationRowDescriptor->getDescRecord(col);
+
+		if (record && !record->wLabel.empty())
+		{
+			// Use cached UTF-16 label — zero conversion
+			const OdbcString& wLabel = record->wLabel;
+			SQLSMALLINT charCount = wLabel.length();
+
+			if (nameLength)
+				*nameLength = charCount;
+
+			if (colName && bufferLength > 0)
+			{
+				int maxChars = bufferLength - 1;  // bufferLength is in SQLWCHAR units for DescribeCol
+				if (maxChars < 0) maxChars = 0;
+				int copyChars = (charCount <= maxChars) ? charCount : maxChars;
+
+				if (copyChars > 0)
+					memcpy(colName, wLabel.data(), copyChars * sizeof(SQLWCHAR));
+				colName[copyChars] = (SQLWCHAR)0;
+
+				if (copyChars < charCount)
+					postError(new OdbcError(0, "01004", "String data, right truncated"));
+			}
+		}
+		else
+		{
+			// Fallback: convert from UTF-8 on the fly
+			const char *name = metaData->getColumnLabel(col);
+			OdbcString wName = OdbcString::from_utf8(name);
+			SQLSMALLINT charCount = wName.length();
+
+			if (nameLength)
+				*nameLength = charCount;
+
+			if (colName && bufferLength > 0)
+			{
+				int maxChars = bufferLength - 1;
+				if (maxChars < 0) maxChars = 0;
+				int copyChars = (charCount <= maxChars) ? charCount : maxChars;
+
+				if (copyChars > 0)
+					memcpy(colName, wName.data(), copyChars * sizeof(SQLWCHAR));
+				colName[copyChars] = (SQLWCHAR)0;
+
+				if (copyChars < charCount)
+					postError(new OdbcError(0, "01004", "String data, right truncated"));
+			}
+		}
+
+		if (sqlType)
+			*sqlType = metaData->getColumnType(col, realSqlType);
+		if (precision)
+			*precision = metaData->getPrecision(col);
+		if (scale)
+			*scale = metaData->getScale(col);
+		if (nullable)
+			*nullable = (metaData->isNullable(col)) ? SQL_NULLABLE : SQL_NO_NULLS;
+	}
+	catch (SQLException &exception)
+	{
+		postError("HY000", exception);
+		return SQL_ERROR;
+	}
+
+	return sqlSuccess();
+}
+
 SQLRETURN OdbcStatement::prepareGetData(int column, DescRecord *recordARD)
 {
 	if ( implementationRowDescriptor->isDefined() )
@@ -4023,6 +4108,220 @@ SQLRETURN OdbcStatement::sqlColAttribute( int column, int fieldId, SQLPOINTER at
 #else
 		*(SQLINTEGER*) numericAttributePtr = value;
 		if ( strLengthPtr ) *strLengthPtr = sizeof ( SQLINTEGER );
+#endif
+	}
+
+	return sqlSuccess();
+}
+
+// Phase 12.2.6: Direct UTF-16 output for SQLColAttributeW.
+// Uses cached OdbcString from IRD DescRecord for string attributes — zero conversion.
+#ifdef _WIN64
+SQLRETURN OdbcStatement::sqlColAttributeW(int column, int fieldId, SQLPOINTER attrPtr,
+										  SQLSMALLINT bufferLength, SQLSMALLINT *strLengthPtr,
+										  SQLLEN *numericAttrPtr)
+#else
+SQLRETURN OdbcStatement::sqlColAttributeW(int column, int fieldId, SQLPOINTER attrPtr,
+										  SQLSMALLINT bufferLength, SQLSMALLINT *strLengthPtr,
+										  SQLPOINTER numericAttrPtr)
+#endif
+{
+	clearErrors();
+	SQLLEN value;
+	const OdbcString *wstring = NULL;
+	OdbcString wstringTemp;  // For fallback conversions
+	int realSqlType;
+
+	try
+	{
+		StatementMetaData *metaData = getStatementMetaDataIRD();
+		DescRecord *record = NULL;
+
+		// Try to get cached IRD record for zero-conversion path
+		if (column > 0 && column <= implementationRowDescriptor->headCount)
+			record = implementationRowDescriptor->getDescRecord(column);
+
+		switch (fieldId)
+		{
+		case SQL_DESC_LABEL:
+		case SQL_COLUMN_NAME:
+		case SQL_DESC_NAME:
+			if (record && !record->wLabel.empty())
+				wstring = &record->wLabel;
+			else {
+				wstringTemp = OdbcString::from_utf8(metaData->getColumnLabel(column));
+				wstring = &wstringTemp;
+			}
+			break;
+
+		case SQL_DESC_BASE_COLUMN_NAME:
+			if (record && !record->wBaseColumnName.empty())
+				wstring = &record->wBaseColumnName;
+			else {
+				wstringTemp = OdbcString::from_utf8(metaData->getColumnName(column));
+				wstring = &wstringTemp;
+			}
+			break;
+
+		case SQL_DESC_UNNAMED:
+			value = (metaData->getColumnLabel(column)) ? SQL_NAMED : SQL_UNNAMED;
+			break;
+
+		case SQL_DESC_UNSIGNED:
+			value = (metaData->isSigned(column)) ? SQL_FALSE : SQL_TRUE;
+			break;
+
+		case SQL_DESC_UPDATABLE:
+			value = (metaData->isWritable(column)) ? SQL_ATTR_WRITE : SQL_ATTR_READONLY;
+			break;
+
+		case SQL_COLUMN_COUNT:
+		case SQL_DESC_COUNT:
+			if (statement && statement->isActiveProcedure())
+				value = 0;
+			else
+				value = metaData->getColumnCount();
+			break;
+
+		case SQL_DESC_TYPE:
+		case SQL_DESC_CONCISE_TYPE:
+			value = metaData->getColumnType(column, realSqlType);
+			break;
+
+		case SQL_COLUMN_LENGTH:
+		case SQL_DESC_LENGTH:
+			value = metaData->getColumnDisplaySize(column);
+			break;
+
+		case SQL_COLUMN_PRECISION:
+		case SQL_DESC_PRECISION:
+		case SQL_DESC_OCTET_LENGTH:
+			value = metaData->getPrecision(column);
+			break;
+
+		case SQL_COLUMN_SCALE:
+		case SQL_DESC_SCALE:
+			value = metaData->getScale(column);
+			break;
+
+		case SQL_DESC_DISPLAY_SIZE:
+			value = metaData->getColumnDisplaySize(column);
+			break;
+
+		case SQL_COLUMN_NULLABLE:
+		case SQL_DESC_NULLABLE:
+			value = (metaData->isNullable(column)) ? SQL_NULLABLE : SQL_NO_NULLS;
+			break;
+
+		case SQL_DESC_FIXED_PREC_SCALE:
+			value = (metaData->isCurrency(column)) ? 1 : 0;
+			break;
+
+		case SQL_DESC_AUTO_UNIQUE_VALUE:
+			value = (metaData->isAutoIncrement(column)) ? 1 : 0;
+			break;
+
+		case SQL_DESC_CASE_SENSITIVE:
+			value = (metaData->isCaseSensitive(column)) ? SQL_TRUE : SQL_FALSE;
+			break;
+
+		case SQL_DESC_SEARCHABLE:
+			value = (metaData->isSearchable(column)) ? SQL_PRED_SEARCHABLE : SQL_PRED_NONE;
+			break;
+
+		case SQL_DESC_TYPE_NAME:
+		case SQL_DESC_LOCAL_TYPE_NAME:
+			if (record && !record->wTypeName.empty())
+				wstring = &record->wTypeName;
+			else {
+				wstringTemp = OdbcString::from_utf8(metaData->getColumnTypeName(column));
+				wstring = &wstringTemp;
+			}
+			break;
+
+		case SQL_DESC_BASE_TABLE_NAME:
+		case SQL_DESC_TABLE_NAME:
+			if (record && !record->wTableName.empty())
+				wstring = &record->wTableName;
+			else {
+				wstringTemp = OdbcString::from_utf8(metaData->getTableName(column));
+				wstring = &wstringTemp;
+			}
+			break;
+
+		case SQL_DESC_SCHEMA_NAME:
+			if (record && !record->wSchemaName.empty())
+				wstring = &record->wSchemaName;
+			else {
+				wstringTemp = OdbcString::from_utf8(metaData->getSchemaName(column));
+				wstring = &wstringTemp;
+			}
+			break;
+
+		case SQL_DESC_CATALOG_NAME:
+			if (record && !record->wCatalogName.empty())
+				wstring = &record->wCatalogName;
+			else {
+				wstringTemp = OdbcString::from_utf8(metaData->getCatalogName(column));
+				wstring = &wstringTemp;
+			}
+			break;
+
+		case SQL_DESC_NUM_PREC_RADIX:
+			value = metaData->getNumPrecRadix(column);
+			break;
+
+		case MSSQL_CA_SS_COLUMN_HIDDEN:
+			value = 0;
+			break;
+
+		case MSSQL_CA_SS_COLUMN_KEY:
+			value = metaData->isColumnPrimaryKey(column);
+			break;
+
+		default:
+		{
+			JString msg;
+			msg.Format("field id (%d) out of range", fieldId);
+			return sqlReturn(SQL_ERROR, "HY091", (const char*)msg);
+		}
+		}
+	}
+	catch (SQLException &exception)
+	{
+		postError("HY000", exception);
+		return SQL_ERROR;
+	}
+
+	if (wstring)
+	{
+		// Write UTF-16 directly — zero conversion
+		SQLSMALLINT charCount = wstring->length();
+
+		if (strLengthPtr)
+			*strLengthPtr = (SQLSMALLINT)(charCount * sizeof(SQLWCHAR));
+
+		if (attrPtr && bufferLength > 0)
+		{
+			int maxChars = (bufferLength / (int)sizeof(SQLWCHAR)) - 1;
+			if (maxChars < 0) maxChars = 0;
+			int copyChars = (charCount <= maxChars) ? charCount : maxChars;
+
+			if (copyChars > 0)
+				memcpy(attrPtr, wstring->data(), copyChars * sizeof(SQLWCHAR));
+			((SQLWCHAR*)attrPtr)[copyChars] = (SQLWCHAR)0;
+
+			// Don't post truncation warning — SQLColAttribute doesn't require it per ODBC spec
+		}
+	}
+	else if (numericAttrPtr)
+	{
+#ifdef _WIN64
+		*(SQLLEN*)numericAttrPtr = value;
+		if (strLengthPtr) *strLengthPtr = sizeof(SQLLEN);
+#else
+		*(SQLINTEGER*)numericAttrPtr = value;
+		if (strLengthPtr) *strLengthPtr = sizeof(SQLINTEGER);
 #endif
 	}
 

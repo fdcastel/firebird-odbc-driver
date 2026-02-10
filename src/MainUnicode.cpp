@@ -333,33 +333,10 @@ SQLRETURN SQL_API SQLColAttributesW( SQLHSTMT hStmt, SQLUSMALLINT columnNumber,
 	TRACE("SQLColAttributesW");
 	GUARD_HSTMT( hStmt );
 
-	switch ( fieldIdentifier )
-	{
-	case SQL_DESC_LABEL:
-	case SQL_DESC_BASE_COLUMN_NAME:
-	case SQL_COLUMN_NAME:
-	case SQL_DESC_NAME:
-	case SQL_DESC_TYPE_NAME:
-	case SQL_DESC_BASE_TABLE_NAME:
-	case SQL_DESC_TABLE_NAME:
-	case SQL_DESC_SCHEMA_NAME:
-	case SQL_DESC_CATALOG_NAME:
-
-		if ( bufferLength > 0 )
-		{
-			ConvertingString<> CharacterAttribute( bufferLength,
-														(SQLWCHAR *)characterAttribute, stringLength );
-			CharacterAttribute.setConnection( GETCONNECT_STMT( hStmt ) );
-
-			return ((OdbcStatement*) hStmt)->sqlColAttribute( columnNumber, fieldIdentifier,
-											(SQLPOINTER)(SQLCHAR*)CharacterAttribute, CharacterAttribute.getLength(),
-											stringLength, numericAttribute );
-		}
-	}
-
-	return ((OdbcStatement*) hStmt)->sqlColAttribute( columnNumber, fieldIdentifier,
-													characterAttribute, bufferLength,
-													stringLength, numericAttribute );
+	// Phase 12.2.6: Direct UTF-16 output — bypass ConvertingString
+	return ((OdbcStatement*) hStmt)->sqlColAttributeW( columnNumber, fieldIdentifier,
+									characterAttribute, bufferLength,
+									stringLength, numericAttribute );
 }
 
 ///// SQLConnectW /////	ODBC 1.0	///// ISO 92
@@ -406,13 +383,11 @@ SQLRETURN SQL_API SQLDescribeColW( SQLHSTMT hStmt, SQLUSMALLINT columnNumber,
 	TRACE ("SQLDescribeColW");
 	GUARD_HSTMT( hStmt );
 
-	ConvertingString<> ColumnName( bufferLength, columnName, nameLength, false );
-	ColumnName.setConnection( GETCONNECT_STMT( hStmt ) );
-
-	SQLRETURN ret = ((OdbcStatement*) hStmt)->sqlDescribeCol( columnNumber,
-													ColumnName, ColumnName.getLength(),
-													nameLength, dataType, columnSize,
-													decimalDigits, nullable );
+	// Phase 12.2.6: Direct UTF-16 output — bypass ConvertingString
+	SQLRETURN ret = ((OdbcStatement*) hStmt)->sqlDescribeColW( columnNumber,
+										columnName, bufferLength,
+										nameLength, dataType, columnSize,
+										decimalDigits, nullable );
 
 	// Per ODBC spec, W API should report character types as their Unicode equivalents
 	if (SQL_SUCCEEDED(ret) && dataType)
@@ -1007,33 +982,10 @@ SQLRETURN SQL_API SQLColAttributeW( SQLHSTMT hStmt, SQLUSMALLINT columnNumber,
 	TRACE ("SQLColAttributeW");
 	GUARD_HSTMT( hStmt );
 
-	switch ( fieldIdentifier )
-	{
-	case SQL_DESC_LABEL:
-	case SQL_DESC_BASE_COLUMN_NAME:
-	case SQL_COLUMN_NAME:
-	case SQL_DESC_NAME:
-	case SQL_DESC_TYPE_NAME:
-	case SQL_DESC_BASE_TABLE_NAME:
-	case SQL_DESC_TABLE_NAME:
-	case SQL_DESC_SCHEMA_NAME:
-	case SQL_DESC_CATALOG_NAME:
-
-		if ( bufferLength > 0 )
-		{
-			ConvertingString<> CharacterAttribute( bufferLength, 
-									(SQLWCHAR *)characterAttribute, stringLength );
-			CharacterAttribute.setConnection( GETCONNECT_STMT( hStmt ) );
-
-			return ((OdbcStatement*)hStmt)->sqlColAttribute( columnNumber, fieldIdentifier,
-								(SQLPOINTER)(SQLCHAR*)CharacterAttribute, CharacterAttribute.getLength(),
-								stringLength, numericAttribute );
-		}
-	}
-
-	return ((OdbcStatement*)hStmt)->sqlColAttribute( columnNumber, fieldIdentifier,
-													characterAttribute, bufferLength,
-													stringLength, numericAttribute );
+	// Phase 12.2.6: Direct UTF-16 output — bypass ConvertingString
+	return ((OdbcStatement*)hStmt)->sqlColAttributeW( columnNumber, fieldIdentifier,
+									characterAttribute, bufferLength,
+									stringLength, numericAttribute );
 }
 
 ///// SQLGetConnectAttrW /////
@@ -1073,34 +1025,9 @@ SQLRETURN SQL_API SQLGetDescFieldW( SQLHDESC hDesc, SQLSMALLINT recNumber,
 	TRACE ("SQLGetDescFieldW");
 	GUARD_HDESC( hDesc );
 
-	switch ( fieldIdentifier )
-	{
-	case SQL_DESC_BASE_COLUMN_NAME:
-	case SQL_DESC_BASE_TABLE_NAME:
-	case SQL_DESC_CATALOG_NAME:
-	case SQL_DESC_LABEL:
-	case SQL_DESC_LITERAL_PREFIX:
-	case SQL_DESC_LITERAL_SUFFIX:
-	case SQL_DESC_LOCAL_TYPE_NAME:
-	case SQL_DESC_NAME:
-	case SQL_DESC_SCHEMA_NAME:
-	case SQL_DESC_TABLE_NAME:
-	case SQL_DESC_TYPE_NAME:
-
-		if ( bufferLength > 0 || bufferLength == SQL_NTS )
-		{
-			bool isByte = !( bufferLength % 2 );
-
-			ConvertingString<SQLINTEGER> Value( bufferLength, (SQLWCHAR *)value, stringLength );
-			Value.setConnection( GETCONNECT_DESC( hDesc ) );
-
-			return ((OdbcDesc*) hDesc)->sqlGetDescField( recNumber, fieldIdentifier,
-											(SQLPOINTER)(SQLCHAR*)Value, Value.getLength(), stringLength );
-		}
-	}
-
-	return ((OdbcDesc*) hDesc)->sqlGetDescField( recNumber, fieldIdentifier,
-												value, bufferLength, stringLength );
+	// Phase 12.2.6: Direct UTF-16 output — bypass ConvertingString
+	return ((OdbcDesc*) hDesc)->sqlGetDescFieldW( recNumber, fieldIdentifier,
+									value, bufferLength, stringLength );
 }
 
 ///// SQLGetDescRecW /////
@@ -1115,12 +1042,10 @@ SQLRETURN SQL_API SQLGetDescRecW( SQLHDESC hDesc,
 	TRACE ("SQLGetDescRecW");
 	GUARD_HDESC( hDesc );
 
-	ConvertingString<> Name( bufferLength, name, stringLength );
-	Name.setConnection( GETCONNECT_DESC( hDesc ) );
-
-	return ((OdbcDesc*) hDesc)->sqlGetDescRec( recNumber, Name, Name.getLength(),
-											  stringLength, type, subType, 
-											  length, precision, scale, nullable );
+	// Phase 12.2.6: Direct UTF-16 output — bypass ConvertingString
+	return ((OdbcDesc*) hDesc)->sqlGetDescRecW( recNumber, name, bufferLength,
+												  stringLength, type, subType, 
+												  length, precision, scale, nullable );
 }
 
 ///// SQLGetDiagFieldW /////
