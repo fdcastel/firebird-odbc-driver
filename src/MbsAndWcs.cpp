@@ -22,9 +22,13 @@
 #include <windows.h>
 #include <stdio.h>
 
+#include "IscDbc/Connection.h"
+
 extern UINT codePage; // from Main.cpp
 
-size_t _MbsToWcs( wchar_t *wcstr, const char *mbstr, size_t count )
+// Phase 12 (12.1.1): Use ODBC_SQLWCHAR* (always 16-bit) instead of wchar_t*.
+// On Windows, ODBC_SQLWCHAR == wchar_t == 2 bytes, so this is binary-compatible.
+size_t _MbsToWcs( ODBC_SQLWCHAR *wcstr, const char *mbstr, size_t count )
 {
 	if (wcstr && !count) return count;
 
@@ -32,7 +36,7 @@ size_t _MbsToWcs( wchar_t *wcstr, const char *mbstr, size_t count )
 									  0,
 									  mbstr,
 									  -1,
-									  wcstr,
+									  (LPWSTR)wcstr,
 									  !wcstr ? 0 : (int)count );
 	if ( len > 0 )
 		len--;
@@ -42,13 +46,13 @@ size_t _MbsToWcs( wchar_t *wcstr, const char *mbstr, size_t count )
 	return len;
 }
 
-size_t _WcsToMbs( char *mbstr,  const wchar_t *wcstr, size_t count )
+size_t _WcsToMbs( char *mbstr,  const ODBC_SQLWCHAR *wcstr, size_t count )
 {
 	if (mbstr && !count) return count;
 
 	size_t len = WideCharToMultiByte( codePage,
 									  0,
-									  wcstr,
+									  (LPCWSTR)wcstr,
 									  -1,
 									  (LPSTR)mbstr,
 									  !mbstr ? 0 : (int)count,

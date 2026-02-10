@@ -1076,7 +1076,7 @@ SQLLEN * OdbcConvert::getAdressBindIndTo(char * pointer)
 		if ( indicatorTo )									\
 			setIndicatorPtr( indicatorTo, SQL_NULL_DATA, to ); \
 		if ( pointerTo )									\
-			*(wchar_t*)pointerTo = 0;                          \
+			*(SQLWCHAR*)pointerTo = 0;                         \
 		return SQL_SUCCESS;									\
 	}														\
 	if ( !pointerTo )										\
@@ -1464,9 +1464,12 @@ int OdbcConvert::conv##TYPE_FROM##ToStringW(DescRecord * from, DescRecord * to)	
 		{																						\
 			char tempBuf [256];																	\
 			strcpy( tempBuf, string );															\
-			from->MbsToWcs( (wchar_t *)string, tempBuf, len );									\
-			((wchar_t *)string)[len] = L'\0';													\
-			len *=2;																			\
+			/* Phase 12 (12.1.3): Use trivial ASCII widening instead of full MbsToWcs. */		\
+			/* Integer formatters produce only ASCII digits, so byte-to-SQLWCHAR is safe. */		\
+			SQLWCHAR *_wdst = (SQLWCHAR *)string;												\
+			for (int _i = 0; _i <= len; _i++)													\
+				_wdst[_i] = (SQLWCHAR)(unsigned char)tempBuf[_i];								\
+			len *= sizeof(SQLWCHAR);															\
 		}																						\
 	}																							\
 																								\
@@ -1681,19 +1684,26 @@ int OdbcConvert::convGuidToString(DescRecord * from, DescRecord * to)
 
 int OdbcConvert::convGuidToStringW(DescRecord * from, DescRecord * to)
 {
-	wchar_t *pointer = (wchar_t*)getAdressBindDataTo((char*)to->dataPtr);
+	SQLWCHAR *pointer = (SQLWCHAR*)getAdressBindDataTo((char*)to->dataPtr);
 	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
 	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
 
 	ODBCCONVERT_CHECKNULLW( pointer );
 
 	SQLGUID *g = (SQLGUID*)getAdressBindDataFrom((char*)from->dataPtr);
-	int len, outlen = to->length / sizeof( wchar_t );
+	int outlen = to->length / sizeof( SQLWCHAR );
 
-	len = swprintf(pointer, outlen, L"%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X",
+	// Phase 12 (12.1.4): Use snprintf + ASCII widening instead of swprintf.
+	// GUID format is always pure ASCII, so byte-to-SQLWCHAR widening is safe.
+	char tmpBuf[64];
+	int len = snprintf(tmpBuf, sizeof(tmpBuf), "%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X",
 		(unsigned int) g->Data1, g->Data2, g->Data3, g->Data4[0], g->Data4[1], g->Data4[2], g->Data4[3], g->Data4[4], g->Data4[5], g->Data4[6], g->Data4[7]);
-
-	len = len == -1 ? outlen * sizeof( wchar_t ) : len * sizeof( wchar_t );
+	if (len < 0) len = 0;
+	if (len >= outlen) len = outlen > 0 ? outlen - 1 : 0;
+	for (int i = 0; i < len; i++)
+		pointer[i] = (SQLWCHAR)(unsigned char)tmpBuf[i];
+	pointer[len] = (SQLWCHAR)0;
+	len *= sizeof( SQLWCHAR );
 
 	if ( to->isIndicatorSqlDa ) {
 		to->headSqlVarPtr->setSqlLen(len);
@@ -1915,7 +1925,7 @@ int OdbcConvert::convFloatToString(DescRecord * from, DescRecord * to)
 
 int OdbcConvert::convFloatToStringW(DescRecord * from, DescRecord * to)
 {
-	wchar_t * pointerTo = (wchar_t *)getAdressBindDataTo((char*)to->dataPtr);
+	SQLWCHAR * pointerTo = (SQLWCHAR *)getAdressBindDataTo((char*)to->dataPtr);
 	SQLLEN *indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
 	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
 
@@ -1925,8 +1935,14 @@ int OdbcConvert::convFloatToStringW(DescRecord * from, DescRecord * to)
 
 	if ( len )
 	{
-		ConvertFloatToString<wchar_t>(*(float*)getAdressBindDataFrom((char*)from->dataPtr), pointerTo, len/2, &len);
-		len *= sizeof( wchar_t );
+		// Phase 12 (12.1.4): Use char-based ConvertFloatToString + ASCII widen.
+		char tmpBuf[64];
+		int charLen = len / (int)sizeof(SQLWCHAR);
+		ConvertFloatToString<char>(*(float*)getAdressBindDataFrom((char*)from->dataPtr), tmpBuf, MIN(charLen, 63), &charLen);
+		for (int i = 0; i < charLen; i++)
+			pointerTo[i] = (SQLWCHAR)(unsigned char)tmpBuf[i];
+		pointerTo[charLen] = (SQLWCHAR)0;
+		len = charLen * sizeof( SQLWCHAR );
 	}
 
 	if ( to->isIndicatorSqlDa ) {
@@ -2032,7 +2048,7 @@ int OdbcConvert::convDoubleToString(DescRecord * from, DescRecord * to)
 
 int OdbcConvert::convDoubleToStringW(DescRecord * from, DescRecord * to)
 {
-	wchar_t * pointerTo = (wchar_t *)getAdressBindDataTo((char*)to->dataPtr);
+	SQLWCHAR * pointerTo = (SQLWCHAR *)getAdressBindDataTo((char*)to->dataPtr);
 	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
 	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
 
@@ -2042,8 +2058,14 @@ int OdbcConvert::convDoubleToStringW(DescRecord * from, DescRecord * to)
 
 	if ( len )	// MAX_DOUBLE_DIGIT_LENGTH = 15
 	{
-		ConvertFloatToString<wchar_t>(*(double*)getAdressBindDataFrom((char*)from->dataPtr), pointerTo, len/2, &len);
-		len *= sizeof( wchar_t );
+		// Phase 12 (12.1.4): Use char-based ConvertFloatToString + ASCII widen.
+		char tmpBuf[64];
+		int charLen = len / (int)sizeof(SQLWCHAR);
+		ConvertFloatToString<char>(*(double*)getAdressBindDataFrom((char*)from->dataPtr), tmpBuf, MIN(charLen, 63), &charLen);
+		for (int i = 0; i < charLen; i++)
+			pointerTo[i] = (SQLWCHAR)(unsigned char)tmpBuf[i];
+		pointerTo[charLen] = (SQLWCHAR)0;
+		len = charLen * sizeof( SQLWCHAR );
 	}
 
 	if ( to->isIndicatorSqlDa ) {
@@ -2151,7 +2173,7 @@ int OdbcConvert::convDateToString(DescRecord * from, DescRecord * to)
 
 int OdbcConvert::convDateToStringW(DescRecord * from, DescRecord * to)
 {
-	wchar_t *pointer = (wchar_t*)getAdressBindDataTo((char*)to->dataPtr);
+	SQLWCHAR *pointer = (SQLWCHAR*)getAdressBindDataTo((char*)to->dataPtr);
 	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
 	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
 
@@ -2161,11 +2183,18 @@ int OdbcConvert::convDateToStringW(DescRecord * from, DescRecord * to)
 	SQLSMALLINT year;
 
 	decode_sql_date(*(int*)getAdressBindDataFrom((char*)from->dataPtr), mday, month, year);
-	int len, outlen = to->length / sizeof( wchar_t );
+	int outlen = to->length / sizeof( SQLWCHAR );
 
-	len = swprintf(pointer, outlen, L"%04d-%02d-%02d",year,month,mday);
+	// Phase 12 (12.1.4): Use snprintf + ASCII widening instead of swprintf.
+	char tmpBuf[32];
+	int len = snprintf(tmpBuf, sizeof(tmpBuf), "%04d-%02d-%02d",year,month,mday);
+	if (len < 0) len = 0;
+	if (len >= outlen) len = outlen > 0 ? outlen - 1 : 0;
+	for (int i = 0; i < len; i++)
+		pointer[i] = (SQLWCHAR)(unsigned char)tmpBuf[i];
+	pointer[len] = (SQLWCHAR)0;
+	len *= sizeof( SQLWCHAR );
 
-	len = len == -1 ? outlen * sizeof( wchar_t ) : len * sizeof( wchar_t );
 	if ( to->isIndicatorSqlDa ) {
 		to->headSqlVarPtr->setSqlLen(len);
 	} else
@@ -2333,7 +2362,7 @@ int OdbcConvert::convTimeToString(DescRecord * from, DescRecord * to)
 
 int OdbcConvert::convTimeToStringW(DescRecord * from, DescRecord * to)
 {
-	wchar_t *pointer = (wchar_t*)getAdressBindDataTo((char*)to->dataPtr);
+	SQLWCHAR *pointer = (SQLWCHAR*)getAdressBindDataTo((char*)to->dataPtr);
 	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
 	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
 
@@ -2345,14 +2374,21 @@ int OdbcConvert::convTimeToStringW(DescRecord * from, DescRecord * to)
 
 	decode_sql_time(ntime, hour, minute, second);
 
-	int len, outlen = to->length / sizeof( wchar_t );
+	int outlen = to->length / sizeof( SQLWCHAR );
 
+	// Phase 12 (12.1.4): Use snprintf + ASCII widening instead of swprintf.
+	char tmpBuf[32];
+	int len;
 	if ( nnano )
-		len = swprintf(pointer, outlen, L"%02d:%02d:%02d.%04lu",hour, minute, second, nnano);
+		len = snprintf(tmpBuf, sizeof(tmpBuf), "%02d:%02d:%02d.%04lu",hour, minute, second, (unsigned long)nnano);
 	else
-		len = swprintf(pointer, outlen, L"%02d:%02d:%02d",hour, minute, second);
-
-	len = len == -1 ? outlen * sizeof( wchar_t ) : len * sizeof( wchar_t );
+		len = snprintf(tmpBuf, sizeof(tmpBuf), "%02d:%02d:%02d",hour, minute, second);
+	if (len < 0) len = 0;
+	if (len >= outlen) len = outlen > 0 ? outlen - 1 : 0;
+	for (int i = 0; i < len; i++)
+		pointer[i] = (SQLWCHAR)(unsigned char)tmpBuf[i];
+	pointer[len] = (SQLWCHAR)0;
+	len *= sizeof( SQLWCHAR );
 
 	if ( to->isIndicatorSqlDa ) {
 		to->headSqlVarPtr->setSqlLen(len);
@@ -2529,7 +2565,7 @@ int OdbcConvert::convDateTimeToString(DescRecord * from, DescRecord * to)
 
 int OdbcConvert::convDateTimeToStringW(DescRecord * from, DescRecord * to)
 {
-	wchar_t *pointer = (wchar_t*)getAdressBindDataTo((char*)to->dataPtr);
+	SQLWCHAR *pointer = (SQLWCHAR*)getAdressBindDataTo((char*)to->dataPtr);
 	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
 	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
 
@@ -2545,14 +2581,21 @@ int OdbcConvert::convDateTimeToStringW(DescRecord * from, DescRecord * to)
 
 	decode_sql_date(ndate, mday, month, year);
 	decode_sql_time(ntime, hour, minute, second);
-	int len, outlen = to->length / sizeof( wchar_t );
+	int outlen = to->length / sizeof( SQLWCHAR );
 
+	// Phase 12 (12.1.4): Use snprintf + ASCII widening instead of swprintf.
+	char tmpBuf[48];
+	int len;
 	if ( nnano )
-		len = swprintf( pointer, outlen, L"%04d-%02d-%02d %02d:%02d:%02d.%04lu",year,month,mday,hour, minute, second, nnano );
+		len = snprintf(tmpBuf, sizeof(tmpBuf), "%04d-%02d-%02d %02d:%02d:%02d.%04lu",year,month,mday,hour, minute, second, (unsigned long)nnano);
 	else
-		len = swprintf( pointer, outlen, L"%04d-%02d-%02d %02d:%02d:%02d",year,month,mday,hour, minute, second );
-
-	len = len == -1 ? outlen * sizeof( wchar_t ) : len * sizeof( wchar_t );
+		len = snprintf(tmpBuf, sizeof(tmpBuf), "%04d-%02d-%02d %02d:%02d:%02d",year,month,mday,hour, minute, second);
+	if (len < 0) len = 0;
+	if (len >= outlen) len = outlen > 0 ? outlen - 1 : 0;
+	for (int i = 0; i < len; i++)
+		pointer[i] = (SQLWCHAR)(unsigned char)tmpBuf[i];
+	pointer[len] = (SQLWCHAR)0;
+	len *= sizeof( SQLWCHAR );
 
 	if ( to->isIndicatorSqlDa ) {
 		to->headSqlVarPtr->setSqlLen(len);
@@ -3083,8 +3126,9 @@ int OdbcConvert::convBlobToStringW( DescRecord * from, DescRecord * to )
 			else
 				length = blob->length();
 
-			from->allocateLocalDataPtr((length + 1) * sizeof(wchar_t));
-			wchar_t *wcs = (wchar_t*) from->localDataPtr;
+			// Phase 12 (12.1.4): Use SQLWCHAR instead of wchar_t
+			from->allocateLocalDataPtr((length + 1) * sizeof(SQLWCHAR));
+			SQLWCHAR *wcs = (SQLWCHAR*) from->localDataPtr;
 
 			if (length)
 			{
@@ -3101,14 +3145,14 @@ int OdbcConvert::convBlobToStringW( DescRecord * from, DescRecord * to )
 					length = lenRead;
 				}
 
-				length = from->MbsToWcs(wcs, tmp, length);
+				length = (int)from->MbsToWcs(wcs, tmp, length);
 				delete[] tmp;
 			}
-			wcs[length] = L'\0';
+			wcs[length] = (SQLWCHAR)0;
 		}
 		else
 		{
-			length = wcslen(((wchar_t*) from->localDataPtr) + from->dataOffset) + from->dataOffset;
+			length = (int)Utf16Length(((SQLWCHAR*) from->localDataPtr) + from->dataOffset) + from->dataOffset;
 		}
 
 		dataRemaining = length - from->dataOffset;
@@ -3123,7 +3167,7 @@ int OdbcConvert::convBlobToStringW( DescRecord * from, DescRecord * to )
 		else
 		{
 			from->startedReturnSQLData = true;
-			int len = MIN(dataRemaining, MAX(0, to->length / (int)sizeof(wchar_t) - 1));
+			int len = MIN(dataRemaining, MAX(0, to->length / (int)sizeof(SQLWCHAR) - 1));
 			 
 			if ( pointer )
 			{
@@ -3145,17 +3189,18 @@ int OdbcConvert::convBlobToStringW( DescRecord * from, DescRecord * to )
 							len = lenRead;
 						}
 
-						from->MbsToWcs( (wchar_t *)pointer, tmp, len );
+						from->MbsToWcs( (SQLWCHAR *)pointer, tmp, len );
 
 						delete [] tmp;
 					}
 				}
 				else
 				{
-					wcsncpy((wchar_t*) pointer, ((wchar_t*) from->localDataPtr) + from->dataOffset, len);
+					// Phase 12 (12.1.4): Use SQLWCHAR-safe copy instead of wcsncpy
+					memcpy((SQLWCHAR*) pointer, ((SQLWCHAR*) from->localDataPtr) + from->dataOffset, len * sizeof(SQLWCHAR));
 				}
 
-				((wchar_t *) (pointer)) [len] = L'\0';
+				((SQLWCHAR *) (pointer)) [len] = (SQLWCHAR)0;
 
 				if ( !statusReturnData )
 					from->dataOffset += len;
@@ -3173,10 +3218,10 @@ int OdbcConvert::convBlobToStringW( DescRecord * from, DescRecord * to )
 	}
 
 	if ( to->isIndicatorSqlDa ) {
-		to->headSqlVarPtr->setSqlLen(dataRemaining * sizeof(wchar_t));
+		to->headSqlVarPtr->setSqlLen(dataRemaining * sizeof(SQLWCHAR));
 	} else
 	if ( indicatorTo )
-		setIndicatorPtr(indicatorTo, dataRemaining * sizeof(wchar_t), to);
+		setIndicatorPtr(indicatorTo, dataRemaining * sizeof(SQLWCHAR), to);
 
 	return ret;
 }
@@ -3422,8 +3467,8 @@ int OdbcConvert::convStringToString(DescRecord * from, DescRecord * to)
 int OdbcConvert::convStringToStringW(DescRecord * from, DescRecord * to)
 {
 	char * pointerFrom = (char*)getAdressBindDataFrom((char*)from->dataPtr);
-	wchar_t * pointerFromWcs;
-	wchar_t * pointerTo = (wchar_t*)getAdressBindDataTo((char*)to->dataPtr);
+	SQLWCHAR * pointerFromWcs;
+	SQLWCHAR * pointerTo = (SQLWCHAR*)getAdressBindDataTo((char*)to->dataPtr);
 	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
 	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
 
@@ -3440,24 +3485,25 @@ int OdbcConvert::convStringToStringW(DescRecord * from, DescRecord * to)
 		from->currentFetched = parentStmt->getCurrentFetched();
 
 		if (!to->isLocalDataPtr)
-			to->allocateLocalDataPtr((from->getBufferLength() + 1) * sizeof(wchar_t));
+			to->allocateLocalDataPtr((from->getBufferLength() + 1) * sizeof(SQLWCHAR));
 
-		pointerFromWcs = (wchar_t*) to->localDataPtr;
+		pointerFromWcs = (SQLWCHAR*) to->localDataPtr;
 
+		// Phase 12 (12.1.4): MbsToWcs now takes SQLWCHAR* (always 16-bit)
 		length = (int)from->MbsToWcs( pointerFromWcs, pointerFrom, from->length * from->headSqlVarPtr->getSqlMultiple() );
 		if ( length < 0 )
 			length = 0;
 
 		while (length < from->length)       // safety-code - should not happen
-			pointerFromWcs[length++] = L' ';
+			pointerFromWcs[length++] = (SQLWCHAR)' ';
 
 		length = from->length;
-		pointerFromWcs[length] = L'\0';
+		pointerFromWcs[length] = (SQLWCHAR)0;
 	}
 	else
 	{
-		pointerFromWcs = (wchar_t*) to->localDataPtr;
-		length = wcslen(pointerFromWcs + from->dataOffset) + from->dataOffset;
+		pointerFromWcs = (SQLWCHAR*) to->localDataPtr;
+		length = (int)Utf16Length(pointerFromWcs + from->dataOffset) + from->dataOffset;
 	}
 
 	int dataRemaining = length - from->dataOffset;
@@ -3472,12 +3518,13 @@ int OdbcConvert::convStringToStringW(DescRecord * from, DescRecord * to)
 	else
 	{
 		from->startedReturnSQLData = true;
-		int len = MIN(dataRemaining, MAX(0, (int)(to->length / sizeof( wchar_t )) - 1 ));
+		int len = MIN(dataRemaining, MAX(0, (int)(to->length / sizeof( SQLWCHAR )) - 1 ));
 		 
 		if ( pointerTo )
 		{
-			wcsncpy(pointerTo, pointerFromWcs + from->dataOffset, len);
-			pointerTo[len] = L'\0';
+			// Phase 12 (12.1.4): Use SQLWCHAR-safe copy instead of wcsncpy
+			memcpy(pointerTo, pointerFromWcs + from->dataOffset, len * sizeof(SQLWCHAR));
+			pointerTo[len] = (SQLWCHAR)0;
 
 			from->dataOffset += len;
 
@@ -3490,10 +3537,10 @@ int OdbcConvert::convStringToStringW(DescRecord * from, DescRecord * to)
 	}
 
 	if ( to->isIndicatorSqlDa ) {
-		to->headSqlVarPtr->setSqlLen(dataRemaining * sizeof( wchar_t ));
+		to->headSqlVarPtr->setSqlLen(dataRemaining * sizeof( SQLWCHAR ));
 	} else
 	if ( indicatorTo )
-		setIndicatorPtr(indicatorTo, dataRemaining * sizeof(wchar_t), to);
+		setIndicatorPtr(indicatorTo, dataRemaining * sizeof(SQLWCHAR), to);
 
 	return ret;
 }
@@ -3574,7 +3621,7 @@ int OdbcConvert::convStringWToBlob(DescRecord * from, DescRecord * to)
 	ODBCCONVERT_CHECKNULL_SQLDA;
 
 	SQLLEN * octetLengthPtr = getAdressBindIndFrom((char*)from->octetLengthPtr);
-	wchar_t * pointerFrom = (wchar_t*)getAdressBindDataFrom((char*)from->dataPtr);
+	SQLWCHAR * pointerFrom = (SQLWCHAR*)getAdressBindDataFrom((char*)from->dataPtr);
 	char * pointerTo = (char*)getAdressBindDataTo((char*)to->dataPtr);
 
 	SQLINTEGER len;
@@ -3789,7 +3836,7 @@ int OdbcConvert::transferStringWToDateTime(DescRecord * from, DescRecord * to)
 	ODBCCONVERT_CHECKNULL_SQLDA;
 
 	SQLLEN * octetLengthPtr = getAdressBindIndFrom((char*)from->octetLengthPtr);
-	wchar_t * pointerFrom = (wchar_t*)getAdressBindDataFrom((char*)from->dataPtr);
+	SQLWCHAR * pointerFrom = (SQLWCHAR*)getAdressBindDataFrom((char*)from->dataPtr);
 
 	int len = 0;
 
@@ -3798,6 +3845,7 @@ int OdbcConvert::transferStringWToDateTime(DescRecord * from, DescRecord * to)
 
 	GET_WLEN_FROM_OCTETLENGTHPTR
 
+	// Phase 12 (12.1.4): Narrow SQLWCHAR (16-bit) to char for datetime parsing
 	int n = len;
 	char * beg = (char*)pointerFrom + 1;
 	short * next = (short*)(beg + 1);
@@ -4197,8 +4245,8 @@ int OdbcConvert::convVarStringToStringW(DescRecord * from, DescRecord * to)
 {
 	short * pointerFromLen = (short*)getAdressBindDataFrom((char*)from->dataPtr);
 	char * pointerFrom = (char*)(pointerFromLen + 1);
-	wchar_t * pointerFromWcs;
-	wchar_t * pointerTo = (wchar_t*)getAdressBindDataTo((char*)to->dataPtr);
+	SQLWCHAR * pointerFromWcs;
+	SQLWCHAR * pointerTo = (SQLWCHAR*)getAdressBindDataTo((char*)to->dataPtr);
 	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
 	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
 
@@ -4215,19 +4263,20 @@ int OdbcConvert::convVarStringToStringW(DescRecord * from, DescRecord * to)
 		from->currentFetched = parentStmt->getCurrentFetched();
 
 		if (!to->isLocalDataPtr)
-			to->allocateLocalDataPtr((from->getBufferLength() + 1) * sizeof(wchar_t));
+			to->allocateLocalDataPtr((from->getBufferLength() + 1) * sizeof(SQLWCHAR));
 
-		pointerFromWcs = (wchar_t*) to->localDataPtr;
+		pointerFromWcs = (SQLWCHAR*) to->localDataPtr;
 
+		// Phase 12 (12.1.4): MbsToWcs now takes SQLWCHAR* (always 16-bit)
 		length = (int)from->MbsToWcs( pointerFromWcs, pointerFrom, *pointerFromLen );
 		if ( length < 0 )
 			length = 0;
-		pointerFromWcs[length] = L'\0';
+		pointerFromWcs[length] = (SQLWCHAR)0;
 	}
 	else
 	{
-		pointerFromWcs = (wchar_t*) to->localDataPtr;
-		length = wcslen(pointerFromWcs + from->dataOffset) + from->dataOffset;
+		pointerFromWcs = (SQLWCHAR*) to->localDataPtr;
+		length = (int)Utf16Length(pointerFromWcs + from->dataOffset) + from->dataOffset;
 	}
 
 	int dataRemaining = length - from->dataOffset;
@@ -4242,12 +4291,13 @@ int OdbcConvert::convVarStringToStringW(DescRecord * from, DescRecord * to)
 	else
 	{
 		from->startedReturnSQLData = true;
-		int len = MIN(dataRemaining, MAX(0, (int)(to->length / sizeof( wchar_t )) - 1 ));
+		int len = MIN(dataRemaining, MAX(0, (int)(to->length / sizeof( SQLWCHAR )) - 1 ));
 		 
 		if ( pointerTo )
 		{
-			wcsncpy(pointerTo, pointerFromWcs + from->dataOffset, len);
-			pointerTo[len] = L'\0';
+			// Phase 12 (12.1.4): Use SQLWCHAR-safe copy instead of wcsncpy
+			memcpy(pointerTo, pointerFromWcs + from->dataOffset, len * sizeof(SQLWCHAR));
+			pointerTo[len] = (SQLWCHAR)0;
 
 			from->dataOffset += len;
 
@@ -4260,10 +4310,10 @@ int OdbcConvert::convVarStringToStringW(DescRecord * from, DescRecord * to)
 	}
 
 	if ( to->isIndicatorSqlDa ) {
-		to->headSqlVarPtr->setSqlLen(dataRemaining * sizeof( wchar_t ));
+		to->headSqlVarPtr->setSqlLen(dataRemaining * sizeof( SQLWCHAR ));
 	} else
 		if ( indicatorTo )
-			setIndicatorPtr(indicatorTo, dataRemaining * sizeof(wchar_t), to);
+			setIndicatorPtr(indicatorTo, dataRemaining * sizeof(SQLWCHAR), to);
 
 	return ret;
 }
@@ -4314,7 +4364,7 @@ int OdbcConvert::convVarStringSystemToString(DescRecord * from, DescRecord * to)
 int OdbcConvert::convVarStringSystemToStringW(DescRecord * from, DescRecord * to)
 {
 	char *pointerFrom = (char*)getAdressBindDataFrom((char*)from->dataPtr);
-	wchar_t *pointerTo = (wchar_t*)getAdressBindDataTo((char*)to->dataPtr);
+	SQLWCHAR *pointerTo = (SQLWCHAR*)getAdressBindDataTo((char*)to->dataPtr);
 	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
 	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
 
@@ -4329,13 +4379,23 @@ int OdbcConvert::convVarStringSystemToStringW(DescRecord * from, DescRecord * to
 
 	while ( lenVar-- && *(--end) == ' ');
 	len = end - src + 1;
-	len = MIN( len, MAX(0,(int)(to->length / sizeof( wchar_t )) - 1 ));
+	len = MIN( len, MAX(0,(int)(to->length / sizeof( SQLWCHAR )) - 1 ));
 
 	if( len > 0 )
-		mbstowcs( pointerTo, src, len );
-	
-	pointerTo[len] = (wchar_t)'\0';
-	len *= sizeof( wchar_t );
+	{
+		// Phase 12 (12.1.2): Use Utf8ToUtf16 instead of bare mbstowcs().
+		// System catalog strings from Firebird are always UTF-8 (CS_METADATA = CS_UTF8).
+		// Using mbstowcs() is incorrect on non-UTF-8 locales.
+		// Temporarily null-terminate the source for Utf8ToUtf16
+		char savedChar = src[len];
+		src[len] = '\0';
+		size_t converted = Utf8ToUtf16(src, pointerTo, len + 1);
+		src[len] = savedChar;
+		len = (int)converted;
+	}
+
+	pointerTo[len] = (SQLWCHAR)0;
+	len *= sizeof( SQLWCHAR );
 
 	if (len && (int)len > (int)to->length)
 	{

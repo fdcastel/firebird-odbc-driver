@@ -31,6 +31,7 @@
 #include "SafeEnvThread.h"
 #include "Main.h"
 #include "Utf16Convert.h"
+#include "IscDbc/MultibyteConvert.h"
 
 #define GETCONNECT_STMT( hStmt ) (((OdbcStatement*)hStmt)->connection)
 #define GETCONNECT_DESC( hDesc ) (((OdbcDesc*)hDesc)->connection)
@@ -92,7 +93,7 @@ public:
 			if ( length == SQL_NTS )
 				lengthString = 0;
 			else if ( retCountOfBytes )
-				lengthString = length / sizeof(wchar_t);
+				lengthString = length / sizeof(SQLWCHAR);
 			else
 				lengthString = length;
 		}
@@ -134,7 +135,7 @@ public:
 				size_t len;
 
 				if ( connection )
-					len = connection->MbsToWcs( (wchar_t*)unicodeString, (const char*)byteString, lengthString );
+					len = connection->MbsToWcs( unicodeString, (const char*)byteString, lengthString );
 				else
 				{
 #ifdef _WINDOWS
@@ -149,7 +150,8 @@ public:
 							len--;
 					}
 #else
-					len = mbstowcs( (wchar_t*)unicodeString, (const char*)byteString, lengthString );
+					// Phase 12 (12.1.1): Use UTF-8 codec directly instead of wcstombs
+					len = IscDbcLibrary::utf8_mbstowcs( unicodeString, (const char*)byteString, lengthString );
 #endif
 				}
 
@@ -180,16 +182,16 @@ public:
 
 	SQLCHAR * convUnicodeToString( SQLWCHAR *wcString, int length )
 	{
-		wchar_t *ptEndWC = NULL;
-		wchar_t saveWC;
+		SQLWCHAR *ptEndWC = NULL;
+		SQLWCHAR saveWC;
 
 		if ( length == SQL_NTS )
-			length = (int)wcslen( (const wchar_t*)wcString );
-		else if ( wcString[length] != L'\0' )
+			length = (int)Utf16Length( wcString );
+		else if ( wcString[length] != (SQLWCHAR)0 )
 		{
-			ptEndWC = (wchar_t*)&wcString[length];
+			ptEndWC = &wcString[length];
 			saveWC = *ptEndWC;
-			*ptEndWC = L'\0';
+			*ptEndWC = (SQLWCHAR)0;
 		}
 
 		// Single-pass fast path: try converting directly into stack buffer
@@ -197,7 +199,7 @@ public:
 		if ( connection )
 		{
 			// Connection-specific codec — must measure first
-			bytesNeeded = connection->WcsToMbs( NULL, (const wchar_t*)wcString, length );
+			bytesNeeded = connection->WcsToMbs( NULL, wcString, length );
 		}
 		else
 		{
@@ -242,7 +244,8 @@ public:
 					NULL, (int)0, NULL, NULL );
 			}
 #else
-			bytesNeeded = wcstombs( NULL, (const wchar_t*)wcString, length );
+			// Phase 12 (12.1.1): Use UTF-8 codec instead of locale-dependent wcstombs
+			bytesNeeded = IscDbcLibrary::utf8_wcstombs( NULL, wcString, length );
 #endif
 		}
 
@@ -259,7 +262,7 @@ public:
 		}
 
 		if ( connection )
-			bytesNeeded = connection->WcsToMbs( (char *)byteString, (const wchar_t*)wcString, bytesNeeded );
+			bytesNeeded = connection->WcsToMbs( (char *)byteString, wcString, bytesNeeded );
 		else
 		{
 #ifdef _WINDOWS
@@ -268,7 +271,8 @@ public:
 			else
 				bytesNeeded = WideCharToMultiByte( codePage, 0, wcString, length, (LPSTR)byteString, (int)bytesNeeded, NULL, NULL );
 #else
-			bytesNeeded = wcstombs( (char *)byteString, (const wchar_t*)wcString, bytesNeeded );
+			// Phase 12 (12.1.1): Use UTF-8 codec instead of wcstombs
+			bytesNeeded = IscDbcLibrary::utf8_wcstombs( (char *)byteString, wcString, bytesNeeded );
 #endif
 		}
 
@@ -856,7 +860,7 @@ SQLRETURN SQL_API SQLNativeSqlW( SQLHDBC hDbc,
 	GUARD_HDBC( hDbc );
 
 	if ( cbSqlStrIn == SQL_NTS )
-		cbSqlStrIn = (SQLINTEGER)wcslen( (const wchar_t*)szSqlStrIn );
+		cbSqlStrIn = (SQLINTEGER)Utf16Length( szSqlStrIn );
 	
 	bool isByte = !( cbSqlStrIn % 2 );
 
@@ -1268,9 +1272,9 @@ SQLRETURN SQL_API SQLSetDescFieldW( SQLHDESC hDesc,
 			int len;
 			
 			if ( bufferLength == SQL_NTS )
-				len = (int)wcslen( (const wchar_t*)value );
+				len = (int)Utf16Length( (const SQLWCHAR*)value );
 			else
-				len = bufferLength / sizeof(wchar_t);
+				len = bufferLength / sizeof(SQLWCHAR);
 
 			ConvertingString<> Value( GETCONNECT_DESC( hDesc ), (SQLWCHAR *)value, len );
 

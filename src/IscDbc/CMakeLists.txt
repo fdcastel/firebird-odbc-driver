@@ -124,6 +124,7 @@ add_library(IscDbc STATIC ${ISCDBC_SOURCES} ${ISCDBC_HEADERS})
 # Include directories
 target_include_directories(IscDbc PUBLIC
     ${CMAKE_CURRENT_SOURCE_DIR}
+    ${CMAKE_CURRENT_SOURCE_DIR}/..
     ${FIREBIRD_INCLUDE_DIR}
 )
 

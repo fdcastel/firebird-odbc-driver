@@ -41,10 +41,12 @@ public:
 MBSTOWCS adressMbsToWcs( int charsetCode );
 WCSTOMBS adressWcsToMbs( int charsetCode );
 
-unsigned int fss_mbstowcs( wchar_t *wcs, const char *mbs, unsigned int length );
-unsigned int fss_wcstombs( char *mbs, const wchar_t *wcs, unsigned int length );
-unsigned int utf8_mbstowcs( wchar_t *wcs, const char *mbs, unsigned int lengthForMBS );
-unsigned int utf8_wcstombs( char *mbs, const wchar_t *wcs, unsigned int lengthForMBS );
+// Phase 12 (12.1.1): All codec functions now use ODBC_SQLWCHAR (always 16-bit)
+// instead of wchar_t* (which is 4 bytes on Linux).
+unsigned int fss_mbstowcs( ODBC_SQLWCHAR *wcs, const char *mbs, unsigned int length );
+unsigned int fss_wcstombs( char *mbs, const ODBC_SQLWCHAR *wcs, unsigned int length );
+unsigned int utf8_mbstowcs( ODBC_SQLWCHAR *wcs, const char *mbs, unsigned int lengthForMBS );
+unsigned int utf8_wcstombs( char *mbs, const ODBC_SQLWCHAR *wcs, unsigned int lengthForMBS );
 
 }; // end namespace IscDbcLibrary
 

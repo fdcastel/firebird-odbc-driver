@@ -155,7 +155,11 @@ WCSTOMBS adressWcsToMbs( int charsetCode )
 #ifdef _WINDOWS
 	return _WcsToMbs;
 #else
-	return wcstombs;
+	// Phase 12 (12.1.1): On Linux without a specific charset, default to UTF-8 codec.
+	// The C runtime wcstombs is locale-dependent and uses wchar_t (4 bytes),
+	// which doesn't match ODBC_SQLWCHAR (2 bytes). Since task 12.4.1 defaults
+	// CHARSET to UTF8, this path should rarely be reached.
+	return (WCSTOMBS)utf8_wcstombs;
 #endif
 }
 
@@ -175,7 +179,8 @@ MBSTOWCS adressMbsToWcs( int charsetCode )
 #ifdef _WINDOWS
 	return _MbsToWcs;
 #else
-	return mbstowcs;
+	// Phase 12 (12.1.1): On Linux, default to UTF-8 codec (see adressWcsToMbs).
+	return (MBSTOWCS)utf8_mbstowcs;
 #endif
 }
 
@@ -200,7 +205,11 @@ static Tab tab[] =
 	0,
 }; 
 
-unsigned int fss_mbstowcs( wchar_t *wcs, const char *mbs, unsigned int lengthForMBS )
+// Phase 12 (12.1.1 + 12.1.5): FSS and UTF-8 codecs now use ODBC_SQLWCHAR* (always 16-bit)
+// instead of wchar_t* (4 bytes on Linux). UNICODE_FSS is a subset of UTF-8
+// (BMP only, max 3-byte sequences), so it works correctly with the same output type.
+
+unsigned int fss_mbstowcs( ODBC_SQLWCHAR *wcs, const char *mbs, unsigned int lengthForMBS )
 {
 	int l, c0, c;
 	bool bContinue = true;
@@ -223,7 +232,7 @@ unsigned int fss_mbstowcs( wchar_t *wcs, const char *mbs, unsigned int lengthFor
 				++mbs;
 				if ( mbs > mbsEnd )
 				{
-					*wcs = L'\0';
+					*wcs = (ODBC_SQLWCHAR)0;
 					return length;
 				}
 
@@ -237,9 +246,9 @@ unsigned int fss_mbstowcs( wchar_t *wcs, const char *mbs, unsigned int lengthFor
 						break;
 					}
 					
-					*wcs++ = (wchar_t)l;
+					*wcs++ = (ODBC_SQLWCHAR)l;
 
-					if ( (wchar_t)l == L'\0' )
+					if ( l == 0 )
 						return length;
 
 					length++;
@@ -288,7 +297,7 @@ unsigned int fss_mbstowcs( wchar_t *wcs, const char *mbs, unsigned int lengthFor
 						break;
 					}
 					
-					if ( (wchar_t)l == L'\0' )
+					if ( l == 0 )
 						return length;
 
 					length++;
@@ -317,7 +326,7 @@ unsigned int fss_mbstowcs( wchar_t *wcs, const char *mbs, unsigned int lengthFor
 	return length;
 }
 
-unsigned int fss_wcstombs( char *mbs, const wchar_t *wcs, unsigned int lengthForMBS )
+unsigned int fss_wcstombs( char *mbs, const ODBC_SQLWCHAR *wcs, unsigned int lengthForMBS )
 { 
 	int l; 
 	int c;
@@ -350,7 +359,7 @@ unsigned int fss_wcstombs( char *mbs, const wchar_t *wcs, unsigned int lengthFor
 				} 
 			} 
 
-		} while ( *(++wcs) != L'\0' );
+		} while ( *(++wcs) != (ODBC_SQLWCHAR)0 );
 	}
 	else
 	{
@@ -373,7 +382,7 @@ unsigned int fss_wcstombs( char *mbs, const wchar_t *wcs, unsigned int lengthFor
 				} 
 			} 
 
-		} while ( *(++wcs) != L'\0' );
+		} while ( *(++wcs) != (ODBC_SQLWCHAR)0 );
 	}
 
 	return length;
@@ -392,7 +401,7 @@ typedef unsigned short USHORT;
 #endif
 typedef signed int int32_t;
 typedef int32_t UChar32;
-typedef wchar_t UChar;
+typedef ODBC_SQLWCHAR UChar;  // Phase 12: use ODBC_SQLWCHAR (always 16-bit) instead of wchar_t
 typedef signed char int8_t;
 typedef int8_t UBool;
 typedef unsigned char uint8_t;
@@ -500,17 +509,17 @@ static const UChar32 utf8_errorValue[6] =
 	0x7fffffff
 };
 
-unsigned int utf8_mbstowcs( wchar_t *wcs, const char *mbs, unsigned int lengthForMBS )
+unsigned int utf8_mbstowcs( ODBC_SQLWCHAR *wcs, const char *mbs, unsigned int lengthForMBS )
 {
 	USHORT err_code = 0;
 	ULONG err_position = 0;
 
 	if ( !wcs )
-		return lengthForMBS * sizeof( *wcs );
+		return lengthForMBS * sizeof( ODBC_SQLWCHAR );
 
 	const UCHAR* mbsOrg = (const UCHAR*)mbs;
 	const UCHAR* const mbsEnd = mbsOrg + lengthForMBS;
-	const USHORT* const wcsStart = (const USHORT*)wcs;
+	const ODBC_SQLWCHAR* const wcsStart = wcs;
 
 	for ( ULONG i = 0; i < lengthForMBS; )
 	{
@@ -520,7 +529,7 @@ unsigned int utf8_mbstowcs( wchar_t *wcs, const char *mbs, unsigned int lengthFo
 		{
 			if ( !c )
 				break;
-			*wcs++ = c;
+			*wcs++ = (ODBC_SQLWCHAR)c;
 		}
 		else
 		{
@@ -538,33 +547,39 @@ unsigned int utf8_mbstowcs( wchar_t *wcs, const char *mbs, unsigned int lengthFo
 				break;
 			}
 			else if ( c <= 0xFFFF )
-				*wcs++ = c;
+				*wcs++ = (ODBC_SQLWCHAR)c;
 			else
 			{
-				*wcs++ = U16_LEAD( c );
-				*wcs++ = U16_TRAIL( c );
+				*wcs++ = (ODBC_SQLWCHAR)U16_LEAD( c );
+				*wcs++ = (ODBC_SQLWCHAR)U16_TRAIL( c );
 			}
 		}
 	}
 
-	*wcs = L'\0';
-	return (const USHORT*)wcs - wcsStart;
+	*wcs = (ODBC_SQLWCHAR)0;
+	return (unsigned int)(wcs - wcsStart);
 }
 
-unsigned int utf8_wcstombs( char *mbs, const wchar_t *wcs, unsigned int lengthForMBS )
+unsigned int utf8_wcstombs( char *mbs, const ODBC_SQLWCHAR *wcs, unsigned int lengthForMBS )
 {
 	USHORT err_code = 0;
 	ULONG err_position = 0;
-	ULONG wcsLen = (ULONG)wcslen( wcs );
 
 	if ( !wcs || !*wcs )
 		return 0; 
 
+	// Phase 12 (12.1.1): Calculate wcsLen from ODBC_SQLWCHAR* (always 16-bit)
+	ULONG wcsLen = 0;
+	{
+		const ODBC_SQLWCHAR* p = wcs;
+		while (*p++) wcsLen++;
+	}
+
 	if ( !mbs )
 		return wcsLen * 4;
 
-	const USHORT* wcsOrg = (const USHORT*)wcs;
-	const USHORT* const wcsEnd = wcsOrg + wcsLen;
+	const ODBC_SQLWCHAR* wcsOrg = wcs;
+	const ODBC_SQLWCHAR* const wcsEnd = wcsOrg + wcsLen;
 	UCHAR* mbsOrg = (UCHAR*)mbs;
 	const UCHAR* const mbsStart = (const UCHAR*)mbsOrg;
 	const UCHAR* const mbsEnd = (const UCHAR*)mbsOrg + lengthForMBS;
@@ -574,7 +589,7 @@ unsigned int utf8_wcstombs( char *mbs, const wchar_t *wcs, unsigned int lengthFo
 		if ( !(mbsEnd - mbsOrg) )
 		{
 			err_code = CS_TRUNCATION_ERROR;
-			err_position = i * sizeof( *wcsOrg );
+			err_position = i * sizeof( ODBC_SQLWCHAR );
 			break;
 		}
 
@@ -584,11 +599,11 @@ unsigned int utf8_wcstombs( char *mbs, const wchar_t *wcs, unsigned int lengthFo
 		{
 			if ( !c )
 				break;
-			*mbsOrg++ = c;
+			*mbsOrg++ = (UCHAR)c;
 		}
 		else
 		{
-			err_position = (i - 1) * sizeof( *wcsOrg );
+			err_position = (i - 1) * sizeof( ODBC_SQLWCHAR );
 
 			if ( U_IS_SURROGATE( c ) )
 			{

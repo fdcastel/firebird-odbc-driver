@@ -56,6 +56,17 @@ typedef __int64			QUAD;
 typedef unsigned __int64			UQUAD;
 #endif
 
+// Phase 12 (12.1.1): SQLWCHAR-based codec typedefs for cross-platform correctness.
+// SQLWCHAR is always 16-bit (UTF-16) per ODBC spec, regardless of platform wchar_t size.
+// We define our own ODBC_SQLWCHAR to avoid depending on ODBC SDK headers in IscDbc.
+#if defined(_WINDOWS) || defined(_WIN32)
+// On Windows, wchar_t is 16-bit == SQLWCHAR
+typedef wchar_t ODBC_SQLWCHAR;
+#else
+// On Linux/macOS, wchar_t is 32-bit but SQLWCHAR is 16-bit
+typedef unsigned short ODBC_SQLWCHAR;
+#endif
+
 #ifdef __BORLANDC__
 #define ENTRY_DLL_CREATE_CONNECTION         "_createConnection"
 #define ENTRY_DLL_CREATE_SERVICES           "_createServices"
@@ -73,8 +84,8 @@ typedef unsigned __int64			UQUAD;
 #define GET_ENTRY_POINT(libraryHandle,nameProc)     GetProcAddress( libraryHandle, nameProc )
 #define CLOSE_SHARE_LIBLARY(libraryHandle)          FreeLibrary( libraryHandle )
 
-size_t _MbsToWcs( wchar_t *wcstr, const char *mbstr, size_t count );
-size_t _WcsToMbs( char *mbstr,  const wchar_t *wcstr, size_t count );
+size_t _MbsToWcs( ODBC_SQLWCHAR *wcstr, const char *mbstr, size_t count );
+size_t _WcsToMbs( char *mbstr,  const ODBC_SQLWCHAR *wcstr, size_t count );
 
 #elif defined (__APPLE__)
 
@@ -128,8 +139,9 @@ enum tra_flags_vals {
 };
 
 typedef void (*callbackEvent)( void *interfaseUserEvents, short length, char *updated );
-typedef size_t (*WCSTOMBS)( char *mbstr,  const wchar_t *wcstr, size_t count );
-typedef size_t (*MBSTOWCS)( wchar_t *wcstr, const char *mbstr, size_t count );
+
+typedef size_t (*WCSTOMBS)( char *mbstr,  const ODBC_SQLWCHAR *wcstr, size_t count );
+typedef size_t (*MBSTOWCS)( ODBC_SQLWCHAR *wcstr, const char *mbstr, size_t count );
 
 namespace IscDbcLibrary {
 

@@ -27,6 +27,7 @@
 #include "OdbcEnv.h"
 #include "OdbcConnection.h"
 #include "IscDbc/Connection.h"
+#include "IscDbc/MultibyteConvert.h"
 #include "OdbcDesc.h"
 #include "DescRecord.h"
 
@@ -82,8 +83,10 @@ DescRecord::DescRecord()
 	WcsToMbs = _WcsToMbs;
 	MbsToWcs = _MbsToWcs;
 #else
-	WcsToMbs = wcstombs;
-	MbsToWcs = mbstowcs;
+	// Phase 12 (12.1.1): Use UTF-8 codecs on Linux instead of locale-dependent
+	// wcstombs/mbstowcs (which use 4-byte wchar_t, incompatible with SQLWCHAR).
+	WcsToMbs = IscDbcLibrary::utf8_wcstombs;
+	MbsToWcs = IscDbcLibrary::utf8_mbstowcs;
 #endif
 }
 

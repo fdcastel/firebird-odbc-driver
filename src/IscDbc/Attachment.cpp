@@ -253,11 +253,15 @@ void Attachment::openDatabase(const char *dbName, Properties *properties)
 		if ( !charset )
 			charset = properties->findValue ("characterset", NULL);
 
-		if (charset && *charset)
-		{
-			dpb->insertString(&throw_status, isc_dpb_lc_ctype, charset);
-			charsetCode = findCharsetsCode( charset );
-		}
+		// Phase 12 (12.4.1): Default to UTF8 when no charset specified.
+		// This ensures consistent encoding, correct Unicode support, and
+		// optimal server-side transliteration. CHARSET=NONE users must
+		// explicitly specify CHARSET=NONE in the connection string.
+		if (!charset || !*charset)
+			charset = "UTF8";
+
+		dpb->insertString(&throw_status, isc_dpb_lc_ctype, charset);
+		charsetCode = findCharsetsCode( charset );
 
 		const char *property = properties->findValue ("databaseAccess", NULL);
 
