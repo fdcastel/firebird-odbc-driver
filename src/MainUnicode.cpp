@@ -1133,27 +1133,8 @@ SQLRETURN SQL_API SQLGetDiagFieldW( SQLSMALLINT handleType, SQLHANDLE handle,
 	TRACE ("SQLGetDiagFieldW");
 	GUARD_HTYPE( handle, handleType );
 
-	switch ( diagIdentifier )
-	{
-	case SQL_DIAG_DYNAMIC_FUNCTION:
-	case SQL_DIAG_CLASS_ORIGIN:
-	case SQL_DIAG_CONNECTION_NAME:
-	case SQL_DIAG_MESSAGE_TEXT:
-	case SQL_DIAG_SERVER_NAME:
-	case SQL_DIAG_SQLSTATE:
-	case SQL_DIAG_SUBCLASS_ORIGIN:
-
-		if ( bufferLength > 0 || bufferLength == SQL_NTS )
-		{
-			ConvertingString<> DiagInfo( bufferLength, (SQLWCHAR *)diagInfo, stringLength );
-			DiagInfo.setConnection( GETCONNECT_HNDL( handle ) );
-
-			return ((OdbcObject*) handle)->sqlGetDiagField( recNumber, diagIdentifier,
-											(SQLPOINTER)(SQLCHAR*)DiagInfo, DiagInfo.getLength(), stringLength );
-		}
-	}
-
-	return ((OdbcObject*) handle)->sqlGetDiagField( recNumber, diagIdentifier,
+	// Phase 12 (12.2.2): Call sqlGetDiagFieldW directly — no ConvertingString roundtrip.
+	return ((OdbcObject*) handle)->sqlGetDiagFieldW( recNumber, diagIdentifier,
 												diagInfo, bufferLength, stringLength );
 }
 
@@ -1167,21 +1148,11 @@ SQLRETURN SQL_API SQLGetDiagRecW( SQLSMALLINT handleType, SQLHANDLE handle,
 	TRACE ("SQLGetDiagRecW");
 	GUARD_HTYPE( handle, handleType );
 
-	ConvertingString<> State( 12, sqlState );
-// MSDN
-// DOC: ODBC Spec Incorrectly says SQLGetDiagRecW Takes in Bufferlength as the Number of Bytes
-// PSS ID Number: 243526
-// Article Last Modified on 8/23/2001
-
-// should be Number of Bytes!!!
-// however ODBC.DLL wait Number of Character
-	bool isByte = false;
-	ConvertingString<> MessageText( bufferLength, messageText, textLength, isByte );
-	MessageText.setConnection( GETCONNECT_HNDL( handle ) );
-
-	return ((OdbcObject*) handle)->sqlGetDiagRec( handleType, recNumber, State,
-												 nativeError, MessageText,
-												 MessageText.getLength(), textLength );
+	// Phase 12 (12.2.2): Call sqlGetDiagRecW directly — no ConvertingString roundtrip.
+	// bufferLength is in SQLWCHAR units (MSDN PSS ID 243526: ODBC DM passes characters, not bytes).
+	return ((OdbcObject*) handle)->sqlGetDiagRecW( handleType, recNumber, sqlState,
+												 nativeError, messageText,
+												 bufferLength, textLength );
 }
 
 ///// SQLGetStmtAttrW /////

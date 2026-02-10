@@ -27,6 +27,9 @@
 
 #include "IscDbc/JString.h"
 
+// Phase 12 (12.2.2): Direct UTF-16 output for W-API diagnostic functions.
+#include "OdbcJdbc.h"
+
 namespace OdbcJdbcLibrary {
 
 using namespace classJString;
@@ -48,6 +51,13 @@ public:
 	void setRowNumber (int number);
 	SQLRETURN sqlGetDiagField (int diagId, SQLPOINTER ptr, int bufferLength, SQLSMALLINT *stringLength);
 	SQLRETURN sqlGetDiagRec (UCHAR *stateBuffer, SQLINTEGER *nativeCode, UCHAR *msgBuffer, int msgBufferLength, SWORD *msgLength);
+
+	// Phase 12 (12.2.2): Direct UTF-16 output — eliminates W→A→W roundtrip.
+	// These methods convert internal UTF-8 text directly to SQLWCHAR without
+	// going through ConvertingString.
+	SQLRETURN sqlGetDiagRecW (SQLWCHAR *stateBuffer, SQLINTEGER *nativeCode, SQLWCHAR *msgBuffer, int msgBufferLength, SWORD *msgLength);
+	SQLRETURN sqlGetDiagFieldW (int diagId, SQLPOINTER ptr, int bufferLength, SQLSMALLINT *stringLength);
+
 	const char* getVersionedSqlState() const;
 	OdbcError(int code, const char *state, JString errorMsg);
 	OdbcError(int code, int fbcode, const char *state, JString errorMsg);

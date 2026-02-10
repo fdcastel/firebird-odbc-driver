@@ -316,6 +316,10 @@ public:
 	int convVarStringToString(DescRecord * from, DescRecord * to);
 	int convVarStringToStringW(DescRecord * from, DescRecord * to);
 	int convVarStringToBinary(DescRecord * from, DescRecord * to);
+
+	// Phase 12 (12.3.2): Shared implementation for String→StringW / VarString→StringW
+	int convToStringWImpl(DescRecord * from, DescRecord * to,
+		char * pointerFrom, int sourceByteCount, int padToLength, bool trimTrailingSpaces);
 };
 
 }; // end namespace OdbcJdbcLibrary

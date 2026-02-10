@@ -123,10 +123,29 @@ task test build, build-test-databases, install, {
 		print Yellow 'WARNING: FIREBIRD_ODBC_CONNECTION environment variable is not set. Using built-in connection strings.'
 	}
 
+	# Test suites that exercise charset/encoding-sensitive code paths.
+	# These are the only suites re-run with non-default charset configurations
+	# because their behavior changes based on connection charset or database charset.
+	# All other suites use pure ASCII text with SQL_C_CHAR bindings, so charset
+	# configuration doesn't affect their results.
+	$charsetSensitiveSuites = @(
+		'WCharTest'              # W-API / SQLWCHAR paths, UTF-8↔UTF-16 conversions
+		'DataTypeTest'           # VARCHAR/CHAR type reporting, text round-trips
+		'CatalogTest'            # Metadata strings, type names
+		'CatalogFunctionsTest'   # Extensive metadata queries
+		'DescRecTest'            # SQL type reporting (VARCHAR vs WVARCHAR)
+		'TypeInfoTest'           # SQLGetTypeInfo strings
+		'BlobTest'               # Text blob encoding
+		'ResultConversionsTest'  # Text conversion paths (int→string, date→string)
+		'ParamConversionsTest'   # Parameter text paths
+		'EscapeSequenceTest'     # String function results
+	)
+	$charsetFilter = ($charsetSensitiveSuites | ForEach-Object { "$_.*" }) -join ':'
+
 	$testConfigs = @(
-		@{ Database = '/fbodbc-tests/TEST.FB50.FDB';     Charset = 'UTF8';      Label = 'UTF8 database, UTF8 charset' }
-		@{ Database = '/fbodbc-tests/TEST-ISO.FB50.FDB'; Charset = 'ISO8859_1'; Label = 'ISO8859_1 database, ISO8859_1 charset' }
-		@{ Database = '/fbodbc-tests/TEST-ISO.FB50.FDB'; Charset = 'UTF8';      Label = 'ISO8859_1 database, UTF8 charset' }
+		@{ Database = '/fbodbc-tests/TEST.FB50.FDB';     Charset = 'UTF8';      Label = 'UTF8 database, UTF8 charset';      Filter = $null }
+		@{ Database = '/fbodbc-tests/TEST-ISO.FB50.FDB'; Charset = 'ISO8859_1'; Label = 'ISO8859_1 database, ISO8859_1 charset'; Filter = $charsetFilter }
+		@{ Database = '/fbodbc-tests/TEST-ISO.FB50.FDB'; Charset = 'UTF8';      Label = 'ISO8859_1 database, UTF8 charset';     Filter = $charsetFilter }
 	)
 
 	$passed = 0
@@ -134,7 +153,20 @@ task test build, build-test-databases, install, {
 		$env:FIREBIRD_ODBC_CONNECTION = "Driver={$DriverName};Database=$($cfg.Database);UID=SYSDBA;PWD=masterkey;CHARSET=$($cfg.Charset);CLIENT=$script:ClientPath"
 		print Cyan "--- Test run: $($cfg.Label) ---"
 		print Cyan "    Connection: $env:FIREBIRD_ODBC_CONNECTION"
-		exec { ctest --test-dir $BuildDir -C $Configuration --output-on-failure }
+
+		if ($cfg.Filter) {
+			# Run only charset-sensitive suites for non-default configurations
+			$testExe = if ($IsWindowsOS) {
+				Join-Path $BuildDir 'tests' $Configuration 'firebird_odbc_tests.exe'
+			} else {
+				Join-Path $BuildDir 'tests' 'firebird_odbc_tests'
+			}
+			print Cyan "    Filter: $($cfg.Filter)"
+			exec { & $testExe --gtest_filter=$($cfg.Filter) }
+		} else {
+			# Run full suite for the primary (UTF8) configuration
+			exec { ctest --test-dir $BuildDir -C $Configuration --output-on-failure }
+		}
 		$passed++
 	}
 

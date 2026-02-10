@@ -283,6 +283,78 @@ SQLRETURN OdbcObject::sqlGetDiagRec(int handleType, int recNumber, SQLCHAR * sta
 	return SQL_NO_DATA;
 }
 
+// Phase 12 (12.2.2): Direct UTF-16 diagnostic record output.
+SQLRETURN OdbcObject::sqlGetDiagRecW(int handleType, int recNumber, SQLWCHAR * stateBuffer, SQLINTEGER * nativeCode, SQLWCHAR * msgBuffer, int msgBufferLength, SQLSMALLINT * msgLength)
+{
+	if (recNumber >= 1 && recNumber <= (int)errors.size())
+		return errors[recNumber - 1]->sqlGetDiagRecW(stateBuffer, nativeCode, msgBuffer, msgBufferLength, msgLength);
+
+	if (stateBuffer)
+	{
+		stateBuffer[0] = (SQLWCHAR)'0';
+		stateBuffer[1] = (SQLWCHAR)'0';
+		stateBuffer[2] = (SQLWCHAR)'0';
+		stateBuffer[3] = (SQLWCHAR)'0';
+		stateBuffer[4] = (SQLWCHAR)'0';
+		stateBuffer[5] = (SQLWCHAR)0;
+	}
+
+	if (msgBuffer)
+		msgBuffer[0] = (SQLWCHAR)0;
+
+	if (msgLength)
+		*msgLength = 0;
+
+	return SQL_NO_DATA;
+}
+
+// Phase 12 (12.2.2): Direct UTF-16 diagnostic field output.
+SQLRETURN OdbcObject::sqlGetDiagFieldW(int recNumber, int diagId, SQLPOINTER ptr, int bufferLength, SQLSMALLINT *stringLength)
+{
+	// Header fields (recNumber == 0) — numeric, no conversion needed
+	switch( diagId )
+	{
+	case SQL_DIAG_CURSOR_ROW_COUNT:
+		if (ptr)
+			*(SQLINTEGER*)ptr = sqlDiagCursorRowCount;
+		return SQL_SUCCESS;
+
+	case SQL_DIAG_DYNAMIC_FUNCTION:
+		if (ptr)
+			*(SQLWCHAR*)ptr = (SQLWCHAR)0;
+		return SQL_SUCCESS;
+
+	case SQL_DIAG_DYNAMIC_FUNCTION_CODE:
+		if (ptr)
+			*(SQLINTEGER*)ptr = sqlDiagDynamicFunctionCode;
+		return SQL_SUCCESS;
+
+	case SQL_DIAG_NUMBER:
+		if (ptr)
+			*(SQLINTEGER*)ptr = (SQLINTEGER)errors.size();
+		return SQL_SUCCESS;
+
+	case SQL_DIAG_RETURNCODE:
+		if (ptr)
+			*(SQLRETURN*)ptr = sqlDiagReturnCode;
+		return SQL_SUCCESS;
+
+	case SQL_DIAG_ROW_COUNT:
+		if (ptr)
+			*(SQLLEN*)ptr = sqlDiagRowCount;
+		return SQL_SUCCESS;
+	}
+
+	// Record-level fields (recNumber >= 1)
+	if (ptr)
+		*(SQLWCHAR*)ptr = (SQLWCHAR)0;
+
+	if (recNumber >= 1 && recNumber <= (int)errors.size())
+		return errors[recNumber - 1]->sqlGetDiagFieldW(diagId, ptr, bufferLength, stringLength);
+
+	return SQL_NO_DATA;
+}
+
 SQLRETURN OdbcObject::sqlGetDiagField(int recNumber, int diagId, SQLPOINTER ptr, int bufferLength, SQLSMALLINT *stringLength)
 {
 	// Header fields (recNumber == 0)

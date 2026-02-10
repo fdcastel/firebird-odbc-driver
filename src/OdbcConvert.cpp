@@ -3452,9 +3452,16 @@ int OdbcConvert::convStringToString(DescRecord * from, DescRecord * to)
 	return ret;
 }
 
-int OdbcConvert::convStringToStringW(DescRecord * from, DescRecord * to)
+// Phase 12 (12.3.2): Shared helper for convStringToStringW / convVarStringToStringW.
+// Handles MbsToWcs conversion, chunked SQLGetData, truncation, and indicators.
+// - pointerFrom: pointer to the raw multibyte source data
+// - sourceByteCount: number of source bytes to convert
+// - padToLength: if >= 0, space-pad converted result to this many SQLWCHAR characters
+//                (used for fixed-width CHAR columns). If < 0, no padding (VARCHAR).
+// - trimTrailingSpaces: if true, trim trailing spaces after conversion (catalog results).
+int OdbcConvert::convToStringWImpl(DescRecord * from, DescRecord * to,
+	char * pointerFrom, int sourceByteCount, int padToLength, bool trimTrailingSpaces)
 {
-	char * pointerFrom = (char*)getAdressBindDataFrom((char*)from->dataPtr);
 	SQLWCHAR * pointerFromWcs;
 	SQLWCHAR * pointerTo = (SQLWCHAR*)getAdressBindDataTo((char*)to->dataPtr);
 	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
@@ -3477,16 +3484,26 @@ int OdbcConvert::convStringToStringW(DescRecord * from, DescRecord * to)
 
 		pointerFromWcs = (SQLWCHAR*) to->localDataPtr;
 
-		// Phase 12 (12.1.4): MbsToWcs now takes SQLWCHAR* (always 16-bit)
-		length = (int)from->MbsToWcs( pointerFromWcs, pointerFrom, from->length * from->headSqlVarPtr->getSqlMultiple() );
+		length = (int)from->MbsToWcs( pointerFromWcs, pointerFrom, sourceByteCount );
 		if ( length < 0 )
 			length = 0;
 
-		while (length < from->length)       // safety-code - should not happen
-			pointerFromWcs[length++] = (SQLWCHAR)' ';
+		if ( padToLength >= 0 )
+		{
+			// Fixed-width CHAR: space-pad to declared column length
+			while ( length < padToLength )
+				pointerFromWcs[length++] = (SQLWCHAR)' ';
+			length = padToLength;
+		}
 
-		length = from->length;
 		pointerFromWcs[length] = (SQLWCHAR)0;
+
+		if ( trimTrailingSpaces )
+		{
+			while ( length > 0 && pointerFromWcs[length - 1] == (SQLWCHAR)' ' )
+				--length;
+			pointerFromWcs[length] = (SQLWCHAR)0;
+		}
 	}
 	else
 	{
@@ -3507,10 +3524,9 @@ int OdbcConvert::convStringToStringW(DescRecord * from, DescRecord * to)
 	{
 		from->startedReturnSQLData = true;
 		int len = MIN(dataRemaining, MAX(0, (int)(to->length / sizeof( SQLWCHAR )) - 1 ));
-		 
+
 		if ( pointerTo )
 		{
-			// Phase 12 (12.1.4): Use SQLWCHAR-safe copy instead of wcsncpy
 			memcpy(pointerTo, pointerFromWcs + from->dataOffset, len * sizeof(SQLWCHAR));
 			pointerTo[len] = (SQLWCHAR)0;
 
@@ -3531,6 +3547,14 @@ int OdbcConvert::convStringToStringW(DescRecord * from, DescRecord * to)
 		setIndicatorPtr(indicatorTo, dataRemaining * sizeof(SQLWCHAR), to);
 
 	return ret;
+}
+
+int OdbcConvert::convStringToStringW(DescRecord * from, DescRecord * to)
+{
+	char * pointerFrom = (char*)getAdressBindDataFrom((char*)from->dataPtr);
+	int sourceByteCount = from->length * from->headSqlVarPtr->getSqlMultiple();
+	return convToStringWImpl(from, to, pointerFrom, sourceByteCount,
+		/*padToLength=*/from->length, /*trimTrailingSpaces=*/false);
 }
 
 // for use App to SqlDa
@@ -4243,86 +4267,8 @@ int OdbcConvert::convVarStringToStringW(DescRecord * from, DescRecord * to)
 {
 	short * pointerFromLen = (short*)getAdressBindDataFrom((char*)from->dataPtr);
 	char * pointerFrom = (char*)(pointerFromLen + 1);
-	SQLWCHAR * pointerFromWcs;
-	SQLWCHAR * pointerTo = (SQLWCHAR*)getAdressBindDataTo((char*)to->dataPtr);
-	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
-	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
-
-	ODBCCONVERT_CHECKNULLW( pointerTo );
-
-	SQLRETURN ret = SQL_SUCCESS;
-	int length;
-	bool fetched = from->currentFetched == parentStmt->getCurrentFetched();
-
-	if ( !fetched )
-	{ // new row read
-		from->dataOffset = 0;
-		from->startedReturnSQLData = false;
-		from->currentFetched = parentStmt->getCurrentFetched();
-
-		if (!to->isLocalDataPtr)
-			to->allocateLocalDataPtr((from->getBufferLength() + 1) * sizeof(SQLWCHAR));
-
-		pointerFromWcs = (SQLWCHAR*) to->localDataPtr;
-
-		// Phase 12 (12.1.4): MbsToWcs now takes SQLWCHAR* (always 16-bit)
-		length = (int)from->MbsToWcs( pointerFromWcs, pointerFrom, *pointerFromLen );
-		if ( length < 0 )
-			length = 0;
-		pointerFromWcs[length] = (SQLWCHAR)0;
-
-		// Phase 12 (12.3.1): Trim trailing spaces for system catalog result sets.
-		// Firebird sends catalog metadata as CHAR (fixed-width, space-padded).
-		if ( parentStmt->isResultSetFromSystemCatalog )
-		{
-			while ( length > 0 && pointerFromWcs[length - 1] == (SQLWCHAR)' ' )
-				--length;
-			pointerFromWcs[length] = (SQLWCHAR)0;
-		}
-	}
-	else
-	{
-		pointerFromWcs = (SQLWCHAR*) to->localDataPtr;
-		length = (int)Utf16Length(pointerFromWcs + from->dataOffset) + from->dataOffset;
-	}
-
-	int dataRemaining = length - from->dataOffset;
-
-	if ( !to->length )
-		;
-	else if (!dataRemaining && ( from->dataOffset || fetched ) && from->startedReturnSQLData)
-	{
-		from->dataOffset = 0;
-		ret = SQL_NO_DATA;
-	}
-	else
-	{
-		from->startedReturnSQLData = true;
-		int len = MIN(dataRemaining, MAX(0, (int)(to->length / sizeof( SQLWCHAR )) - 1 ));
-		 
-		if ( pointerTo )
-		{
-			// Phase 12 (12.1.4): Use SQLWCHAR-safe copy instead of wcsncpy
-			memcpy(pointerTo, pointerFromWcs + from->dataOffset, len * sizeof(SQLWCHAR));
-			pointerTo[len] = (SQLWCHAR)0;
-
-			from->dataOffset += len;
-
-			if ( len && len < dataRemaining )
-			{
-				OdbcError *error = parentStmt->postError (new OdbcError (0, "01004", "Data truncated"));
-				ret = SQL_SUCCESS_WITH_INFO;
-			}
-		}
-	}
-
-	if ( to->isIndicatorSqlDa ) {
-		to->headSqlVarPtr->setSqlLen(dataRemaining * sizeof( SQLWCHAR ));
-	} else
-		if ( indicatorTo )
-			setIndicatorPtr(indicatorTo, dataRemaining * sizeof(SQLWCHAR), to);
-
-	return ret;
+	return convToStringWImpl(from, to, pointerFrom, *pointerFromLen,
+		/*padToLength=*/-1, /*trimTrailingSpaces=*/parentStmt->isResultSetFromSystemCatalog);
 }
 
 // Phase 12 (12.3.1): convVarStringSystemToString and convVarStringSystemToStringW removed.

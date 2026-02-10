@@ -64,6 +64,11 @@ add_executable(firebird_odbc_tests
     test_wchar.cpp
     test_cursor_name.cpp
     test_phase11_typeinfo_timeout_pool.cpp
+    test_odbc_string.cpp
+    # Utf16Convert.cpp is compiled into OdbcFb.dll but its symbols are not exported.
+    # We include it here so that OdbcString unit tests can link without requiring
+    # the full driver DLL at test time.
+    ${CMAKE_SOURCE_DIR}/src/Utf16Convert.cpp
 )
 
 # Link with Google Test and the ODBC library

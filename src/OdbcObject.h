@@ -74,6 +74,10 @@ public:
 	SQLRETURN returnStringInfo(SQLPOINTER ptr, SQLSMALLINT maxLength, SQLINTEGER* returnLength, const char * value);
 	/// Retrieve a diagnostic record (implements SQLGetDiagRec).
 	SQLRETURN sqlGetDiagRec (int handleType, int recNumber, SQLCHAR*sqlState,SQLINTEGER*nativeErrorPtr,SQLCHAR*messageText,int bufferLength,SQLSMALLINT*textLengthPtr);
+
+	// Phase 12 (12.2.2): Direct UTF-16 output — eliminates ConvertingString roundtrip.
+	SQLRETURN sqlGetDiagRecW (int handleType, int recNumber, SQLWCHAR *sqlState, SQLINTEGER *nativeErrorPtr, SQLWCHAR *messageText, int bufferLength, SQLSMALLINT *textLengthPtr);
+	virtual SQLRETURN sqlGetDiagFieldW (int recNumber, int diagId, SQLPOINTER ptr, int bufferLength, SQLSMALLINT *stringLength);
 	/// Post an error with a given SQLSTATE and message string.
 	OdbcError* postError (const char *state, JString msg);
 	const char * getString (char **temp, const UCHAR *string, int length, const char *defaultValue);

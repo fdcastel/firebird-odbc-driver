@@ -28,6 +28,7 @@
 #include "OdbcConnection.h"
 #include "OdbcError.h"
 #include "OdbcSqlState.h"
+#include "Utf16Convert.h"
 
 #define LABEL_ODBC				"[ODBC Firebird Driver]";
 
@@ -595,6 +596,149 @@ SQLRETURN OdbcError::sqlGetDiagRec(UCHAR * stateBuffer, SQLINTEGER * nativeCodeP
 		msgBuffer [msgBufferLength] = 0;
 		return SQL_SUCCESS_WITH_INFO;
 		}
+
+	return SQL_SUCCESS;
+}
+
+// Phase 12 (12.2.2): Direct UTF-16 output for SQLGetDiagRecW.
+// Converts internal UTF-8 strings directly to SQLWCHAR without ConvertingString.
+SQLRETURN OdbcError::sqlGetDiagRecW(SQLWCHAR * stateBuffer, SQLINTEGER * nativeCodePtr, SQLWCHAR * msgBuffer, int msgBufferLength, SWORD * msgLength)
+{
+	if (stateBuffer)
+	{
+		const char *state = getVersionedSqlState();
+		// SQLSTATE is always 5 ASCII chars + null
+		for (int i = 0; i < 5; ++i)
+			stateBuffer[i] = (SQLWCHAR)(unsigned char)state[i];
+		stateBuffer[5] = (SQLWCHAR)0;
+	}
+
+	if (nativeCodePtr)
+		*nativeCodePtr = nativeCode;
+
+	// Convert message from UTF-8 to UTF-16
+	const char *msgUtf8 = (const char*)msg;
+	int utf8Len = (int)strlen(msgUtf8);
+
+	// Calculate the full UTF-16 length (in SQLWCHAR units)
+	int fullWcharLen = (int)Utf8ToUtf16Length(msgUtf8);
+
+	if (msgLength)
+		*msgLength = (SWORD)fullWcharLen;
+
+	if (msgBufferLength <= 0 || !msgBuffer)
+		return SQL_SUCCESS_WITH_INFO;
+
+	// msgBufferLength is in SQLWCHAR units (per ODBC spec for W functions)
+	int maxChars = msgBufferLength - 1;  // reserve space for null terminator
+	if (maxChars < 0)
+		maxChars = 0;
+
+	int written = (int)Utf8ToUtf16(msgUtf8, msgBuffer, maxChars + 1);
+	if (written < 0)
+		written = 0;
+	msgBuffer[written] = (SQLWCHAR)0;
+
+	if (written < fullWcharLen)
+		return SQL_SUCCESS_WITH_INFO;
+
+	return SQL_SUCCESS;
+}
+
+// Phase 12 (12.2.2): Direct UTF-16 output for SQLGetDiagFieldW.
+// Only handles string-type diagnostic fields; numeric fields are passed through.
+SQLRETURN OdbcError::sqlGetDiagFieldW(int diagId, SQLPOINTER ptr, int msgBufferLength, SQLSMALLINT *msgLength)
+{
+	const char *string = NULL;
+	int value;
+
+	switch (diagId)
+	{
+		case SQL_DIAG_CLASS_ORIGIN:
+		{
+			const char *vstate = getVersionedSqlState();
+			if (vstate[0] == 'I' && vstate[1] == 'M')
+				string = CLASS_ODBC;
+			else
+				string = CLASS_ISO;
+		}
+		break;
+
+		case SQL_DIAG_SUBCLASS_ORIGIN:
+		{
+			short link;
+			const char *vstate = getVersionedSqlState();
+			string = CLASS_ISO;
+
+			if ( listODBCError.findError( vstate, link ) )
+				if ( codes[link].subClassOdbc )
+					string = CLASS_ODBC;
+		}
+		break;
+
+		case SQL_DIAG_CONNECTION_NAME:
+			if ( connection )
+				string = connection->dsn;
+			else
+				string = "";
+			break;
+
+		case SQL_DIAG_SERVER_NAME:
+			if ( connection && connection->connection )
+				string = connection->getMetaData()->getDatabaseProductName();
+			else
+				string = "";
+			break;
+
+		case SQL_DIAG_MESSAGE_TEXT:
+			string = msg;
+			break;
+
+		case SQL_DIAG_NATIVE:
+			value = nativeCode;
+			break;
+
+		case SQL_DIAG_SQLSTATE:
+			string = getVersionedSqlState();
+			break;
+
+		case SQL_DIAG_ROW_NUMBER:
+			value = rowNumber;
+			break;
+
+		case SQL_DIAG_COLUMN_NUMBER:
+			value = columnNumber;
+			break;
+
+		default:
+			return SQL_ERROR;
+	}
+
+	if (!string)
+	{
+		*(SQLINTEGER*) ptr = value;
+		return SQL_SUCCESS;
+	}
+
+	// Convert string from UTF-8/ASCII to UTF-16 directly
+	SQLWCHAR *wBuffer = (SQLWCHAR*) ptr;
+	int fullWcharLen = (int)Utf8ToUtf16Length(string);
+
+	if (msgLength)
+		*msgLength = (SQLSMALLINT)(fullWcharLen * sizeof(SQLWCHAR));
+
+	// msgBufferLength is in bytes for sqlGetDiagField
+	int maxChars = (msgBufferLength / (int)sizeof(SQLWCHAR)) - 1;
+	if (maxChars < 0 || !ptr)
+		return SQL_SUCCESS_WITH_INFO;
+
+	int written = (int)Utf8ToUtf16(string, wBuffer, maxChars + 1);
+	if (written < 0)
+		written = 0;
+	wBuffer[written] = (SQLWCHAR)0;
+
+	if (written < fullWcharLen)
+		return SQL_SUCCESS_WITH_INFO;
 
 	return SQL_SUCCESS;
 }

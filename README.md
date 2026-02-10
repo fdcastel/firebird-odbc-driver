@@ -36,7 +36,7 @@ Driver={Firebird ODBC Driver};Database=localhost:C:\mydb\employee.fdb;UID=SYSDBA
 | `UID` | `User` | Username | `SYSDBA` |
 | `PWD` | `Password` | Password | — |
 | `Role` | — | SQL role for the connection | — |
-| `CHARSET` | `CharacterSet` | Character set for the connection | — |
+| `CHARSET` | `CharacterSet` | Character set for the connection (see below) | `UTF8` |
 | `Client` | — | Path to `fbclient.dll` / `libfbclient.so` | System default |
 | `Dialect` | — | SQL dialect (1 or 3) | `3` |
 | `ReadOnly` | — | Read-only transaction mode (`Y`/`N`) | `N` |
@@ -62,6 +62,18 @@ Driver={Firebird ODBC Driver};Database=/var/db/mydb.fdb;UID=SYSDBA;PWD=masterkey
 # Read-only connection with lock timeout
 Driver={Firebird ODBC Driver};Database=myserver:/data/mydb.fdb;UID=SYSDBA;PWD=masterkey;ReadOnly=Y;LockTimeout=10
 ```
+
+### Character Set (`CHARSET`)
+
+The `CHARSET` parameter controls what character encoding Firebird uses when sending text data over the wire. It defaults to **`UTF8`** when not specified.
+
+| CHARSET Value | Behavior | Recommended? |
+|---|---|---|
+| `UTF8` (default) | Firebird transliterates all text to UTF-8. The driver converts UTF-8 → UTF-16 for W-API calls. Full Unicode support. | ✅ **Yes** — use this for all new applications |
+| `ISO8859_1`, `WIN1252`, etc. | Firebird transliterates to the specified charset. The driver converts to UTF-16 via the charset's codec. Only characters in that charset's repertoire are representable. | ⚠️ Legacy — use only if you know your data fits this charset |
+| `NONE` | Firebird sends raw bytes in the column's storage charset without transliteration. On Windows, the driver uses the system ANSI code page for W-API conversion. On Linux, the driver falls back to UTF-8 decoding. | ❌ **Avoid** — can produce mojibake with multi-charset databases |
+
+> **Note**: When `CHARSET` is omitted, the driver defaults to `UTF8` and emits an informational diagnostic (SQLSTATE 01000) so applications are aware a default was applied.
 
 ---
 
