@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v[0-9]+.[0-9]+.[0-9]+'
+      - 'v[0-9]+.[0-9]+.[0-9]+*'
 
 env:
   BUILD_TYPE: Release
@@ -18,12 +18,21 @@ jobs:
         id: get_version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
 
+      - name: Detect Prerelease
+        id: detect_prerelease
+        run: |
+          if [[ "${{ github.ref }}" =~ -[a-zA-Z0-9]+ ]]; then
+            echo "is_prerelease=true" >> $GITHUB_OUTPUT
+          else
+            echo "is_prerelease=false" >> $GITHUB_OUTPUT
+          fi
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           name: Firebird ODBC Driver v${{ steps.get_version.outputs.version }}
           draft: false
-          prerelease: false
+          prerelease: ${{ steps.detect_prerelease.outputs.is_prerelease }}
           generate_release_notes: true
 
   build-windows:
