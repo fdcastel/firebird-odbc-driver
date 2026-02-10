@@ -709,17 +709,11 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 				if ( from->isIndicatorSqlDa && from->dataBlobPtr )
 					return &OdbcConvert::convBlobToString;
 				bIdentity = true;
-				if ( parentStmt->isResultSetFromSystemCatalog )
-					return &OdbcConvert::convVarStringSystemToString;
-				else
-					return &OdbcConvert::convVarStringToString;
+				return &OdbcConvert::convVarStringToString;
 			case SQL_C_WCHAR:
 				if ( from->isIndicatorSqlDa && from->dataBlobPtr )
 					return &OdbcConvert::convBlobToStringW;
-				if ( parentStmt->isResultSetFromSystemCatalog )
-					return &OdbcConvert::convVarStringSystemToStringW;
-				else
-					return &OdbcConvert::convVarStringToStringW;
+				return &OdbcConvert::convVarStringToStringW;
 			case SQL_C_BINARY:
 				if ( from->isIndicatorSqlDa && from->dataBlobPtr )
 					return &OdbcConvert::convBlobToBlob;
@@ -872,18 +866,12 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 			case SQL_C_CHAR:
 				if ( from->isIndicatorSqlDa && from->dataBlobPtr )
 					return &OdbcConvert::convBlobToString;
-				if ( parentStmt->isResultSetFromSystemCatalog )
-					return &OdbcConvert::convVarStringSystemToString;
-				else
-					return &OdbcConvert::convVarStringToString;
+				return &OdbcConvert::convVarStringToString;
 			case SQL_C_WCHAR:
 				if ( from->isIndicatorSqlDa && from->dataBlobPtr )
 					return &OdbcConvert::convBlobToStringW;
 				bIdentity = true;
-				if ( parentStmt->isResultSetFromSystemCatalog )
-					return &OdbcConvert::convVarStringSystemToStringW;
-				else
-					return &OdbcConvert::convVarStringToStringW;
+				return &OdbcConvert::convVarStringToStringW;
 			case SQL_C_BINARY:
 				if ( from->isIndicatorSqlDa && from->dataBlobPtr )
 					return &OdbcConvert::convBlobToBlob;
@@ -4195,6 +4183,16 @@ int OdbcConvert::convVarStringToString(DescRecord * from, DescRecord * to)
 
 	SQLRETURN ret = SQL_SUCCESS;
 	int length = *(unsigned short*)pointerFrom;
+
+	// Phase 12 (12.3.1): Trim trailing spaces for system catalog result sets.
+	// Firebird sends catalog metadata as CHAR (fixed-width, space-padded).
+	if ( parentStmt->isResultSetFromSystemCatalog && length > 0 )
+	{
+		char *data = pointerFrom + sizeof(short);
+		while ( length > 0 && data[length - 1] == ' ' )
+			--length;
+	}
+
 	int dataRemaining = length - from->dataOffset;
 
 	if ( !to->length )
@@ -4272,6 +4270,15 @@ int OdbcConvert::convVarStringToStringW(DescRecord * from, DescRecord * to)
 		if ( length < 0 )
 			length = 0;
 		pointerFromWcs[length] = (SQLWCHAR)0;
+
+		// Phase 12 (12.3.1): Trim trailing spaces for system catalog result sets.
+		// Firebird sends catalog metadata as CHAR (fixed-width, space-padded).
+		if ( parentStmt->isResultSetFromSystemCatalog )
+		{
+			while ( length > 0 && pointerFromWcs[length - 1] == (SQLWCHAR)' ' )
+				--length;
+			pointerFromWcs[length] = (SQLWCHAR)0;
+		}
 	}
 	else
 	{
@@ -4318,101 +4325,10 @@ int OdbcConvert::convVarStringToStringW(DescRecord * from, DescRecord * to)
 	return ret;
 }
 
-int OdbcConvert::convVarStringSystemToString(DescRecord * from, DescRecord * to)
-{
-	char * pointerFrom = (char*)getAdressBindDataFrom((char*)from->dataPtr);
-	char * pointerTo = (char*)getAdressBindDataTo((char*)to->dataPtr);
-	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
-	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
-
-	ODBCCONVERT_CHECKNULL( pointerTo );
-	
-	SQLRETURN ret = SQL_SUCCESS;
-	unsigned short lenVar = *(unsigned short*)pointerFrom;
-	int len;
-
-	char * src = pointerFrom + 2,
-		 * end = src + lenVar;
-
-	while ( lenVar-- && *(--end) == ' ');
-	len = end - src + 1;
-	len = MIN(len, MAX(0,(int)to->length-1));
-
-	if( len > 0 )
-		memcpy (pointerTo, src, len);
-
-	pointerTo[len] = 0;
-
-	if (len && (int)len > (int)to->length)
-	{
-		OdbcError *error = parentStmt->postError (new OdbcError (0, "01004", "Data truncated"));
-//		if (error)
-//			error->setColumnNumber (column, rowNumber);
-		ret = SQL_SUCCESS_WITH_INFO;
-	}
-
-	if ( to->isIndicatorSqlDa ) {
-		to->headSqlVarPtr->setSqlLen(len);
-	} else
-	if ( indicatorTo )
-		setIndicatorPtr(indicatorTo, len, to);
-
-
-	return ret;
-}
-
-int OdbcConvert::convVarStringSystemToStringW(DescRecord * from, DescRecord * to)
-{
-	char *pointerFrom = (char*)getAdressBindDataFrom((char*)from->dataPtr);
-	SQLWCHAR *pointerTo = (SQLWCHAR*)getAdressBindDataTo((char*)to->dataPtr);
-	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
-	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
-
-	ODBCCONVERT_CHECKNULLW( pointerTo );
-	
-	SQLRETURN ret = SQL_SUCCESS;
-	unsigned short lenVar = *(unsigned short*)pointerFrom;
-	int len;
-
-	char * src = pointerFrom + 2,
-		 * end = src + lenVar;
-
-	while ( lenVar-- && *(--end) == ' ');
-	len = end - src + 1;
-	len = MIN( len, MAX(0,(int)(to->length / sizeof( SQLWCHAR )) - 1 ));
-
-	if( len > 0 )
-	{
-		// Phase 12 (12.1.2): Use Utf8ToUtf16 instead of bare mbstowcs().
-		// System catalog strings from Firebird are always UTF-8 (CS_METADATA = CS_UTF8).
-		// Using mbstowcs() is incorrect on non-UTF-8 locales.
-		// Temporarily null-terminate the source for Utf8ToUtf16
-		char savedChar = src[len];
-		src[len] = '\0';
-		size_t converted = Utf8ToUtf16(src, pointerTo, len + 1);
-		src[len] = savedChar;
-		len = (int)converted;
-	}
-
-	pointerTo[len] = (SQLWCHAR)0;
-	len *= sizeof( SQLWCHAR );
-
-	if (len && (int)len > (int)to->length)
-	{
-		OdbcError *error = parentStmt->postError (new OdbcError (0, "01004", "Data truncated"));
-//		if (error)
-//			error->setColumnNumber (column, rowNumber);
-		ret = SQL_SUCCESS_WITH_INFO;
-	}
-
-	if ( to->isIndicatorSqlDa ) {
-		to->headSqlVarPtr->setSqlLen(len);
-	} else
-	if ( indicatorTo )
-		setIndicatorPtr(indicatorTo, len, to);
-
-	return ret;
-}
+// Phase 12 (12.3.1): convVarStringSystemToString and convVarStringSystemToStringW removed.
+// With CHARSET=UTF8 as the default (12.4.1) and unified SQLWCHAR codecs (12.1.1),
+// the standard convVarStringToString/convVarStringToStringW handle all VARCHAR
+// conversions correctly, including system catalog result sets.
 
 signed int OdbcConvert::encode_sql_date(SQLUSMALLINT day, SQLUSMALLINT month, SQLSMALLINT year)
 {

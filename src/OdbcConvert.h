@@ -315,8 +315,6 @@ public:
 	int convVarStringWToBigint(DescRecord * from, DescRecord * to);
 	int convVarStringToString(DescRecord * from, DescRecord * to);
 	int convVarStringToStringW(DescRecord * from, DescRecord * to);
-	int convVarStringSystemToString(DescRecord * from, DescRecord * to);
-	int convVarStringSystemToStringW(DescRecord * from, DescRecord * to);
 	int convVarStringToBinary(DescRecord * from, DescRecord * to);
 };
 

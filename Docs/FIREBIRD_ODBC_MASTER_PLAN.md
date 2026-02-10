@@ -847,7 +847,7 @@ True async execution is **not feasible** with the current Firebird OO API, which
 **Priority**: High  
 **Duration**: 8–12 weeks  
 **Goal**: Eliminate redundant charset transliterations, consolidate encoding paths, rationalize the OdbcConvert conversion matrix, and implement native UTF-16 internal encoding (task 10.6.3)
-**Current Status**: Phase 12.1 (Consolidate Encoding Implementations) and 12.4.1 (Default CHARSET=UTF8) ✅ **COMPLETE** — February 9, 2026
+**Current Status**: Phase 12.1 (Consolidate Encoding), 12.3 (Rationalize OdbcConvert), and 12.4.1 (Default CHARSET=UTF8) ✅ **COMPLETE** — February 10, 2026
 
 **Phase 12.1 Summary of Changes:**
 - Introduced `ODBC_SQLWCHAR` typedef in `Connection.h` (always 16-bit on all platforms)
@@ -859,6 +859,12 @@ True async execution is **not feasible** with the current Firebird OO API, which
 - On Linux, `CHARSET=NONE` fallback now uses UTF-8 codec (not incompatible `wcstombs`)
 - Default `CHARSET` to `UTF8` when not specified in `Attachment.cpp`
 - All 406 tests pass, benchmarks verified
+
+**Phase 12.3 Summary of Changes:**
+- Removed `convVarStringSystemToString`/`convVarStringSystemToStringW` — trailing-space trimming folded into standard variants via `isResultSetFromSystemCatalog` flag
+- Removed 4 dispatch branches in `getAdressFunction()` — simplified to always use standard path
+- Audited all 17 `notYetImplemented` paths — most are correct per ODBC spec; documented missing conversions
+- Created `Docs/CONVERSION_MATRIX.md` — comprehensive reference for the conversion dispatch table
 
 #### Background & Research Findings
 
@@ -987,10 +993,10 @@ With the encoding consolidation (12.1) and native UTF-16 (12.2) in place, the Od
 
 | Task | Description | Complexity | Benefit | Status |
 |------|-------------|------------|---------|--------|
-| **12.3.1** | **Merge `convVarStringSystemToString`/`convVarStringSystemToStringW` into `convVarStringToString`/`convVarStringToStringW`** — The "System" variants exist because system catalog result sets have different encoding assumptions. With `CHARSET=UTF8` as the standard and a unified UTF-8 codec, there is no encoding difference between catalog strings and user-data strings. Remove the `isResultSetFromSystemCatalog` branch in `getAdressFunction()` and route all varying-string conversions through the standard path. **Prerequisite**: task 12.1.2 (fix the codec used). | Easy | Medium — reduces the conversion function count by 2, eliminates a branch | |
+| **12.3.1** | **Merge `convVarStringSystemToString`/`convVarStringSystemToStringW` into `convVarStringToString`/`convVarStringToStringW`** — Removed separate System variants. Standard `convVarStringToString`/`convVarStringToStringW` now trim trailing spaces when `isResultSetFromSystemCatalog` is set. Dispatch branches simplified. | Easy | Medium — reduces the conversion function count by 2, eliminates a branch | ✅ DONE |
 | **12.3.2** | **Unify `convStringToStringW` and `convVarStringToStringW`** — These two functions differ only in how they read the source length: `convStringToString` uses `from->length` (fixed-width CHAR), while `convVarStringToString` reads `*(unsigned short*)pointerFrom` (SQL_VARYING prefix). Extract the length-reading into a helper and merge the bodies. Both functions allocate `localDataPtr`, call `MbsToWcs`, and manage `dataOffset` for chunked `SQLGetData` — this is 100% duplicated logic. | Medium | Medium — reduces code duplication | |
-| **12.3.3** | **Audit and remove `notYetImplemented` fallback paths** — `getAdressFunction()` has ~15 `case` branches that return `&OdbcConvert::notYetImplemented`. Audit which type combinations are actually valid per the ODBC spec (Appendix D: Data Type Conversion Rules) and either implement the missing conversions or replace with explicit `SQL_ERROR` / SQLSTATE 07006 ("Restricted data type attribute violation"). | Easy | Low — spec compliance for edge cases | |
-| **12.3.4** | **Document the conversion matrix** — Create a table in `Docs/` listing every (source_type, target_type) pair, the function that handles it, and whether it's identity, widening, narrowing, or formatting. This serves as a test plan for T-4 (conversion unit tests) and a reference for future maintenance. | Easy | Medium — maintainability | |
+| **12.3.3** | **Audit and remove `notYetImplemented` fallback paths** — Audited all 17 dispatch paths. Most are correct per ODBC spec (unsupported type combinations). Identified missing conversions: Integer→BINARY, Float→NUMERIC, Bigint→BIT, Numeric→CHAR/WCHAR, String→NUMERIC/DATE/GUID. Fall-through in String/WString→Date/Time paths is intentional (app-side string→date parsing not implemented). Documented in `Docs/CONVERSION_MATRIX.md`. | Easy | Low — spec compliance for edge cases | ✅ DONE |
+| **12.3.4** | **Document the conversion matrix** — Created `Docs/CONVERSION_MATRIX.md` listing every (source_type, target_type) pair, the function that handles it, and whether it's identity, widening, narrowing, or formatting. Includes notes on catalog trimming, encoding paths, and missing conversions. | Easy | Medium — maintainability | ✅ DONE |
 
 ##### 12.4 `CHARSET` Connection Parameter Semantics
 
