@@ -85,8 +85,9 @@ DescRecord::DescRecord()
 #else
 	// Phase 12 (12.1.1): Use UTF-8 codecs on Linux instead of locale-dependent
 	// wcstombs/mbstowcs (which use 4-byte wchar_t, incompatible with SQLWCHAR).
-	WcsToMbs = IscDbcLibrary::utf8_wcstombs;
-	MbsToWcs = IscDbcLibrary::utf8_mbstowcs;
+	// Cast needed: codec functions use unsigned int params, typedef uses size_t.
+	WcsToMbs = (WCSTOMBS)IscDbcLibrary::utf8_wcstombs;
+	MbsToWcs = (MBSTOWCS)IscDbcLibrary::utf8_mbstowcs;
 #endif
 }
 
