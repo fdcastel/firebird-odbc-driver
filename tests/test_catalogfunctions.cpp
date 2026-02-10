@@ -9,6 +9,9 @@
 #include "test_helpers.h"
 #include <cstring>
 #include <string>
+#include <set>
+#include <map>
+#include <vector>
 
 class CatalogFunctionsTest : public OdbcConnectedTest {
 protected:
@@ -479,4 +482,164 @@ TEST_F(CatalogFunctionsTest, GetInfoMaxTableNameLen) {
     SQLRETURN rc = SQLGetInfo(hDbc, SQL_MAX_TABLE_NAME_LEN, &maxLen, sizeof(maxLen), NULL);
     ASSERT_TRUE(SQL_SUCCEEDED(rc));
     EXPECT_GT(maxLen, 0u) << "Max table name length should be > 0";
+}
+
+// ===== SQLGetTypeInfo tests (from Phase 11) =====
+
+class TypeInfoTest : public OdbcConnectedTest {};
+
+// Result set must be sorted by DATA_TYPE ascending (ODBC spec requirement)
+TEST_F(TypeInfoTest, ResultSetSortedByDataType) {
+    SQLRETURN ret = SQLGetTypeInfo(hStmt, SQL_ALL_TYPES);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret))
+        << "SQLGetTypeInfo failed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    SQLSMALLINT prevDataType = -32768;
+    int rowCount = 0;
+    while (SQL_SUCCEEDED(SQLFetch(hStmt))) {
+        SQLSMALLINT dataType = 0;
+        SQLLEN ind = 0;
+        ret = SQLGetData(hStmt, 2, SQL_C_SSHORT, &dataType, 0, &ind);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+        EXPECT_GE(dataType, prevDataType)
+            << "Row " << (rowCount + 1) << ": DATA_TYPE " << dataType
+            << " is less than previous " << prevDataType
+            << " — result set is not sorted by DATA_TYPE ascending";
+        prevDataType = dataType;
+        rowCount++;
+    }
+    EXPECT_GT(rowCount, 0) << "No rows returned by SQLGetTypeInfo(SQL_ALL_TYPES)";
+}
+
+// When a specific DATA_TYPE is requested, all matching rows must be returned
+TEST_F(TypeInfoTest, MultipleRowsForSameDataType) {
+    // SQL_INTEGER is a good test — should return exactly 1 row
+    SQLRETURN ret = SQLGetTypeInfo(hStmt, SQL_INTEGER);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    int rowCount = 0;
+    while (SQL_SUCCEEDED(SQLFetch(hStmt))) {
+        SQLSMALLINT dataType = 0;
+        SQLLEN ind = 0;
+        SQLGetData(hStmt, 2, SQL_C_SSHORT, &dataType, 0, &ind);
+        EXPECT_EQ(dataType, SQL_INTEGER) << "Unexpected DATA_TYPE in filtered result";
+        rowCount++;
+    }
+    EXPECT_GE(rowCount, 1) << "Should return at least 1 row for SQL_INTEGER";
+}
+
+// SQL_NUMERIC should return at least NUMERIC, and on FB4+ also INT128
+TEST_F(TypeInfoTest, NumericReturnsMultipleOnFB4Plus) {
+    SQLRETURN ret = SQLGetTypeInfo(hStmt, SQL_NUMERIC);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    std::vector<std::string> typeNames;
+    while (SQL_SUCCEEDED(SQLFetch(hStmt))) {
+        SQLCHAR typeName[128] = {};
+        SQLLEN ind = 0;
+        SQLGetData(hStmt, 1, SQL_C_CHAR, typeName, sizeof(typeName), &ind);
+        typeNames.push_back(std::string((char*)typeName));
+    }
+    ASSERT_GE(typeNames.size(), 1u) << "At least NUMERIC should be returned";
+
+    // Verify NUMERIC is in the list
+    bool hasNumeric = false;
+    for (auto& name : typeNames) {
+        if (name == "NUMERIC") hasNumeric = true;
+    }
+    EXPECT_TRUE(hasNumeric) << "NUMERIC type not found in SQL_NUMERIC results";
+}
+
+// No non-existent type should return any rows
+TEST_F(TypeInfoTest, NonexistentTypeReturnsNoRows) {
+    SQLRETURN ret = SQLGetTypeInfo(hStmt, 9999);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    int rowCount = 0;
+    while (SQL_SUCCEEDED(SQLFetch(hStmt)))
+        rowCount++;
+    EXPECT_EQ(rowCount, 0) << "Invalid type 9999 should return 0 rows";
+}
+
+// SQL_GUID type should have SEARCHABLE = SQL_ALL_EXCEPT_LIKE (2)
+TEST_F(TypeInfoTest, GuidSearchabilityIsAllExceptLike) {
+    SQLRETURN ret = SQLGetTypeInfo(hStmt, SQL_ALL_TYPES);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    bool foundGuid = false;
+    while (SQL_SUCCEEDED(SQLFetch(hStmt))) {
+        SQLSMALLINT dataType = 0;
+        SQLLEN ind = 0;
+        SQLGetData(hStmt, 2, SQL_C_SSHORT, &dataType, 0, &ind);
+        if (dataType == SQL_GUID) {
+            foundGuid = true;
+            SQLSMALLINT searchable = 0;
+            SQLGetData(hStmt, 9, SQL_C_SSHORT, &searchable, 0, &ind);
+            EXPECT_EQ(searchable, SQL_ALL_EXCEPT_LIKE)
+                << "SQL_GUID SEARCHABLE should be SQL_ALL_EXCEPT_LIKE (2), not " << searchable;
+
+            // LITERAL_PREFIX/SUFFIX should be NULL for GUID
+            SQLCHAR prefix[32] = {};
+            ret = SQLGetData(hStmt, 4, SQL_C_CHAR, prefix, sizeof(prefix), &ind);
+            EXPECT_TRUE(ind == SQL_NULL_DATA || strlen((char*)prefix) == 0)
+                << "SQL_GUID LITERAL_PREFIX should be NULL or empty";
+            break;
+        }
+    }
+    EXPECT_TRUE(foundGuid) << "SQL_GUID type not found in type info result set";
+}
+
+// On FB4+ servers, BINARY/VARBINARY should not have duplicate entries
+TEST_F(TypeInfoTest, NoDuplicateBinaryTypesOnFB4Plus) {
+    SQLRETURN ret = SQLGetTypeInfo(hStmt, SQL_ALL_TYPES);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    std::map<SQLSMALLINT, std::vector<std::string>> typeMap;
+    while (SQL_SUCCEEDED(SQLFetch(hStmt))) {
+        SQLSMALLINT dataType = 0;
+        SQLCHAR typeName[128] = {};
+        SQLLEN ind = 0;
+        SQLGetData(hStmt, 2, SQL_C_SSHORT, &dataType, 0, &ind);
+        SQLGetData(hStmt, 1, SQL_C_CHAR, typeName, sizeof(typeName), &ind);
+        typeMap[dataType].push_back(std::string((char*)typeName));
+    }
+
+    if (typeMap.count(SQL_BINARY)) {
+        auto& names = typeMap[SQL_BINARY];
+        bool hasBlobAlias = false;
+        bool hasNative = false;
+        for (auto& n : names) {
+            if (n == "BLOB SUB_TYPE 0") hasBlobAlias = true;
+            if (n == "BINARY") hasNative = true;
+        }
+        if (hasBlobAlias && hasNative) {
+            FAIL() << "SQL_BINARY has both 'BLOB SUB_TYPE 0' and 'BINARY' entries — "
+                      "version-gating failed";
+        }
+    }
+}
+
+// Verify every row in SQL_ALL_TYPES has valid data
+TEST_F(TypeInfoTest, AllTypesReturnValidData) {
+    SQLRETURN ret = SQLGetTypeInfo(hStmt, SQL_ALL_TYPES);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    int rowCount = 0;
+    while (SQL_SUCCEEDED(SQLFetch(hStmt))) {
+        SQLCHAR typeName[128] = {};
+        SQLSMALLINT dataType = 0;
+        SQLINTEGER columnSize = 0;
+        SQLLEN ind1 = 0, ind2 = 0, ind3 = 0;
+
+        SQLGetData(hStmt, 1, SQL_C_CHAR, typeName, sizeof(typeName), &ind1);
+        SQLGetData(hStmt, 2, SQL_C_SSHORT, &dataType, 0, &ind2);
+        SQLGetData(hStmt, 3, SQL_C_SLONG, &columnSize, 0, &ind3);
+
+        EXPECT_NE(ind1, SQL_NULL_DATA) << "TYPE_NAME should not be NULL";
+        EXPECT_NE(ind2, SQL_NULL_DATA) << "DATA_TYPE should not be NULL";
+        EXPECT_GT(strlen((char*)typeName), 0u) << "TYPE_NAME should not be empty";
+        rowCount++;
+    }
+    EXPECT_GT(rowCount, 10) << "Expected at least 10 type info rows";
 }

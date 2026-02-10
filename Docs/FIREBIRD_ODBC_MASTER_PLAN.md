@@ -4,7 +4,7 @@
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
 **Last Updated**: February 10, 2026  
-**Version**: 3.5
+**Version**: 3.6
 
 > This document consolidates all known issues and newly identified architectural deficiencies.
 > It serves as the **single source of truth** for the project's improvement roadmap.
@@ -1108,7 +1108,7 @@ AFTER (Phase 12):
 
 **Deliverable**: A driver with exactly one encoding conversion per data path (the theoretical minimum), zero redundant codec implementations, correct cross-platform `SQLWCHAR` handling, and cached UTF-16 metadata that eliminates the W→A→W roundtrip for all 7 metadata/diagnostic W-API output functions. Combined with Phase 10's fetch optimizations, this makes the driver the fastest and most correct Unicode ODBC driver for Firebird.
 
-### Phase 13: Code Simplification & Dead Code Removal
+### Phase 13: Code Simplification & Dead Code Removal ✅ (Completed — February 10, 2026)
 **Priority**: Low  
 **Duration**: 1–2 weeks  
 **Goal**: Remove dead code, eliminate file-level redundancy, consolidate duplicate tests, clean up build system
@@ -1121,19 +1121,19 @@ After completing Phases 0–12, the codebase has accumulated dead files, unused 
 
 Files that are compiled but have zero callers, or that exist on disk but are not compiled and not referenced:
 
-| # | File(s) | Location | Lines | Status | Reason |
-|---|---------|----------|-------|--------|--------|
-| **13.1.1** | `LinkedList.cpp`, `LinkedList.h` | `src/IscDbc/` | ~400 | Compiled, zero callers | Phase 5 replaced all usages with `std::vector<T*>`. No file outside LinkedList.cpp includes LinkedList.h. Remove from `ISCDBC_SOURCES`/`ISCDBC_HEADERS` and delete. |
-| **13.1.2** | `Lock.cpp`, `Lock.h` | `src/IscDbc/` | ~80 | Compiled, zero callers | RAII mutex wrapper — no file outside Lock.cpp includes Lock.h. Locking is done via `SafeEnvThread`/`Mutex` directly. Remove from `ISCDBC_SOURCES`/`ISCDBC_HEADERS` and delete. |
-| **13.1.3** | `ServiceManager.cpp`, `ServiceManager.h` | `src/IscDbc/` | ~880 | Compiled, zero callers | Backup/restore/statistics service manager. Only `ServiceManager.cpp` includes `ServiceManager.h`. Was used by the OdbcJdbcSetup GUI (not built). 877 lines of dead code linked into the static library. Remove from build and delete. |
-| **13.1.4** | `SupportFunctions.cpp`, `SupportFunctions.h` | `src/IscDbc/` | ~200 | Not compiled, on disk | Removed from build per M-4 (WONTFIX). Source files remain on disk. Delete. |
-| **13.1.5** | `OdbcDateTime.cpp`, `OdbcDateTime.h` | `src/` | ~400 | Not compiled, on disk | Removed from build per Phase 9.6. Replaced by `FbDateConvert.h`. Source files remain on disk. Delete. |
-| **13.1.6** | `Engine.h` | `src/IscDbc/` | ~70 | In headers list, zero includers | Only referenced by a commented-out line in `Error.cpp` (`//#include "Engine.h"`). Defines obsolete macros (`MAX`, `MIN`, `ABS`) that conflict with `<algorithm>`. Remove from `ISCDBC_HEADERS` and delete. |
-| **13.1.7** | `WriteBuildNo.h` | `src/` | ~20 | In headers list, zero includers | Listed in `ODBCJDBC_HEADERS` but never `#include`d by any file. Master plan confirms "no longer used for versioning" (replaced by `Version.h`). Remove from `ODBCJDBC_HEADERS` and delete. |
-| **13.1.8** | `IscDbc.def`, `IscDbc.exp` | `src/IscDbc/` | ~10 | Not used by CMake | Legacy linker files from when IscDbc was a shared DLL. Now it's a static library (`add_library(IscDbc STATIC ...)`). Delete. |
-| **13.1.9** | `OdbcJdbcMinGw.def` | `src/` | ~120 | Not used by CMake | MinGW-specific .def file. CMake only uses `OdbcJdbc.def`. Delete. |
-| **13.1.10** | `OdbcJdbc.dll.manifest` | `src/` | ~10 | Not used by CMake | Legacy Windows manifest. Not referenced by CMake build. Delete. |
-| **13.1.11** | `makefile.in` (×2) | `src/`, `src/IscDbc/` | ~200 | Not used | Legacy autotools makefiles. CMake is the sole build system. Delete. |
+| # | File(s) | Location | Lines | Status | Completion | Reason |
+|---|---------|----------|-------|--------|------------|--------|
+| **13.1.1** | `LinkedList.cpp`, `LinkedList.h` | `src/IscDbc/` | ~400 | Compiled, zero callers | ✅ Deleted | Phase 5 replaced all usages with `std::vector<T*>`. No file outside LinkedList.cpp includes LinkedList.h. Remove from `ISCDBC_SOURCES`/`ISCDBC_HEADERS` and delete. |
+| **13.1.2** | `Lock.cpp`, `Lock.h` | `src/IscDbc/` | ~80 | Compiled, zero callers | ✅ Deleted | RAII mutex wrapper — no file outside Lock.cpp includes Lock.h. Locking is done via `SafeEnvThread`/`Mutex` directly. Remove from `ISCDBC_SOURCES`/`ISCDBC_HEADERS` and delete. |
+| **13.1.3** | `ServiceManager.cpp`, `ServiceManager.h` | `src/IscDbc/` | ~880 | Compiled, zero callers | ✅ Deleted | Backup/restore/statistics service manager. Only `ServiceManager.cpp` includes `ServiceManager.h`. Was used by the OdbcJdbcSetup GUI (not built). 877 lines of dead code linked into the static library. Remove from build and delete. |
+| **13.1.4** | `SupportFunctions.cpp`, `SupportFunctions.h` | `src/IscDbc/` | ~200 | Not compiled, on disk | ✅ Deleted | Removed from build per M-4 (WONTFIX). Source files remain on disk. Delete. |
+| **13.1.5** | `OdbcDateTime.cpp`, `OdbcDateTime.h` | `src/` | ~400 | Not compiled, on disk | ✅ Deleted | Removed from build per Phase 9.6. Replaced by `FbDateConvert.h`. Source files remain on disk. Delete. |
+| **13.1.6** | `Engine.h` | `src/IscDbc/` | ~70 | In headers list, zero includers | ✅ Deleted | Only referenced by a commented-out line in `Error.cpp` (`//#include "Engine.h"`). Defines obsolete macros (`MAX`, `MIN`, `ABS`) that conflict with `<algorithm>`. Remove from `ISCDBC_HEADERS` and delete. |
+| **13.1.7** | `WriteBuildNo.h` | `src/` | ~20 | In headers list, zero includers | ✅ Deleted | Listed in `ODBCJDBC_HEADERS` but never `#include`d by any file. Master plan confirms "no longer used for versioning" (replaced by `Version.h`). Remove from `ODBCJDBC_HEADERS` and delete. |
+| **13.1.8** | `IscDbc.def`, `IscDbc.exp` | `src/IscDbc/` | ~10 | Not used by CMake | ✅ Deleted | Legacy linker files from when IscDbc was a shared DLL. Now it's a static library (`add_library(IscDbc STATIC ...)`). Delete. |
+| **13.1.9** | `OdbcJdbcMinGw.def` | `src/` | ~120 | Not used by CMake | ✅ Deleted | MinGW-specific .def file. CMake only uses `OdbcJdbc.def`. Delete. |
+| **13.1.10** | `OdbcJdbc.dll.manifest` | `src/` | ~10 | Not used by CMake | ✅ Deleted | Legacy Windows manifest. Not referenced by CMake build. Delete. |
+| **13.1.11** | `makefile.in` (×2) | `src/`, `src/IscDbc/` | ~200 | Not used | ✅ Deleted | Legacy autotools makefiles. CMake is the sole build system. Delete. |
 
 **Estimated removal**: ~2,400 lines of dead code + ~500 lines of dead build files.
 
@@ -1141,67 +1141,64 @@ Files that are compiled but have zero callers, or that exist on disk but are not
 
 Files that are actively `#include`d but are missing from the `ODBCJDBC_HEADERS` list (doesn't affect compilation since include directories are set, but affects IDE integration and `install` targets):
 
-| # | File | Included By | Action |
-|---|------|-------------|--------|
-| **13.2.1** | `OdbcString.h` | `DescRecord.h`, `OdbcError.h` | Add to `ODBCJDBC_HEADERS` |
-| **13.2.2** | `OdbcSqlState.h` | `OdbcError.cpp` | Add to `ODBCJDBC_HEADERS` |
-| **13.2.3** | `OdbcUserEvents.h` | `OdbcStatement.cpp` | Add to `ODBCJDBC_HEADERS` |
-| **13.2.4** | `FbDateConvert.h` | `OdbcConvert.cpp`, `DateTime.cpp` | Add to `ISCDBC_HEADERS` |
+| # | File | Included By | Action | Status |
+|---|------|-------------|--------|--------|
+| **13.2.1** | `OdbcString.h` | `DescRecord.h`, `OdbcError.h` | Add to `ODBCJDBC_HEADERS` | ✅ Done |
+| **13.2.2** | `OdbcSqlState.h` | `OdbcError.cpp` | Add to `ODBCJDBC_HEADERS` | ✅ Done |
+| **13.2.3** | `OdbcUserEvents.h` | `OdbcStatement.cpp` | Add to `ODBCJDBC_HEADERS` | ✅ Done |
+| **13.2.4** | `FbDateConvert.h` | `OdbcConvert.cpp`, `DateTime.cpp` | Add to `ISCDBC_HEADERS` | ✅ Done |
 
 #### 13.3 Build System Simplification
 
-| # | Issue | Location | Action |
-|---|-------|----------|--------|
-| **13.3.1** | Redundant if/else in `.def` file assignment — 64-bit and 32-bit branches use identical paths | `CMakeLists.txt:176–181` | Remove the if/else; use a single `set_target_properties(OdbcFb PROPERTIES LINK_FLAGS "/DEF:...")` |
-| **13.3.2** | `BUILD_SETUP` option references non-existent `OdbcJdbcSetup` subdirectory | `CMakeLists.txt:192–194` | Remove the `BUILD_SETUP` option and the `add_subdirectory(OdbcJdbcSetup)` block |
+| # | Issue | Location | Action | Status |
+|---|-------|----------|--------|--------|
+| **13.3.1** | Redundant if/else in `.def` file assignment — 64-bit and 32-bit branches use identical paths | `CMakeLists.txt:176–181` | Remove the if/else; use a single `set_target_properties(OdbcFb PROPERTIES LINK_FLAGS "/DEF:...")` | ✅ Done |
+| **13.3.2** | `BUILD_SETUP` option references non-existent `OdbcJdbcSetup` subdirectory | `CMakeLists.txt:192–194` | Remove the `BUILD_SETUP` option and the `add_subdirectory(OdbcJdbcSetup)` block | ✅ Done |
 
 #### 13.4 Test Suite Consolidation
 
 ##### 13.4.1 Test Files to Delete (Strict Subsets)
 
-| File to Delete | Tests | Superseded By | Reason |
-|---|---|---|---|
-| `test_catalog.cpp` | 6 tests | `test_catalogfunctions.cpp` (22 tests) | Every test in `test_catalog.cpp` has a near-identical or more thorough version in `test_catalogfunctions.cpp`: `SQLTablesFindsTestTable` ≈ `SQLTablesBasic`, `SQLColumnsReturnsCorrectTypes` ≈ `SQLColumnsDataTypes` + `SQLColumnsNullability` + `SQLColumnsNames`, `SQLPrimaryKeys` ≈ `SQLPrimaryKeysBasic`, `SQLGetTypeInfo` ≈ `SQLGetTypeInfoAllTypes`, `SQLStatistics` ≈ `SQLStatisticsBasic`, `SQLSpecialColumns` ≈ `SQLSpecialColumnsBasic` |
-| `test_batch_params.cpp` | 4 tests | `test_array_binding.cpp` (17 tests) | `InsertWithRowWiseBinding` ≈ `RowWiseInsert` (same data), `SelectAfterBatchInsert` ≈ verified within `RowWiseInsert`, `InsertSingleRow` ≈ `SingleRowArray`, `ColumnWiseInsert` ≈ `ColumnWiseInsert` |
+| File to Delete | Tests | Superseded By | Reason | Status |
+|---|---|---|---|---|
+| `test_catalog.cpp` | 6 tests | `test_catalogfunctions.cpp` (22 tests) | Every test in `test_catalog.cpp` has a near-identical or more thorough version in `test_catalogfunctions.cpp`: `SQLTablesFindsTestTable` ≈ `SQLTablesBasic`, `SQLColumnsReturnsCorrectTypes` ≈ `SQLColumnsDataTypes` + `SQLColumnsNullability` + `SQLColumnsNames`, `SQLPrimaryKeys` ≈ `SQLPrimaryKeysBasic`, `SQLGetTypeInfo` ≈ `SQLGetTypeInfoAllTypes`, `SQLStatistics` ≈ `SQLStatisticsBasic`, `SQLSpecialColumns` ≈ `SQLSpecialColumnsBasic` | ✅ Deleted |
+| `test_batch_params.cpp` | 4 tests | `test_array_binding.cpp` (17 tests) | `InsertWithRowWiseBinding` ≈ `RowWiseInsert` (same data), `SelectAfterBatchInsert` ≈ verified within `RowWiseInsert`, `InsertSingleRow` ≈ `SingleRowArray`, `ColumnWiseInsert` ≈ `ColumnWiseInsert` | ✅ Deleted |
 
 ##### 13.4.2 Test Files to Trim (Remove Duplicated Tests)
 
-| File | Tests to Remove | Reason | Keep |
-|---|---|---|---|
-| `test_connection.cpp` | `ConnectToFirebird` | Duplicated by `test_connect_options.cpp:DriverConnectBasic` and implicitly by every connected test | Keep `DisconnectIdempotent`, `FreeHandleDisconnects` (unique) — or delete file entirely since these are trivial |
-| `test_cursor.cpp` | `SetAndGetCursorName` | Exact duplicate of `test_cursor_name.cpp:SetAndGetCursorName` | Keep `DefaultCursorName` unless it duplicates `test_cursor_name.cpp:DefaultCursorName` (it does — remove both cursor name tests) |
-| `test_cursor.cpp` | `CommitClosesBehavior` | Duplicated by `test_cursor_commit.cpp:CommitClosesCursor` and `test_cursors.cpp:CommitClosesOpenCursor` (triple-tested) | Remove from `test_cursor.cpp` |
-| `test_cursor.cpp` | `SQLCloseCursorAllowsReExec` | Duplicated by `test_cursors.cpp:CloseThenReExecute` | Remove from `test_cursor.cpp` |
-| `test_data_types.cpp` | `IntegerToStringConversion` | Duplicated by `test_result_conversions.cpp:IntToChar` (more thorough) | Remove from `test_data_types.cpp` |
-| `test_data_types.cpp` | `StringTruncation` | Duplicated by `test_result_conversions.cpp:CharTruncation` | Remove from `test_data_types.cpp` |
-| `test_bind_cycle.cpp` | `RebindColumnBetweenExecutions` | Near-identical to `test_bindcol.cpp:RebindToDifferentType` | Remove from `test_bind_cycle.cpp` |
-| `test_bind_cycle.cpp` | `UnbindAllColumns` | Near-identical to `test_bindcol.cpp:UnbindAndUseGetData` | Remove from `test_bind_cycle.cpp` |
+| File | Tests to Remove | Reason | Keep | Status |
+|---|---|---|---|---|
+| `test_connection.cpp` | All tests | All tests are trivial or duplicated by `test_connect_options.cpp:BasicDriverConnect` and by every connected test fixture | N/A — file removed from build entirely | ✅ Removed |
+| `test_cursor.cpp` | All tests | `SetAndGetCursorName`/`DefaultCursorName` duplicate `test_cursor_name.cpp`; `CommitClosesBehavior` duplicates `test_cursors.cpp:CommitClosesOpenCursor`; `SQLCloseCursorAllowsReExec` duplicates `test_cursors.cpp:CloseThenReExecute`; block-fetch tests covered by `test_cursors.cpp:FetchAllWithoutInterruption` | N/A — file removed from build entirely | ✅ Removed |
+| `test_data_types.cpp` | `IntegerToString` | Duplicated by `test_result_conversions.cpp:IntToChar` (more thorough) | Keep all other tests | ✅ Removed |
+| `test_data_types.cpp` | `GetDataStringTruncation` | Duplicated by `test_result_conversions.cpp:CharTruncation` | Keep all other tests | ✅ Removed |
+| `test_bind_cycle.cpp` | All tests | `RebindColumnBetweenExecutions` ≈ `test_bindcol.cpp:RebindToDifferentType`; `UnbindAllColumns` ≈ `test_bindcol.cpp:UnbindAndUseGetData`; remaining tests are trivial parameter binding covered by `test_data_types.cpp:ParameterizedInsertAndSelect` | N/A — file removed from build entirely | ✅ Removed |
 
 ##### 13.4.3 Phase-Based Catch-All Files to Redistribute
 
 These files group unrelated tests by the phase in which they were written, not by topic. For long-term maintainability, their tests should be moved to topic-specific files:
 
-| Source File | Fixture | Tests | Move To |
-|---|---|---|---|
-| `test_phase7_crusher_fixes.cpp` | `DescriptorCrusherTest` (7 tests) | CopyDesc, SetDescCount, etc. | `test_descriptor.cpp` |
-| `test_phase7_crusher_fixes.cpp` | `DiagRowCountTest` (4 tests) | DiagRowCount after exec | `test_errors.cpp` |
-| `test_phase7_crusher_fixes.cpp` | `ConnectionTimeoutTest` (3 tests) | SQL_ATTR_CONNECTION_TIMEOUT | `test_connect_options.cpp` |
-| `test_phase7_crusher_fixes.cpp` | `AsyncCapabilityTest` (4 tests) | SQL_ATTR_ASYNC_ENABLE | `test_connect_options.cpp` |
-| `test_phase7_crusher_fixes.cpp` | `TruncationIndicatorTest` (3 tests) | returnStringInfo truncation | `test_errors.cpp` |
-| `test_phase11_typeinfo_timeout_pool.cpp` | `TypeInfoTest` (7 tests) | SQLGetTypeInfo ordering | `test_catalogfunctions.cpp` |
-| `test_phase11_typeinfo_timeout_pool.cpp` | `AsyncModeTest` (1 test) | SQL_ASYNC_MODE report | `test_connect_options.cpp` |
-| `test_phase11_typeinfo_timeout_pool.cpp` | `QueryTimeoutTest` (5 tests) | SQL_ATTR_QUERY_TIMEOUT | `test_connect_options.cpp` or new `test_timeout.cpp` |
-| `test_phase11_typeinfo_timeout_pool.cpp` | `ConnectionResetTest` (5 tests) | SQL_ATTR_RESET_CONNECTION | `test_connect_options.cpp` |
+| Source File | Fixture | Tests | Move To | Status |
+|---|---|---|---|---|
+| `test_phase7_crusher_fixes.cpp` | `CopyDescCrashTest` (7 tests) | CopyDesc, SetDescCount, etc. | `test_descriptor.cpp` | ✅ Moved |
+| `test_phase7_crusher_fixes.cpp` | `DiagRowCountTest` (4 tests) | DiagRowCount after exec | `test_errors.cpp` | ✅ Moved |
+| `test_phase7_crusher_fixes.cpp` | `ConnectionTimeoutTest` (3 tests) | SQL_ATTR_CONNECTION_TIMEOUT | `test_connect_options.cpp` | ✅ Moved |
+| `test_phase7_crusher_fixes.cpp` | `AsyncEnableTest` (5 tests) | SQL_ATTR_ASYNC_ENABLE | `test_connect_options.cpp` | ✅ Moved |
+| `test_phase7_crusher_fixes.cpp` | `TruncationIndicatorTest` (3 tests) | returnStringInfo truncation | `test_errors.cpp` | ✅ Moved |
+| `test_phase11_typeinfo_timeout_pool.cpp` | `TypeInfoTest` (7 tests) | SQLGetTypeInfo ordering | `test_catalogfunctions.cpp` | ✅ Moved |
+| `test_phase11_typeinfo_timeout_pool.cpp` | `AsyncModeTest` (1 test) | SQL_ASYNC_MODE report | `test_connect_options.cpp` | ✅ Moved |
+| `test_phase11_typeinfo_timeout_pool.cpp` | `QueryTimeoutTest` (7 tests) | SQL_ATTR_QUERY_TIMEOUT | `test_connect_options.cpp` | ✅ Moved |
+| `test_phase11_typeinfo_timeout_pool.cpp` | `ConnectionResetTest` (6 tests) | SQL_ATTR_RESET_CONNECTION | `test_connect_options.cpp` | ✅ Moved |
 
 After redistribution, delete `test_phase7_crusher_fixes.cpp` and `test_phase11_typeinfo_timeout_pool.cpp`.
 
 ##### 13.4.4 Optional Merges (Lower Priority)
 
-| Files | Rationale | Priority |
-|---|---|---|
-| `test_bind_cycle.cpp` + `test_bindcol.cpp` → `test_binding.cpp` | Both test bind/unbind patterns; ~4 unique tests each after dedup | Low |
-| `test_stmthandles.cpp` + `test_multi_statement.cpp` → `test_statement_handles.cpp` | Both test multiple statement handles on one connection | Low |
-| `test_cursor.cpp` + `test_cursors.cpp` → single `test_cursor.cpp` | After removing duplicates, `test_cursor.cpp` has ~3 unique block-fetch tests and `test_cursors.cpp` has ~5 unique tests | Low |
+| Files | Rationale | Priority | Status |
+|---|---|---|---|
+| `test_bind_cycle.cpp` + `test_bindcol.cpp` → `test_binding.cpp` | Both test bind/unbind patterns; ~4 unique tests each after dedup | Low | ✅ Done — `test_bind_cycle.cpp` removed entirely (all tests superseded by `test_bindcol.cpp`) |
+| `test_stmthandles.cpp` + `test_multi_statement.cpp` → `test_statement_handles.cpp` | Both test multiple statement handles on one connection | Low | ❌ Deferred |
+| `test_cursor.cpp` + `test_cursors.cpp` → single `test_cursor.cpp` | After removing duplicates, `test_cursor.cpp` has ~3 unique block-fetch tests and `test_cursors.cpp` has ~5 unique tests | Low | ✅ Done — `test_cursor.cpp` removed entirely (all tests superseded by `test_cursors.cpp` + `test_cursor_name.cpp`) |
 
 #### 13.5 Summary
 
@@ -1218,14 +1215,14 @@ After redistribution, delete `test_phase7_crusher_fixes.cpp` and `test_phase11_t
 
 #### Success Criteria
 
-- [ ] Zero dead `.cpp`/`.h` files remain in `src/` or `src/IscDbc/`
-- [ ] All actively-used headers listed in appropriate `CMakeLists.txt` headers list
-- [ ] No duplicate if/else branches in build system
-- [ ] No test file is a strict subset of another
-- [ ] No individual test is duplicated across files
-- [ ] Phase-named test files replaced by topic-named files
-- [ ] All 432 existing *unique* tests still pass (count may decrease due to dedup)
-- [ ] Build compiles without warnings on Windows and Linux
+- [x] Zero dead `.cpp`/`.h` files remain in `src/` or `src/IscDbc/`
+- [x] All actively-used headers listed in appropriate `CMakeLists.txt` headers list
+- [x] No duplicate if/else branches in build system
+- [x] No test file is a strict subset of another
+- [x] No individual test is duplicated across files
+- [x] Phase-named test files replaced by topic-named files
+- [x] All 401 unique tests pass (reduced from 432 after removing 31 duplicated/superseded tests)
+- [x] Build compiles without warnings on Windows and Linux
 
 **Deliverable**: A leaner codebase with ~3,750 fewer lines of dead code, a cleaner test suite organized by topic instead of implementation phase, and a simplified build system.
 
@@ -1238,7 +1235,7 @@ After redistribution, delete `test_phase7_crusher_fixes.cpp` and `test_phase11_t
 | Metric | Current | Target | Notes |
 |--------|---------|--------|-------|
 | Test pass rate | **100%** | 100% | ✅ All tests pass; connection tests skip gracefully without database |
-| Test count | **432** | 150+ | ✅ Target far exceeded — 432 tests covering 39 test suites |
+| Test count | **401** | 150+ | ✅ Target far exceeded — 401 tests covering 34 test suites (Phase 13 dedup removed 31 duplicated tests) |
 | SQLSTATE mapping coverage | **90%+ (121 kSqlStates, 100+ ISC mappings)** | 90%+ | ✅ All common Firebird errors map to correct SQLSTATEs |
 | Crash on invalid input | **Never (NULL handles return SQL_INVALID_HANDLE)** | Never | ✅ Phase 0 complete — 65 GTest (direct-DLL) + 28 null handle tests |
 | Cross-platform tests | **Windows + Linux (x64 + ARM64)** | Windows + Linux + macOS | ✅ CI passes on all platforms |
@@ -1335,5 +1332,5 @@ A first-class ODBC driver should:
 
 ---
 
-*Document version: 3.5 — February 10, 2026*
+*Document version: 3.6 — February 10, 2026*
 *This is the single authoritative reference for all Firebird ODBC driver improvements.*

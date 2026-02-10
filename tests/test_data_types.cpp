@@ -262,21 +262,8 @@ TEST_F(DataTypeTest, TimestampRoundTrip) {
 }
 
 // ===== Cross-type conversions =====
-
-TEST_F(DataTypeTest, IntegerToString) {
-    ExecDirect("INSERT INTO ODBC_TEST_TYPES (ID, COL_INTEGER) VALUES (14, 42)");
-    Commit();
-    ReallocStmt();
-
-    ExecDirect("SELECT COL_INTEGER FROM ODBC_TEST_TYPES WHERE ID = 14");
-
-    // Fetch integer column as string
-    SQLCHAR val[32] = {};
-    SQLLEN ind = 0;
-    SQLBindCol(hStmt, 1, SQL_C_CHAR, val, sizeof(val), &ind);
-    ASSERT_TRUE(SQL_SUCCEEDED(SQLFetch(hStmt)));
-    EXPECT_STREQ((char*)val, "42");
-}
+// (IntegerToString and StringTruncation tests removed — duplicated by
+//  test_result_conversions.cpp IntToChar and CharTruncation)
 
 TEST_F(DataTypeTest, StringToInteger) {
     // Insert a string value, read as integer via CAST
@@ -310,24 +297,8 @@ TEST_F(DataTypeTest, GetDataInteger) {
     EXPECT_EQ(val, 999);
 }
 
-TEST_F(DataTypeTest, GetDataStringTruncation) {
-    ExecDirect("INSERT INTO ODBC_TEST_TYPES (ID, COL_VARCHAR) VALUES (17, 'ABCDEFGHIJ')");
-    Commit();
-    ReallocStmt();
-
-    ExecDirect("SELECT COL_VARCHAR FROM ODBC_TEST_TYPES WHERE ID = 17");
-    ASSERT_TRUE(SQL_SUCCEEDED(SQLFetch(hStmt)));
-
-    // Read into a buffer that's too small (5 bytes = 4 chars + null)
-    SQLCHAR val[5] = {};
-    SQLLEN ind = 0;
-    SQLRETURN ret = SQLGetData(hStmt, 1, SQL_C_CHAR, val, sizeof(val), &ind);
-
-    // Should return SQL_SUCCESS_WITH_INFO with 01004 (data truncated)
-    EXPECT_EQ(ret, SQL_SUCCESS_WITH_INFO);
-    EXPECT_EQ(ind, 10);  // total length of the data
-    EXPECT_STREQ((char*)val, "ABCD");
-}
+// (GetDataStringTruncation test removed — duplicated by
+//  test_result_conversions.cpp CharTruncation)
 
 // ===== Parameter binding =====
 

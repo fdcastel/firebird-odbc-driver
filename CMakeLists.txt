@@ -31,7 +31,6 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 # Options
 option(BUILD_SHARED_LIBS "Build shared libraries" ON)
 option(BUILD_TESTING "Build tests" ON)
-option(BUILD_SETUP "Build setup/configuration library" OFF)
 option(ODBC_PERF_COUNTERS "Enable performance counter instrumentation" OFF)
 
 if(ODBC_PERF_COUNTERS)
@@ -144,7 +143,9 @@ set(ODBCJDBC_HEADERS
     src/SetupAttributes.h
     src/TemplateConvert.h
     src/Utf16Convert.h
-    src/WriteBuildNo.h
+    src/OdbcString.h
+    src/OdbcSqlState.h
+    src/OdbcUserEvents.h
     src/resource.h
 )
 
@@ -173,13 +174,7 @@ if(WIN32)
     # ODBC entry points and should not import them from the Driver Manager
     
     # Set the .def file for exports
-    if(CMAKE_SIZEOF_VOID_P EQUAL 8)
-        # 64-bit
-        set_target_properties(OdbcFb PROPERTIES LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/src/OdbcJdbc.def")
-    else()
-        # 32-bit
-        set_target_properties(OdbcFb PROPERTIES LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/src/OdbcJdbc.def")
-    endif()
+    set_target_properties(OdbcFb PROPERTIES LINK_FLAGS "/DEF:${CMAKE_CURRENT_SOURCE_DIR}/src/OdbcJdbc.def")
 else()
     target_link_libraries(OdbcFb PRIVATE 
         ${ODBC_LIBRARIES}
@@ -187,11 +182,6 @@ else()
         dl
         pthread
     )
-endif()
-
-# Setup library (optional)
-if(BUILD_SETUP AND WIN32)
-    add_subdirectory(OdbcJdbcSetup)
 endif()
 
 # Testing

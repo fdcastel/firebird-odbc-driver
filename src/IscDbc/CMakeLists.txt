@@ -33,16 +33,13 @@ set(ISCDBC_SOURCES
     IscTablesResultSet.cpp
     IscUserEvents.cpp
     JString.cpp
-    LinkedList.cpp
     LoadFbClientDll.cpp
-    Lock.cpp
     MultibyteConvert.cpp
     Mutex.cpp
     Parameter.cpp
     ParameterEvent.cpp
     Parameters.cpp
     ParametersEvents.cpp
-    ServiceManager.cpp
     Sqlda.cpp
     SQLError.cpp
     SqlTime.cpp
@@ -60,7 +57,6 @@ set(ISCDBC_HEADERS
     Blob.h
     Connection.h
     DateTime.h
-    Engine.h
     EnvShare.h
     Error.h
     IscArray.h
@@ -92,10 +88,9 @@ set(ISCDBC_HEADERS
     IscUserEvents.h
     JavaType.h
     JString.h
-    LinkedList.h
+    FbDateConvert.h
     ListParamTransaction.h
     LoadFbClientDll.h
-    Lock.h
     Mlist.h
     MultibyteConvert.h
     Mutex.h
@@ -104,7 +99,6 @@ set(ISCDBC_HEADERS
     Parameters.h
     ParametersEvents.h
     Properties.h
-    ServiceManager.h
     Sqlda.h
     SQLError.h
     SQLException.h

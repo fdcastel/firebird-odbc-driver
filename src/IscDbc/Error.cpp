@@ -24,7 +24,6 @@
 
 // copyright (c) 1999 - 2000 by James A. Starkey for IBPhoenix.
 
-//#include "Engine.h"
 #include "Error.h"
 #include <stdarg.h>
 #include <stdio.h>

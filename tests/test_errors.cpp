@@ -218,3 +218,166 @@ TEST_F(ErrorsTest, DivisionByZero) {
             << "Expected division by zero error, got: " << sqlState;
     }
 }
+
+// ===== OC-2: SQL_DIAG_ROW_COUNT tests =====
+
+class DiagRowCountTest : public OdbcConnectedTest {};
+
+TEST_F(DiagRowCountTest, RowCountAfterInsert) {
+    TempTable table(this, "ODBC_TEST_DIAGRC",
+        "ID INTEGER NOT NULL PRIMARY KEY, NAME VARCHAR(50)");
+    ReallocStmt();
+
+    // Insert a row
+    SQLRETURN ret = SQLExecDirect(hStmt,
+        (SQLCHAR*)"INSERT INTO ODBC_TEST_DIAGRC VALUES (1, 'Alice')", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret))
+        << "INSERT failed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    // Check SQL_DIAG_ROW_COUNT via SQLGetDiagField
+    SQLLEN rowCount = -1;
+    ret = SQLGetDiagField(SQL_HANDLE_STMT, hStmt, 0,
+        SQL_DIAG_ROW_COUNT, &rowCount, 0, NULL);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret))
+        << "SQLGetDiagField(SQL_DIAG_ROW_COUNT) failed";
+    EXPECT_EQ(rowCount, 1) << "Expected 1 row affected by INSERT";
+}
+
+TEST_F(DiagRowCountTest, RowCountAfterUpdate) {
+    TempTable table(this, "ODBC_TEST_DIAGRC",
+        "ID INTEGER NOT NULL PRIMARY KEY, NAME VARCHAR(50)");
+    ReallocStmt();
+
+    // Insert two rows
+    SQLExecDirect(hStmt, (SQLCHAR*)"INSERT INTO ODBC_TEST_DIAGRC VALUES (1, 'Alice')", SQL_NTS);
+    ReallocStmt();
+    SQLExecDirect(hStmt, (SQLCHAR*)"INSERT INTO ODBC_TEST_DIAGRC VALUES (2, 'Bob')", SQL_NTS);
+    ReallocStmt();
+    Commit();
+
+    // Update both rows
+    SQLRETURN ret = SQLExecDirect(hStmt,
+        (SQLCHAR*)"UPDATE ODBC_TEST_DIAGRC SET NAME = 'Updated'", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret))
+        << "UPDATE failed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    SQLLEN rowCount = -1;
+    ret = SQLGetDiagField(SQL_HANDLE_STMT, hStmt, 0,
+        SQL_DIAG_ROW_COUNT, &rowCount, 0, NULL);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    EXPECT_EQ(rowCount, 2) << "Expected 2 rows affected by UPDATE";
+}
+
+TEST_F(DiagRowCountTest, RowCountAfterDelete) {
+    TempTable table(this, "ODBC_TEST_DIAGRC",
+        "ID INTEGER NOT NULL PRIMARY KEY");
+    ReallocStmt();
+
+    // Insert 3 rows
+    SQLExecDirect(hStmt, (SQLCHAR*)"INSERT INTO ODBC_TEST_DIAGRC VALUES (1)", SQL_NTS);
+    ReallocStmt();
+    SQLExecDirect(hStmt, (SQLCHAR*)"INSERT INTO ODBC_TEST_DIAGRC VALUES (2)", SQL_NTS);
+    ReallocStmt();
+    SQLExecDirect(hStmt, (SQLCHAR*)"INSERT INTO ODBC_TEST_DIAGRC VALUES (3)", SQL_NTS);
+    ReallocStmt();
+    Commit();
+
+    // Delete all
+    SQLRETURN ret = SQLExecDirect(hStmt,
+        (SQLCHAR*)"DELETE FROM ODBC_TEST_DIAGRC", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret))
+        << "DELETE failed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    SQLLEN rowCount = -1;
+    ret = SQLGetDiagField(SQL_HANDLE_STMT, hStmt, 0,
+        SQL_DIAG_ROW_COUNT, &rowCount, 0, NULL);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    EXPECT_EQ(rowCount, 3) << "Expected 3 rows affected by DELETE";
+}
+
+TEST_F(DiagRowCountTest, RowCountAfterSelectIsMinusOne) {
+    // SELECT should set SQL_DIAG_ROW_COUNT to -1 (spec says undefined for SELECTs,
+    // but -1 is the conventional value used by drivers to indicate "not applicable")
+    SQLRETURN ret = SQLExecDirect(hStmt,
+        (SQLCHAR*)"SELECT 1 FROM RDB$DATABASE", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    SQLLEN rowCount = 0;
+    ret = SQLGetDiagField(SQL_HANDLE_STMT, hStmt, 0,
+        SQL_DIAG_ROW_COUNT, &rowCount, 0, NULL);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    // For SELECTs, row count is driver-defined; we set it to -1
+    EXPECT_EQ(rowCount, -1) << "Expected -1 for SELECT statement";
+}
+
+// ===== OC-5: returnStringInfo truncation reports full length =====
+
+class TruncationIndicatorTest : public OdbcConnectedTest {};
+
+TEST_F(TruncationIndicatorTest, GetConnectAttrTruncationReportsFullLength) {
+    // SQL_ATTR_CURRENT_CATALOG returns the database path, which is typically long
+    // First, get the full length
+    SQLINTEGER fullLen = 0;
+    char fullBuf[1024] = {};
+    SQLRETURN ret = SQLGetConnectAttr(hDbc, SQL_ATTR_CURRENT_CATALOG,
+        fullBuf, sizeof(fullBuf), &fullLen);
+
+    if (!SQL_SUCCEEDED(ret)) {
+        GTEST_SKIP() << "SQL_ATTR_CURRENT_CATALOG not available";
+    }
+
+    // Skip if the catalog name is too short to trigger truncation
+    if (fullLen <= 5) {
+        GTEST_SKIP() << "Catalog name too short for truncation test (len=" << fullLen << ")";
+    }
+
+    // Now try with a small buffer that will trigger truncation
+    char smallBuf[6] = {};  // Very small buffer
+    SQLINTEGER reportedLen = 0;
+    ret = SQLGetConnectAttr(hDbc, SQL_ATTR_CURRENT_CATALOG,
+        smallBuf, sizeof(smallBuf), &reportedLen);
+
+    // Should return SQL_SUCCESS_WITH_INFO (truncation)
+    EXPECT_EQ(ret, SQL_SUCCESS_WITH_INFO)
+        << "Expected SQL_SUCCESS_WITH_INFO for truncated result";
+
+    // The reported length should be the FULL string length, not the truncated length
+    EXPECT_EQ(reportedLen, fullLen)
+        << "Truncated call should report full length (" << fullLen
+        << "), not truncated length";
+}
+
+TEST_F(TruncationIndicatorTest, GetInfoStringTruncationReportsFullLength) {
+    // Use SQL_DBMS_NAME which is always available
+    char fullBuf[256] = {};
+    SQLSMALLINT fullLen = 0;
+    SQLRETURN ret = SQLGetInfo(hDbc, SQL_DBMS_NAME,
+        fullBuf, sizeof(fullBuf), &fullLen);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ASSERT_GT(fullLen, 0) << "DBMS name should have nonzero length";
+
+    // Now try with a buffer too small (2 bytes: 1 char + null terminator)
+    char smallBuf[2] = {};
+    SQLSMALLINT reportedLen = 0;
+    ret = SQLGetInfo(hDbc, SQL_DBMS_NAME,
+        smallBuf, sizeof(smallBuf), &reportedLen);
+
+    // Should return SQL_SUCCESS_WITH_INFO
+    EXPECT_EQ(ret, SQL_SUCCESS_WITH_INFO);
+
+    // The reported length should be the FULL string length
+    EXPECT_EQ(reportedLen, fullLen)
+        << "Truncated SQLGetInfo should report full length (" << fullLen
+        << "), not truncated length (" << reportedLen << ")";
+}
+
+TEST_F(TruncationIndicatorTest, GetInfoZeroBufferReportsFullLength) {
+    // Call with NULL buffer and 0 length — should report length without copying
+    SQLSMALLINT fullLen = 0;
+    SQLRETURN ret = SQLGetInfo(hDbc, SQL_DBMS_NAME,
+        NULL, 0, &fullLen);
+
+    // Should return SQL_SUCCESS_WITH_INFO (data available but not copied)
+    EXPECT_TRUE(ret == SQL_SUCCESS || ret == SQL_SUCCESS_WITH_INFO);
+    EXPECT_GT(fullLen, 0) << "Should report the full string length even with NULL buffer";
+}

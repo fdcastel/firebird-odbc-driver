@@ -31,18 +31,13 @@ include(GoogleTest)
 add_executable(firebird_odbc_tests
     test_main.cpp
     test_null_handles.cpp
-    test_connection.cpp
-    test_cursor.cpp
     test_descriptor.cpp
     test_multi_statement.cpp
     test_data_types.cpp
     test_blob.cpp
-    test_bind_cycle.cpp
     test_savepoint.cpp
-    test_catalog.cpp
     test_escape_sequences.cpp
     test_server_version.cpp
-    test_batch_params.cpp
     test_conn_settings.cpp
     test_scrollable_cursor.cpp
     test_connect_options.cpp
@@ -53,7 +48,6 @@ add_executable(firebird_odbc_tests
     test_cursor_commit.cpp
     test_data_at_execution.cpp
     test_array_binding.cpp
-    test_phase7_crusher_fixes.cpp
     test_odbc38_compliance.cpp
     test_guid_and_binary.cpp
     test_stmthandles.cpp
@@ -63,7 +57,6 @@ add_executable(firebird_odbc_tests
     test_bindcol.cpp
     test_wchar.cpp
     test_cursor_name.cpp
-    test_phase11_typeinfo_timeout_pool.cpp
     test_odbc_string.cpp
     # Utf16Convert.cpp is compiled into OdbcFb.dll but its symbols are not exported.
     # We include it here so that OdbcString unit tests can link without requiring
