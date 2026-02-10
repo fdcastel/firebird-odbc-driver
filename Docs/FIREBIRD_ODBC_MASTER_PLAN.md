@@ -4,7 +4,7 @@
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
 **Last Updated**: February 9, 2026  
-**Version**: 2.9
+**Version**: 3.0
 
 > This document consolidates all known issues and newly identified architectural deficiencies.
 > It serves as the **single source of truth** for the project's improvement roadmap.
@@ -843,6 +843,232 @@ True async execution is **not feasible** with the current Firebird OO API, which
 
 **Deliverable**: A spec-compliant `SQLGetTypeInfo` with correct ordering and thread-safety; functional query timeout and cancellation using Firebird's native API; robust connection reset for pool environments. These improvements target real-world correctness issues that affect ORM frameworks (Entity Framework, Hibernate) and connection pool managers (HikariCP, ADO.NET pool).
 
+### Phase 12: String Conversion Elimination & OdbcConvert Rationalization
+**Priority**: High  
+**Duration**: 8–12 weeks  
+**Goal**: Eliminate redundant charset transliterations, consolidate encoding paths, rationalize the OdbcConvert conversion matrix, and implement native UTF-16 internal encoding (task 10.6.3)
+
+#### Background & Research Findings
+
+A comprehensive analysis of the data conversion architecture — comparing against the PostgreSQL ODBC driver (psqlodbc), the Firebird server's charset system, and the ODBC specification — reveals the following:
+
+##### Finding 1: OdbcConvert.cpp Is Necessary (Cannot Be Removed)
+
+Unlike psqlodbc, which receives **all data from PostgreSQL as text strings** and converts them inline with `pg_atoi()`/`pg_atof()` in a single monolithic `copy_and_convert_field()` function, the Firebird driver receives **binary wire data** (ISC_DATE integers, SQLDA-format VARYING strings, scaled integer numerics, etc.). This binary protocol requires type-specific decoders — exactly what `OdbcConvert`'s ~150 conversion functions provide.
+
+**Why OdbcConvert is architecturally superior to psqlodbc's approach:**
+- **Dispatch-table caching**: The Firebird driver resolves the conversion function *once* at bind time (`getAdressFunction()`) and caches the function pointer in `DescRecord::fnConv`. psqlodbc evaluates a two-level `switch` for every column of every row — measurably slower.
+- **Binary source data**: Firebird's binary wire protocol means numeric conversions are `*(int*)ptr` → cast, not `pg_atoi(text_string)` → strtol. Binary-to-binary is inherently faster than text-to-binary.
+- **No SQL rewriting**: psqlodbc's `convert.c` (6600 lines) is actually ~50% SQL rewriting/parameter binding code mixed in with data conversion. Our `OdbcConvert.cpp` is pure data conversion.
+
+**Conclusion**: `OdbcConvert.cpp` should be **kept and optimized**, not removed. The dispatch-table-plus-cached-function-pointer pattern is the correct design for a binary-protocol driver. The file's size (4627 lines) is a consequence of the large ODBC type matrix, not bad architecture.
+
+##### Finding 2: Firebird Cannot Communicate in UTF-16
+
+The Firebird server **cannot** use UTF-16 or UCS-2 as a connection character set. The server's `initCharSet()` (in `jrd/Attachment.cpp`) explicitly rejects any charset with `charset_min_bytes_per_char != 1`:
+
+```cpp
+if (cs->charset_min_bytes_per_char != 1) {
+    valid = false;
+    s.printf("%s. Wide character sets are not supported yet.", ...);
+}
+```
+
+Both `CS_UTF16` (ID 61) and `CS_UNICODE_UCS2` (ID 8) have `min_bytes_per_char = 2`. UTF-16 is used internally as the **pivot encoding** for all charset-to-charset transliteration (via `CsConvert::cnvt1` → UTF-16 → `CsConvert::cnvt2`), but it is not exposed as a client wire encoding.
+
+**Implication**: The driver MUST use `CHARSET=UTF8` (or another single-byte-minimum charset) for the connection DPB. All text data arrives from the wire as UTF-8 bytes. The driver must then convert UTF-8 → UTF-16 for `SQL_C_WCHAR` bindings. **This conversion is unavoidable** and is not a redundancy — it's the minimal path.
+
+**Regarding `IMetadataBuilder::setCharSet()`**: This OO API method only sets metadata tags on message buffers — it does NOT cause the engine to automatically transliterate output. It is used by UDR plugins to describe their buffer layouts, not by client applications to request a different wire encoding.
+
+##### Finding 3: `CHARSET=UTF8` Is the Optimal Choice
+
+Using `CHARSET=UTF8` in the connection string is **not counterproductive** — it's the only correct choice for a Unicode ODBC driver:
+
+1. **Server-side transliteration**: When the connection charset is UTF-8, the Firebird server transliterates all column data to UTF-8 before sending it over the wire. This means a `VARCHAR(100) CHARACTER SET WIN1252` column's data is converted to UTF-8 by the server, not the driver. This is **desirable** — it offloads charset conversion to the server (which has full ICU support) and gives the driver a single, consistent input encoding.
+
+2. **System catalog metadata**: Firebird stores all system catalog metadata (table names, column names, etc.) in UTF-8 internally (`CS_METADATA = CS_UTF8`). Using `CHARSET=UTF8` means these strings arrive without any server-side transliteration — zero overhead for metadata operations.
+
+3. **Single input encoding**: With `CHARSET=UTF8`, the driver knows that ALL incoming text data is UTF-8. This eliminates the need for per-column charset detection and simplifies the conversion path to a single, well-optimized UTF-8 → UTF-16 converter.
+
+4. **Alternative considered — `CHARSET=NONE`**: Using `CHARSET=NONE` (CS_NONE, ID 0) would send bytes in the column's native charset without transliteration. This would require the driver to implement charset-specific decoders for every Firebird charset (WIN1252, ISO8859-1, KOI8-R, SJIS, BIG5, GB2312, etc.) — a massive and error-prone effort. `CHARSET=UTF8` correctly delegates this to the server.
+
+##### Finding 4: Current Encoding Architecture Has Redundancies
+
+The driver currently has **five distinct encoding conversion implementations**:
+
+| # | Implementation | Location | Used By |
+|---|---------------|----------|---------|
+| 1 | `utf8_mbstowcs` / `utf8_wcstombs` | `IscDbc/MultibyteConvert.cpp` | Per-column `DescRecord::MbsToWcs` (fetch path) |
+| 2 | `Utf8ToUtf16` / `Utf16ToUtf8` | `Utf16Convert.cpp` | `ConvertingString` (W-API shim) |
+| 3 | `fss_mbstowcs` / `fss_wcstombs` | `IscDbc/MultibyteConvert.cpp` | UNICODE_FSS columns (legacy) |
+| 4 | `_MbsToWcs` / `_WcsToMbs` | `IscDbc/MultibyteConvert.cpp` | `CHARSET=NONE` fallback (Windows `MultiByteToWideChar`) |
+| 5 | `mbstowcs` / `wcstombs` | C runtime | `CHARSET=NONE` fallback (Linux), `convVarStringSystemToStringW` |
+
+Implementations #1 and #2 are **functionally equivalent** UTF-8 ↔ UTF-16 converters that exist in different files. Implementation #5 is locale-dependent and **actively incorrect** for `convVarStringSystemToStringW` (which handles system catalog strings that are always UTF-8, not locale-encoded). Implementations #3 and #4 are needed for non-UTF8 charsets.
+
+##### Finding 5: The W→A→W Roundtrip Problem (Task 10.6.3)
+
+The current W-API architecture creates an unnecessary encoding roundtrip:
+
+```
+App calls SQLExecDirectW(L"SELECT ...")
+  → ConvertingString converts UTF-16 → UTF-8  (allocation + conversion)
+  → Inner engine processes as char*
+  → Result column names stored as char*
+  
+App calls SQLDescribeColW()
+  → Inner engine returns char* column name
+  → ConvertingString converts UTF-8 → UTF-16  (allocation + conversion)
+  → App receives SQLWCHAR*
+```
+
+For a modern all-Unicode application (which is the default on Windows), every metadata string is converted **twice** — W→A on input, A→W on output — with heap allocations on each conversion. The stack-buffer optimization (10.6.1) mitigated the allocation cost, but the double-conversion overhead remains.
+
+psqlodbc has the same issue: it stores all data internally as UTF-8 (from libpq), and converts to UTF-16 only at delivery time (`setup_getdataclass()` → `utf8_to_ucs2_lf()`). However, psqlodbc's internal architecture is C-string-based throughout, so switching to UTF-16 internal storage would require a complete rewrite. Our C++ architecture is more amenable to this change.
+
+##### Finding 6: Specific Bugs in Current Charset Handling
+
+| Bug | Location | Issue |
+|-----|----------|-------|
+| `convVarStringSystemToStringW` uses bare `mbstowcs()` | OdbcConvert.cpp:4336 | System catalog strings are UNICODE_FSS/UTF-8 from Firebird, but this function uses locale-dependent `mbstowcs()` instead of the per-column `MbsToWcs` codec. Can produce mojibake on non-UTF-8 locales (e.g., Japanese Windows with CP932). |
+| `ODBCCONVERT_CONV_TO_STRINGW` macro calls `MbsToWcs` on pure-ASCII | OdbcConvert.cpp:1465 | Integer→StringW formatters produce ASCII digit strings (`0-9`, `-`, `.`), then call `from->MbsToWcs()` to widen them. This invokes the full multibyte codec on guaranteed-ASCII data. Should use a trivial byte-to-wchar widening loop. |
+| Three redundant UTF-8 codecs | MultibyteConvert.cpp, Utf16Convert.cpp | `utf8_mbstowcs` and `Utf8ToUtf16` are independently maintained, hand-rolled UTF-8 decoders. Any bug fix applied to one must be manually replicated to the other. |
+| `wchar_t` used as SQLWCHAR | OdbcConvert.cpp (throughout) | All `*ToStringW` functions cast to `wchar_t*`. On Linux, `wchar_t` is 4 bytes (UTF-32), not 2 bytes (UTF-16). The `utf8_mbstowcs` function in MultibyteConvert.cpp produces `wchar_t` values, while `Utf8ToUtf16` in Utf16Convert.cpp produces `SQLWCHAR` values. This is a latent platform-correctness issue for OdbcConvert's string-W functions on Linux. |
+
+#### Tasks
+
+##### 12.1 Consolidate Encoding Implementations
+
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
+| **12.1.1** | **Unify UTF-8 codecs into single implementation** — Replace `utf8_mbstowcs`/`utf8_wcstombs` (MultibyteConvert.cpp) with calls to `Utf8ToUtf16`/`Utf16ToUtf8` (Utf16Convert.cpp). The `Utf16Convert` versions are SQLWCHAR-aware (always 16-bit), while the MultibyteConvert versions target `wchar_t` (platform-dependent). Keep `Utf16Convert` as the canonical implementation. Update `adressMbsToWcs(4)` and `adressWcsToMbs(4)` to return wrappers around the Utf16Convert functions. | Medium | **High** — single source of truth, fixes Linux wchar_t issue | |
+| **12.1.2** | **Fix `convVarStringSystemToStringW` to use per-column codec** — Replace bare `mbstowcs()` with `from->MbsToWcs()` (the per-column codec function pointer). System catalog strings from Firebird are always UNICODE_FSS or UTF-8; using `mbstowcs()` is incorrect on non-UTF-8 locales. | Easy | **High** — correctness fix | |
+| **12.1.3** | **Replace `MbsToWcs` on ASCII-only data with trivial widening** — In the `ODBCCONVERT_CONV_TO_STRINGW` macro (integer→StringW), replace the `from->MbsToWcs()` call with a simple byte-to-SQLWCHAR loop: `for (int i = 0; i <= len; i++) dst[i] = (SQLWCHAR)(unsigned char)src[i];`. ASCII is identity-mapped in UTF-8/UTF-16/Latin-1/every charset. Also apply to `convGuidToStringW`. | Easy | Medium — eliminates unnecessary codec dispatch on hot path | |
+| **12.1.4** | **Fix `wchar_t*` casts in OdbcConvert to use `SQLWCHAR*`** — All `*ToStringW` conversion functions cast output pointers to `wchar_t*` and use `wcsncpy`/`wcslen`/`L'\0'`. On Linux (where `wchar_t` = 4 bytes), this is incorrect — it writes 4-byte characters into a 2-byte SQLWCHAR buffer. Replace all `wchar_t*` casts with `SQLWCHAR*` and use `Utf16Length`/`Utf16Copy`/`(SQLWCHAR)0` from `Utf16Convert.h`. This is required for correct cross-platform W-API fetch behavior. | Medium | **Very High** — correctness on Linux/macOS | |
+| **12.1.5** | **Remove `fss_mbstowcs`/`fss_wcstombs` — use `Utf8ToUtf16`/`Utf16ToUtf8` for UNICODE_FSS** — UNICODE_FSS (charset 3) is a subset of UTF-8 (the original UTF-8 as defined in RFC 2279, limited to 3-byte sequences / BMP only). The `Utf8ToUtf16` function handles this correctly by definition — any valid FSS sequence is a valid UTF-8 sequence. Eliminate the separate FSS codec and route charset 3 through the UTF-8 path. | Easy | Medium — code reduction, maintenance reduction | |
+| **12.1.6** | **Audit `CHARSET=NONE` path for correctness** — When `CHARSET=NONE`, the driver falls back to `_MbsToWcs`/`_WcsToMbs` (Windows: `MultiByteToWideChar(CP_ACP)`) or `mbstowcs`/`wcstombs` (Linux: locale-dependent). Document that `CHARSET=NONE` is a legacy compatibility mode that should be avoided for Unicode applications. Add a warning to the driver documentation that `CHARSET=NONE` may produce incorrect results on non-matching locales. Consider emitting `SQLGetDiagField(SQL_DIAG_DYNAMIC_FUNCTION_CODE)` or an informational SQLSTATE (01000) when `CHARSET=NONE` is used with a W-API application. | Easy | Low — documentation + defensive coding | |
+
+##### 12.2 Native UTF-16 Internal Encoding (Task 10.6.3)
+
+This is the "significant effort" task that eliminates the W→A→W roundtrip. The approach is to store metadata strings (table names, column names, error messages, SQL text) internally as `SQLWCHAR*` (UTF-16), and convert to UTF-8 only when communicating with the Firebird engine.
+
+**Design decisions:**
+- **Scope**: Metadata strings only (column names, table names, error messages, SQLSTATE text, SQL statement text). NOT row data — row data already has an optimal single-conversion path via `OdbcConvert::conv*ToStringW`.
+- **Internal string type**: Use `std::u16string` (C++17, backed by `char16_t` which matches `SQLWCHAR` on all platforms) for internal storage. Expose as `SQLWCHAR*` via `.data()`.
+- **Conversion point**: UTF-8 → UTF-16 conversion happens ONCE when strings enter the driver (from Firebird API results or from the IscDbc layer). UTF-16 → UTF-8 conversion happens ONCE when strings leave the driver to the Firebird API (SQL text, parameter names).
+- **A-API compatibility**: The ANSI (non-W) entry points convert UTF-16 → system codepage at the boundary, replacing the current "passthrough" behavior. This is actually more correct — currently, A-API calls pass raw bytes through without charset awareness.
+
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
+| **12.2.1** | **Introduce `OdbcString` — UTF-16-native string class** — A thin wrapper around `std::u16string` that provides: `SQLWCHAR* data()`, `SQLSMALLINT length()` (in SQLWCHAR units), `std::string to_utf8()`, `static OdbcString from_utf8(const char*, int len)`, `static OdbcString from_utf16(const SQLWCHAR*, int len)`. This type will gradually replace `JString` and `char*` for metadata storage throughout the codebase. | Medium | **Very High** — foundation for all other 12.2 tasks | |
+| **12.2.2** | **Convert `OdbcError` messages to UTF-16 storage** — Change `OdbcError::sqlState` from `char[6]` to `SQLWCHAR[6]` (or `OdbcString`). Change `OdbcError::text` from `JString` (char*-based) to `OdbcString` (UTF-16). Update `OdbcObject::postError()` to convert ISC error text (UTF-8 from Firebird) to UTF-16 at creation time. Update `sqlGetDiagRec` / `sqlGetDiagField` to write UTF-16 directly for W calls and convert UTF-16→system codepage for A calls. | Medium | High — eliminates A→W conversion in the diagnostic path | |
+| **12.2.3** | **Convert column/table name storage to UTF-16** — `DescRecord::name`, `baseColumnName`, `baseTableName`, `catalogName`, `label`, `literalPrefix`, `literalSuffix`, `schemaName`, `tableName`, `typeName` are all `JString` (char*-based). Change to `OdbcString`. The IscDbc layer's `Sqlda::getColumnName()` etc. return `const char*` (UTF-8); convert to UTF-16 when populating the IRD in `OdbcStatement::setIRD()`. `SQLDescribeColW` then returns the stored UTF-16 directly — no conversion needed. `SQLDescribeColA` converts UTF-16 → system codepage. | Hard | **Very High** — eliminates per-call conversion for the most common metadata operation | |
+| **12.2.4** | **Convert SQL statement text to UTF-16 internal storage** — `SQLPrepareW` and `SQLExecDirectW` currently convert UTF-16 → UTF-8 via `ConvertingString`, pass UTF-8 through the engine, and discard the UTF-16. Instead, store the UTF-16 SQL text in the statement and convert to UTF-8 only when calling `IscConnection::prepareStatement()`. For `SQLNativeSqlW`, the output is the same UTF-16 SQL text (since we don't transform SQL). | Medium | Medium — eliminates one `ConvertingString` per prepare/execute | |
+| **12.2.5** | **Simplify `ConvertingString` for UTF-16-native driver** — With internal UTF-16 storage, `ConvertingString` becomes simpler: (a) For W→internal (input), it's a no-op copy (or pointer passthrough). (b) For internal→W (output), it's a no-op copy. (c) For A→internal (input from A-API), it converts system codepage → UTF-16 once. (d) For internal→A (output to A-API), it converts UTF-16 → system codepage once. The current W→A→internal→A→W roundtrip is eliminated. | Medium | High — architectural simplification | |
+| **12.2.6** | **Update `MainUnicode.cpp` W-API functions for direct UTF-16 passthrough** — Once internal storage is UTF-16, W-API functions like `SQLDescribeColW`, `SQLGetDiagRecW`, `SQLColAttributeW` can write output directly from internal UTF-16 storage to the app's `SQLWCHAR*` buffer — a single `memcpy`. No `ConvertingString` needed on the output path. Input parameters (SQL text, cursor names) can be passed directly to the internal UTF-16 storage. | Hard | **Very High** — the payoff of the entire phase | |
+| **12.2.7** | **Update `Main.cpp` A-API functions for UTF-16→A conversion** — A-API functions now need a conversion step that didn't exist before: internal UTF-16 → system codepage for output, and system codepage → UTF-16 for input. This is the inverse of the current `ConvertingString` flow. Create an `AnsiConvertingString` helper for A-API entry points that converts at the boundary. | Medium | N/A — maintains backward compatibility | |
+| **12.2.8** | **Migrate IscDbc string returns to caller-provided buffers** — The IscDbc layer currently returns `const char*` pointers to internally-owned strings (e.g., `getColumnName()` returns a pointer into `Sqlda::column_name_`). To avoid per-call heap allocation when converting to UTF-16, change these to write into caller-provided `SQLWCHAR*` buffers: `getColumnName(SQLWCHAR* buf, int bufSize)`. Or, more practically, convert once when populating the IRD and cache the UTF-16 result. | Hard | Medium — architectural cleanliness | |
+
+##### 12.3 OdbcConvert Rationalization
+
+With the encoding consolidation (12.1) and native UTF-16 (12.2) in place, the OdbcConvert matrix can be simplified:
+
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
+| **12.3.1** | **Merge `convVarStringSystemToString`/`convVarStringSystemToStringW` into `convVarStringToString`/`convVarStringToStringW`** — The "System" variants exist because system catalog result sets have different encoding assumptions. With `CHARSET=UTF8` as the standard and a unified UTF-8 codec, there is no encoding difference between catalog strings and user-data strings. Remove the `isResultSetFromSystemCatalog` branch in `getAdressFunction()` and route all varying-string conversions through the standard path. **Prerequisite**: task 12.1.2 (fix the codec used). | Easy | Medium — reduces the conversion function count by 2, eliminates a branch | |
+| **12.3.2** | **Unify `convStringToStringW` and `convVarStringToStringW`** — These two functions differ only in how they read the source length: `convStringToString` uses `from->length` (fixed-width CHAR), while `convVarStringToString` reads `*(unsigned short*)pointerFrom` (SQL_VARYING prefix). Extract the length-reading into a helper and merge the bodies. Both functions allocate `localDataPtr`, call `MbsToWcs`, and manage `dataOffset` for chunked `SQLGetData` — this is 100% duplicated logic. | Medium | Medium — reduces code duplication | |
+| **12.3.3** | **Audit and remove `notYetImplemented` fallback paths** — `getAdressFunction()` has ~15 `case` branches that return `&OdbcConvert::notYetImplemented`. Audit which type combinations are actually valid per the ODBC spec (Appendix D: Data Type Conversion Rules) and either implement the missing conversions or replace with explicit `SQL_ERROR` / SQLSTATE 07006 ("Restricted data type attribute violation"). | Easy | Low — spec compliance for edge cases | |
+| **12.3.4** | **Document the conversion matrix** — Create a table in `Docs/` listing every (source_type, target_type) pair, the function that handles it, and whether it's identity, widening, narrowing, or formatting. This serves as a test plan for T-4 (conversion unit tests) and a reference for future maintenance. | Easy | Medium — maintainability | |
+
+##### 12.4 `CHARSET` Connection Parameter Semantics
+
+| Task | Description | Complexity | Benefit | Status |
+|------|-------------|------------|---------|--------|
+| **12.4.1** | **Default `CHARSET` to `UTF8` when not specified** — Currently, when `CHARSET` is omitted from the connection string, the driver passes no `isc_dpb_lc_ctype` to Firebird, which defaults to `CS_NONE` (ID 0). This means: (a) text data arrives in the column's native charset (no server-side transliteration), (b) the driver falls back to locale-dependent `MultiByteToWideChar(CP_ACP)` for W-API conversion, (c) multi-charset databases produce mixed encodings that the driver can't handle correctly. **Fix**: When `CHARSET` is not specified, default to `UTF8`. This ensures consistent encoding, correct Unicode support, and optimal server-side transliteration. Emit SQLSTATE 01000 informational if the original connection string had no CHARSET (so apps know the driver is using a default). | Easy | **High** — correctness for the common case | |
+| **12.4.2** | **Document `CHARSET` parameter behavior** — Update README.md with clear guidance: `CHARSET=UTF8` is recommended for all applications. `CHARSET=NONE` is for legacy single-byte applications that want raw bytes. Other charsets (WIN1252, ISO8859_1, etc.) are supported but not recommended — the server will transliterate, but the driver can only convert to UTF-16 via UTF-8 as an intermediate step for non-UTF8 charsets. | Easy | Medium — user guidance | |
+
+#### Research Reference: Why Not UTF-16 on the Wire?
+
+For completeness, here is why requesting UTF-16 from Firebird is not possible and not desirable even if it were:
+
+1. **Firebird blocks it**: `jrd/Attachment.cpp:initCharSet()` rejects `charset_min_bytes_per_char != 1`. Both `CS_UTF16` (ID 61) and `CS_UNICODE_UCS2` (ID 8) fail this check with the message "Wide character sets are not supported yet."
+
+2. **Wire protocol overhead**: UTF-16 encoding of a `VARCHAR(100)` column requires 200 bytes on the wire (2 × max chars), while UTF-8 requires at most 400 bytes but typically much less for Western text (~100 bytes). For Asian text, UTF-16 (2 bytes/char for BMP) is more compact than UTF-8 (3 bytes/char for CJK), but the `VARCHAR` wire format is max-length-padded in Firebird's SQL_TEXT format, so the theoretical advantage doesn't apply.
+
+3. **No transliteration elimination**: Even if Firebird could send UTF-16, the server would still need to transliterate from the column's storage charset (UTF-8, WIN1252, etc.) to UTF-16 internally — using the same `CsConvert` pivot architecture. The transliteration work is merely moved, not eliminated.
+
+4. **ODBC Driver Manager complication**: The ODBC DM on Windows already handles UTF-16 at the API layer. Having the wire also be UTF-16 doesn't eliminate any driver-side conversion — the driver still needs to copy data from the wire buffer to the app buffer, potentially with truncation, indicator management, and chunked `SQLGetData` support.
+
+**Bottom line**: The optimal architecture is: Firebird sends UTF-8 → driver converts UTF-8 → UTF-16 once → delivers to ODBC app. This is exactly one conversion, and it's unavoidable because the Firebird wire protocol uses byte-oriented encodings.
+
+#### Architecture Diagram: Before and After
+
+```
+BEFORE (current):
+  SQLExecDirectW(L"SELECT name FROM t")
+    → ConvertingString: UTF-16→UTF-8 (allocation)       ← CONVERSION 1
+    → IscConnection::prepareStatement(utf8_sql)
+    → Firebird executes, returns UTF-8 column data
+    → SQLDescribeColW() 
+      → engine returns char* column name (UTF-8)
+      → ConvertingString destructor: UTF-8→UTF-16        ← CONVERSION 2
+    → SQLFetch() + SQLGetData(SQL_C_WCHAR)
+      → convVarStringToStringW: UTF-8→wchar_t (MbsToWcs) ← CONVERSION 3 (correct, necessary)
+
+AFTER (Phase 12):
+  SQLExecDirectW(L"SELECT name FROM t")  
+    → Store UTF-16 SQL text internally (no conversion — passthrough)
+    → Convert UTF-16→UTF-8 once for Firebird API          ← CONVERSION 1 (unavoidable)
+    → Firebird executes, returns UTF-8 column data
+    → IRD populated: UTF-8→UTF-16 once during setIRD()    ← CONVERSION 2 (once per prepare, cached)
+    → SQLDescribeColW()
+      → Return cached UTF-16 column name (memcpy)          ← NO CONVERSION
+    → SQLFetch() + SQLGetData(SQL_C_WCHAR)
+      → convVarStringToStringW: UTF-8→SQLWCHAR (Utf8ToUtf16) ← CONVERSION 3 (correct, necessary)
+```
+
+**Net effect**: Metadata operations (SQLDescribeCol, SQLColAttribute, SQLGetDiagRec) become zero-conversion for W-API callers. Row data conversion remains at exactly one conversion (UTF-8→UTF-16), which is the theoretical minimum.
+
+#### Dependencies & Ordering
+
+```
+12.1.1 (unify codecs) ──────────────────────────┐
+12.1.2 (fix SystemToStringW) ───┐                │
+12.1.3 (ASCII widening) ────────┤                │
+12.1.4 (wchar_t→SQLWCHAR) ─────┤                │
+12.1.5 (remove FSS codec) ─────┤                │
+12.1.6 (audit CHARSET=NONE) ───┘                │
+                                                 ├──→ 12.2.1 (OdbcString) ──→ 12.2.2–12.2.8
+12.3.1 (merge System variants) ──→ requires 12.1.2
+12.3.2 (merge String/VarString W) ──→ requires 12.1.4
+12.4.1 (default CHARSET=UTF8) ──→ independent, can be done first
+```
+
+**Recommended execution order**:
+1. 12.4.1 (quick win, high impact)
+2. 12.1.2, 12.1.3, 12.1.4 (correctness fixes)
+3. 12.1.1, 12.1.5 (codec consolidation)
+4. 12.3.1, 12.3.2 (code reduction)
+5. 12.2.1 → 12.2.2 → 12.2.3 → 12.2.4 → 12.2.5 → 12.2.6 → 12.2.7 → 12.2.8 (native UTF-16 — sequential)
+
+#### Success Criteria
+
+- [ ] Single UTF-8 ↔ UTF-16 codec implementation (Utf16Convert.h) used throughout the driver
+- [ ] `convVarStringSystemToStringW` uses per-column codec, not bare `mbstowcs()`
+- [ ] All `*ToStringW` functions use `SQLWCHAR*` (not `wchar_t*`) — correct on Linux/macOS
+- [ ] Integer→StringW formatters use trivial ASCII widening, not full multibyte codec
+- [ ] `CHARSET` defaults to `UTF8` when not specified in the connection string
+- [ ] `OdbcString` type introduced for internal UTF-16 string storage
+- [ ] `OdbcError` stores SQLSTATE and message text in UTF-16
+- [ ] `DescRecord` stores column/table names in UTF-16
+- [ ] `SQLDescribeColW` returns cached UTF-16 without per-call conversion
+- [ ] `ConvertingString` simplified or eliminated for W-API output paths
+- [ ] All 406+ existing tests still pass
+- [ ] New tests verify correct behavior with `CHARSET=UTF8` (default), `CHARSET=NONE`, and `CHARSET=WIN1252`
+- [ ] Cross-platform correctness verified: Linux + Windows + macOS
+
+**Deliverable**: A driver with exactly one encoding conversion per data path (the theoretical minimum), zero redundant codec implementations, correct cross-platform `SQLWCHAR` handling, and native UTF-16 internal storage that eliminates the W→A→W roundtrip for metadata operations. Combined with Phase 10's fetch optimizations, this makes the driver the fastest and most correct Unicode ODBC driver for Firebird.
+
 ---
 
 ## 6. Success Criteria
@@ -906,6 +1132,7 @@ A first-class ODBC driver should:
 - [Firebird New OO API Reference](https://github.com/FirebirdSQL/firebird/blob/master/doc/Using_OO_API.md)
 - [Firebird OO API Summary for Driver Authors](firebird-api.MD)
 - [Firebird IBatch Interface](https://github.com/FirebirdSQL/firebird/blob/master/doc/Using_OO_API.md#modifying-data-in-a-batch)
+- [Firebird Character Set Architecture](https://firebirdsql.org/file/documentation/html/en/refdocs/fblangref50/firebird-50-language-reference.html#fblangref50-appx04-charsets) — server charset system, transliteration, and connection charset behavior
 - [SQLGetTypeInfo Function](https://learn.microsoft.com/en-us/sql/odbc/reference/syntax/sqlgettypeinfo-function)
 - [Developing Connection-Pool Awareness in an ODBC Driver](https://learn.microsoft.com/en-us/sql/odbc/reference/develop-driver/developing-connection-pool-awareness-in-an-odbc-driver)
 - [Notification of Asynchronous Function Completion](https://learn.microsoft.com/en-us/sql/odbc/reference/develop-driver/notification-of-asynchronous-function-completion)
@@ -914,5 +1141,5 @@ A first-class ODBC driver should:
 
 ---
 
-*Document version: 2.7 — February 8, 2026*
+*Document version: 3.0 — February 9, 2026*
 *This is the single authoritative reference for all Firebird ODBC driver improvements.*
