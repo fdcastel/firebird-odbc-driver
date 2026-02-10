@@ -4,7 +4,7 @@
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
 **Last Updated**: February 10, 2026  
-**Version**: 3.3
+**Version**: 3.4
 
 > This document consolidates all known issues and newly identified architectural deficiencies.
 > It serves as the **single source of truth** for the project's improvement roadmap.
@@ -1144,6 +1144,40 @@ A first-class ODBC driver should:
 
 ---
 
+## Appendix A: Versioning and Packaging ✅ (Completed — February 10, 2026)
+
+### Git-Based Versioning
+- Version is extracted automatically from git tags in `vMAJOR.MINOR.PATCH` format
+- CMake module: `cmake/GetVersionFromGit.cmake` uses `git describe --tags`
+- Generated header: `cmake/Version.h.in` → `build/generated/Version.h`
+- **Official releases** (CI, tag-triggered): 4th version component (tweak) = 0 → `3.0.0.0`
+- **Local/dev builds**: tweak = commits-since-tag + 1 → `3.0.0.5` (4 commits after tag)
+- `SetupAttributes.h` reads version from `Version.h` instead of hardcoded constants
+- `WriteBuildNo.h` is no longer used for versioning
+
+### Windows Resource File (`OdbcJdbc.rc`)
+- CompanyName: "Firebird Foundation" (was "Firebird Project")
+- Copyright: "Copyright © 2000-2026 Firebird Foundation"
+- ProductName: "Firebird ODBC Driver"
+- All version strings derived from git tags via `Version.h`
+- RC file is now compiled into the DLL via CMake
+
+### WiX MSI Installer (`installer/Product.wxs`)
+- WiX v5 (dotnet tool) builds MSI packages for Windows x64
+- Installs `FirebirdODBC.dll` to `System32`
+- Registers ODBC driver in the registry automatically
+- Supports Debug builds with separate driver name ("Firebird ODBC Driver (Debug)")
+- Major upgrade support — newer versions automatically replace older ones
+
+### Release Workflow (`.github/workflows/release.yml`)
+- Triggered by `vX.Y.Z` tags (strict semver, no pre-release suffixes)
+- Uses `softprops/action-gh-release@v2` for release creation
+- Publishes both MSI installer and ZIP archive for Windows
+- Publishes TAR.GZ archive for Linux
+- Auto-generates release notes from commit history
+
+---
+
 ## Appendix B: psqlodbc Patterns to Adopt
 
 | Pattern | psqlodbc Implementation | Firebird Adaptation |
@@ -1180,5 +1214,5 @@ A first-class ODBC driver should:
 
 ---
 
-*Document version: 3.3 — February 10, 2026*
+*Document version: 3.4 — February 10, 2026*
 *This is the single authoritative reference for all Firebird ODBC driver improvements.*

@@ -1,6 +1,23 @@
 cmake_minimum_required(VERSION 3.15)
 
-project(firebird-odbc-driver VERSION 3.0.0 LANGUAGES CXX C)
+project(firebird-odbc-driver LANGUAGES CXX C)
+
+# Extract version from git tags
+include(cmake/GetVersionFromGit.cmake)
+
+# Set project version from git
+set(PROJECT_VERSION "${ODBC_VERSION_MAJOR}.${ODBC_VERSION_MINOR}.${ODBC_VERSION_PATCH}.${ODBC_VERSION_TWEAK}")
+set(PROJECT_VERSION_MAJOR ${ODBC_VERSION_MAJOR})
+set(PROJECT_VERSION_MINOR ${ODBC_VERSION_MINOR})
+set(PROJECT_VERSION_PATCH ${ODBC_VERSION_PATCH})
+set(PROJECT_VERSION_TWEAK ${ODBC_VERSION_TWEAK})
+
+# Generate Version.h from template
+configure_file(
+    ${CMAKE_CURRENT_SOURCE_DIR}/cmake/Version.h.in
+    ${CMAKE_CURRENT_BINARY_DIR}/generated/Version.h
+    @ONLY
+)
 
 # Set C++ standard
 set(CMAKE_CXX_STANDARD 17)
@@ -77,11 +94,17 @@ include(cmake/FetchFirebirdHeaders.cmake)
 include_directories(
     ${CMAKE_CURRENT_SOURCE_DIR}/src
     ${CMAKE_CURRENT_SOURCE_DIR}/src/IscDbc
+    ${CMAKE_CURRENT_BINARY_DIR}/generated
     ${FIREBIRD_INCLUDE_DIR}
 )
 
 # Add subdirectories
 add_subdirectory(src/IscDbc)
+
+# Windows resource file for version info
+if(WIN32)
+    set(ODBCJDBC_RC src/OdbcJdbc.rc)
+endif()
 
 # Main ODBC driver library sources
 set(ODBCJDBC_SOURCES
@@ -126,7 +149,7 @@ set(ODBCJDBC_HEADERS
 )
 
 # Create the main ODBC driver library
-add_library(OdbcFb ${ODBCJDBC_SOURCES} ${ODBCJDBC_HEADERS})
+add_library(OdbcFb ${ODBCJDBC_SOURCES} ${ODBCJDBC_HEADERS} ${ODBCJDBC_RC})
 
 # Set library output name
 if(WIN32)

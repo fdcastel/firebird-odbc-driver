@@ -3,7 +3,7 @@ name: Release
 on:
   push:
     tags:
-      - 'v*.*.*'
+      - 'v[0-9]+.[0-9]+.[0-9]+'
 
 env:
   BUILD_TYPE: Release
@@ -12,143 +12,143 @@ jobs:
   create-release:
     runs-on: ubuntu-latest
     outputs:
-      upload_url: ${{ steps.create_release.outputs.upload_url }}
       version: ${{ steps.get_version.outputs.version }}
     steps:
       - name: Get version from tag
         id: get_version
         run: echo "version=${GITHUB_REF#refs/tags/v}" >> $GITHUB_OUTPUT
-        
+
       - name: Create Release
-        id: create_release
-        uses: actions/create-release@v1
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        uses: softprops/action-gh-release@v2
         with:
-          tag_name: ${{ github.ref }}
-          release_name: Firebird ODBC Driver ${{ github.ref }}
+          name: Firebird ODBC Driver v${{ steps.get_version.outputs.version }}
           draft: false
           prerelease: false
+          generate_release_notes: true
           body: |
-            Release of Firebird ODBC Driver version ${{ steps.get_version.outputs.version }}
-            
-            ## Downloads
-            - Windows x64: `firebird-odbc-driver-windows-x64.zip`
-            - Linux x64: `firebird-odbc-driver-linux-x64.tar.gz`
-            
-            ## Installation
-            
-            ### Windows
+            ## Firebird ODBC Driver v${{ steps.get_version.outputs.version }}
+
+            ### Downloads
+            | Platform | Installer | Archive |
+            |----------|-----------|---------|
+            | Windows x64 | `firebird-odbc-driver-${{ steps.get_version.outputs.version }}-win-x64.msi` | `firebird-odbc-driver-${{ steps.get_version.outputs.version }}-win-x64.zip` |
+            | Linux x64 | — | `firebird-odbc-driver-${{ steps.get_version.outputs.version }}-linux-x64.tar.gz` |
+
+            ### Installation
+
+            #### Windows (MSI Installer — Recommended)
+            1. Download the `.msi` file
+            2. Double-click to install, or use `msiexec /i firebird-odbc-driver-${{ steps.get_version.outputs.version }}-win-x64.msi /quiet`
+            3. The driver will be registered automatically in the ODBC Data Source Administrator
+
+            #### Windows (ZIP — Manual)
             1. Extract the ZIP file
-            2. Copy `FirebirdODBC.dll` to `C:\Windows\System32` (for 64-bit) or `C:\Windows\SysWOW64` (for 32-bit)
-            3. Register the driver using the ODBC Data Source Administrator or installer
-            
-            ### Linux
+            2. Copy `FirebirdODBC.dll` to `C:\Windows\System32`
+            3. Register the driver manually via the ODBC Data Source Administrator
+
+            #### Linux
             1. Extract the TAR.GZ file
             2. Copy `libOdbcFb.so` to `/usr/local/lib/odbc/`
-            3. Register the driver in `/etc/odbcinst.ini`
-            
-            ## Changes
-            See [ChangeLog](https://github.com/${{ github.repository }}/blob/master/ChangeLog_v3.0) for details.
+            3. Register the driver in `/etc/odbcinst.ini` (see included `odbcinst.ini.sample`)
 
   build-windows:
     needs: create-release
     runs-on: windows-latest
-    
+
     steps:
     - uses: actions/checkout@v4
-    
-    - name: Configure CMake
-      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DBUILD_TESTING=OFF
-      
-    - name: Build
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}}
-      
-    - name: Package Windows Build
-      shell: powershell
-      run: |
-        $packageDir = "${{github.workspace}}/package-windows"
-        New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
-        
-        # Copy DLL
-        Copy-Item "${{github.workspace}}/build/${{env.BUILD_TYPE}}/FirebirdODBC.dll" -Destination $packageDir
-        
-        # Copy lib if exists
-        if (Test-Path "${{github.workspace}}/build/${{env.BUILD_TYPE}}/FirebirdODBC.lib") {
-          Copy-Item "${{github.workspace}}/build/${{env.BUILD_TYPE}}/FirebirdODBC.lib" -Destination $packageDir
-        }
-        
-        # Copy README and license files
-        Copy-Item "${{github.workspace}}/README.md" -Destination $packageDir -ErrorAction SilentlyContinue
-        Copy-Item "${{github.workspace}}/ChangeLog_v3.0" -Destination $packageDir -ErrorAction SilentlyContinue
-        
-        # Create ZIP
-        Compress-Archive -Path "$packageDir/*" -DestinationPath "${{github.workspace}}/firebird-odbc-driver-windows-x64.zip"
-        
-    - name: Upload Windows Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
       with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: ./firebird-odbc-driver-windows-x64.zip
-        asset_name: firebird-odbc-driver-windows-x64-v${{ needs.create-release.outputs.version }}.zip
-        asset_content_type: application/zip
+        fetch-depth: 0  # Full history needed for git describe
+
+    - name: Configure CMake
+      run: cmake -B build -S . -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DBUILD_TESTING=OFF -DODBC_OFFICIAL_RELEASE=ON
+
+    - name: Build
+      run: cmake --build build --config ${{env.BUILD_TYPE}}
+
+    - name: Install WiX Toolset
+      run: dotnet tool install --global wix
+
+    - name: Build MSI Installer
+      shell: pwsh
+      run: |
+        $version = "${{ needs.create-release.outputs.version }}.0"
+        $dllPath = Resolve-Path "build/${{env.BUILD_TYPE}}/FirebirdODBC.dll"
+
+        wix build `
+          -d ProductVersion=$version `
+          -d DriverPath="$dllPath" `
+          -d Configuration=${{env.BUILD_TYPE}} `
+          -arch x64 `
+          -o "firebird-odbc-driver-${{ needs.create-release.outputs.version }}-win-x64.msi" `
+          installer/Product.wxs
+
+    - name: Package Windows ZIP
+      shell: pwsh
+      run: |
+        $packageDir = "package-windows"
+        New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
+
+        Copy-Item "build/${{env.BUILD_TYPE}}/FirebirdODBC.dll" -Destination $packageDir
+        Copy-Item "build/${{env.BUILD_TYPE}}/FirebirdODBC.lib" -Destination $packageDir -ErrorAction SilentlyContinue
+        Copy-Item "README.md" -Destination $packageDir -ErrorAction SilentlyContinue
+
+        Compress-Archive -Path "$packageDir/*" `
+          -DestinationPath "firebird-odbc-driver-${{ needs.create-release.outputs.version }}-win-x64.zip"
+
+    - name: Upload Release Assets
+      uses: softprops/action-gh-release@v2
+      with:
+        files: |
+          firebird-odbc-driver-${{ needs.create-release.outputs.version }}-win-x64.msi
+          firebird-odbc-driver-${{ needs.create-release.outputs.version }}-win-x64.zip
 
   build-linux:
     needs: create-release
     runs-on: ubuntu-latest
-    
+
     steps:
     - uses: actions/checkout@v4
-    
+      with:
+        fetch-depth: 0  # Full history needed for git describe
+
     - name: Install Dependencies
       run: |
         sudo apt-get update
         sudo apt-get install -y unixodbc unixodbc-dev firebird-dev
-        
+
     - name: Configure CMake
-      run: cmake -B ${{github.workspace}}/build -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DBUILD_TESTING=OFF
-      
+      run: cmake -B build -S . -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DBUILD_TESTING=OFF -DODBC_OFFICIAL_RELEASE=ON
+
     - name: Build
-      run: cmake --build ${{github.workspace}}/build --config ${{env.BUILD_TYPE}} -- -j$(nproc)
-      
+      run: cmake --build build --config ${{env.BUILD_TYPE}} -- -j$(nproc)
+
     - name: Package Linux Build
       run: |
-        packageDir="${{github.workspace}}/package-linux"
+        packageDir="package-linux"
         mkdir -p "$packageDir"
-        
-        # Copy shared library
-        cp ${{github.workspace}}/build/libOdbcFb.so "$packageDir/"
-        
-        # Copy IscDbc library if built separately
-        if [ -f "${{github.workspace}}/build/src/IscDbc/libIscDbc.a" ]; then
-          cp ${{github.workspace}}/build/src/IscDbc/libIscDbc.a "$packageDir/"
+
+        cp build/libOdbcFb.so "$packageDir/"
+
+        if [ -f "build/src/IscDbc/libIscDbc.a" ]; then
+          cp build/src/IscDbc/libIscDbc.a "$packageDir/"
         fi
-        
-        # Copy README and license files
-        cp ${{github.workspace}}/README.md "$packageDir/" 2>/dev/null || true
-        cp ${{github.workspace}}/ChangeLog_v3.0 "$packageDir/" 2>/dev/null || true
-        
-        # Create sample odbcinst.ini
-        cat > "$packageDir/odbcinst.ini.sample" << EOF
+
+        cp README.md "$packageDir/" 2>/dev/null || true
+
+        cat > "$packageDir/odbcinst.ini.sample" << 'EOF'
         [Firebird ODBC Driver]
         Description = Firebird ODBC Driver
         Driver = /usr/local/lib/odbc/libOdbcFb.so
         Setup = /usr/local/lib/odbc/libOdbcFb.so
         FileUsage = 1
         EOF
-        
-        # Create TAR.GZ
+
         cd "$packageDir"
-        tar -czf "${{github.workspace}}/firebird-odbc-driver-linux-x64.tar.gz" *
-        
-    - name: Upload Linux Release Asset
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        tar -czf "../firebird-odbc-driver-${{ needs.create-release.outputs.version }}-linux-x64.tar.gz" *
+
+    - name: Upload Release Assets
+      uses: softprops/action-gh-release@v2
       with:
-        upload_url: ${{ needs.create-release.outputs.upload_url }}
-        asset_path: ./firebird-odbc-driver-linux-x64.tar.gz
-        asset_name: firebird-odbc-driver-linux-x64-v${{ needs.create-release.outputs.version }}.tar.gz
-        asset_content_type: application/gzip
+        files: |
+          firebird-odbc-driver-${{ needs.create-release.outputs.version }}-linux-x64.tar.gz
