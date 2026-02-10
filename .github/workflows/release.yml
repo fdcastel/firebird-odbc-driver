@@ -5,11 +5,12 @@ on:
     tags:
       - 'v[0-9]+.[0-9]+.[0-9]+*'
 
-env:
-  BUILD_TYPE: Release
-
 jobs:
-  create-release:
+  build-and-test:
+    uses: ./.github/workflows/build-and-test.yml
+
+  release:
+    needs: build-and-test
     runs-on: ubuntu-latest
     outputs:
       version: ${{ steps.get_version.outputs.version }}
@@ -35,20 +36,22 @@ jobs:
           prerelease: ${{ steps.detect_prerelease.outputs.is_prerelease }}
           generate_release_notes: true
 
-  build-windows:
-    needs: create-release
+  package-windows:
+    needs: [build-and-test, release]
     runs-on: windows-latest
 
     steps:
     - uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Full history needed for git describe
+        sparse-checkout: |
+          installer
+          README.md
 
-    - name: Configure CMake
-      run: cmake -B build -S . -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DBUILD_TESTING=OFF -DODBC_OFFICIAL_RELEASE=ON
-
-    - name: Build
-      run: cmake --build build --config ${{env.BUILD_TYPE}}
+    - name: Download Windows Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: windows-x64-binaries
+        path: artifacts
 
     - name: Install WiX Toolset
       run: dotnet tool install --global wix
@@ -56,67 +59,62 @@ jobs:
     - name: Build MSI Installer
       shell: pwsh
       run: |
-        $version = "${{ needs.create-release.outputs.version }}.0"
-        $dllPath = Resolve-Path "build/${{env.BUILD_TYPE}}/FirebirdODBC.dll"
+        $version = "${{ needs.release.outputs.version }}"
+        # MSI ProductVersion requires exactly 3 or 4 numeric parts — strip any prerelease suffix
+        $msiVersion = ($version -replace '-.*', '') + '.0'
+        $dllPath = Resolve-Path "artifacts/FirebirdODBC.dll"
 
         wix build `
-          -d ProductVersion=$version `
+          -d ProductVersion=$msiVersion `
           -d DriverPath="$dllPath" `
-          -d Configuration=${{env.BUILD_TYPE}} `
+          -d Configuration=Release `
           -arch x64 `
-          -o "firebird-odbc-driver-${{ needs.create-release.outputs.version }}-win-x64.msi" `
+          -o "firebird-odbc-driver-$version-win-x64.msi" `
           installer/Product.wxs
 
     - name: Package Windows ZIP
       shell: pwsh
       run: |
+        $version = "${{ needs.release.outputs.version }}"
         $packageDir = "package-windows"
         New-Item -ItemType Directory -Path $packageDir -Force | Out-Null
 
-        Copy-Item "build/${{env.BUILD_TYPE}}/FirebirdODBC.dll" -Destination $packageDir
-        Copy-Item "build/${{env.BUILD_TYPE}}/FirebirdODBC.lib" -Destination $packageDir -ErrorAction SilentlyContinue
+        Copy-Item "artifacts/FirebirdODBC.dll" -Destination $packageDir
+        Copy-Item "artifacts/FirebirdODBC.lib" -Destination $packageDir -ErrorAction SilentlyContinue
         Copy-Item "README.md" -Destination $packageDir -ErrorAction SilentlyContinue
 
         Compress-Archive -Path "$packageDir/*" `
-          -DestinationPath "firebird-odbc-driver-${{ needs.create-release.outputs.version }}-win-x64.zip"
+          -DestinationPath "firebird-odbc-driver-$version-win-x64.zip"
 
     - name: Upload Release Assets
       uses: softprops/action-gh-release@v2
       with:
         files: |
-          firebird-odbc-driver-${{ needs.create-release.outputs.version }}-win-x64.msi
-          firebird-odbc-driver-${{ needs.create-release.outputs.version }}-win-x64.zip
+          firebird-odbc-driver-${{ needs.release.outputs.version }}-win-x64.msi
+          firebird-odbc-driver-${{ needs.release.outputs.version }}-win-x64.zip
 
-  build-linux:
-    needs: create-release
+  package-linux:
+    needs: [build-and-test, release]
     runs-on: ubuntu-latest
 
     steps:
     - uses: actions/checkout@v4
       with:
-        fetch-depth: 0  # Full history needed for git describe
+        sparse-checkout: README.md
 
-    - name: Install Dependencies
-      run: |
-        sudo apt-get update
-        sudo apt-get install -y unixodbc unixodbc-dev firebird-dev
-
-    - name: Configure CMake
-      run: cmake -B build -S . -DCMAKE_BUILD_TYPE=${{env.BUILD_TYPE}} -DBUILD_TESTING=OFF -DODBC_OFFICIAL_RELEASE=ON
-
-    - name: Build
-      run: cmake --build build --config ${{env.BUILD_TYPE}} -- -j$(nproc)
+    - name: Download Linux Artifacts
+      uses: actions/download-artifact@v4
+      with:
+        name: linux-x64-binaries
+        path: artifacts
 
     - name: Package Linux Build
       run: |
+        version="${{ needs.release.outputs.version }}"
         packageDir="package-linux"
         mkdir -p "$packageDir"
 
-        cp build/libOdbcFb.so "$packageDir/"
-
-        if [ -f "build/src/IscDbc/libIscDbc.a" ]; then
-          cp build/src/IscDbc/libIscDbc.a "$packageDir/"
-        fi
+        cp artifacts/libOdbcFb.so "$packageDir/"
 
         cp README.md "$packageDir/" 2>/dev/null || true
 
@@ -129,10 +127,10 @@ jobs:
         EOF
 
         cd "$packageDir"
-        tar -czf "../firebird-odbc-driver-${{ needs.create-release.outputs.version }}-linux-x64.tar.gz" *
+        tar -czf "../firebird-odbc-driver-${version}-linux-x64.tar.gz" *
 
     - name: Upload Release Assets
       uses: softprops/action-gh-release@v2
       with:
         files: |
-          firebird-odbc-driver-${{ needs.create-release.outputs.version }}-linux-x64.tar.gz
+          firebird-odbc-driver-${{ needs.release.outputs.version }}-linux-x64.tar.gz

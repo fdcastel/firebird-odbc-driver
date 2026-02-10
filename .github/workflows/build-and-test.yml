@@ -3,6 +3,7 @@ name: Build and Test
 on:
   push:
   pull_request:
+  workflow_call:
 
 jobs:
   build-and-test-windows:
@@ -12,7 +13,23 @@ jobs:
     - uses: actions/checkout@v4
       with:
         fetch-depth: 0
-    
+
+    - name: Cache CMake FetchContent
+      uses: actions/cache@v4
+      with:
+        path: build/_deps
+        key: fetchcontent-windows-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt', 'cmake/FetchFirebirdHeaders.cmake') }}
+        restore-keys: fetchcontent-windows-
+
+    - name: Cache PowerShell Modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/Documents/PowerShell/Modules/PSFirebird
+          ~/Documents/PowerShell/Modules/InvokeBuild
+        key: psmodules-windows-${{ hashFiles('install-prerequisites.ps1') }}
+        restore-keys: psmodules-windows-
+
     - name: Install Prerequisites
       shell: pwsh
       run: ./install-prerequisites.ps1
@@ -61,7 +78,23 @@ jobs:
           fi
           sudo apt-get update
         fi
-        
+
+    - name: Cache CMake FetchContent
+      uses: actions/cache@v4
+      with:
+        path: build/_deps
+        key: fetchcontent-linux-${{ hashFiles('CMakeLists.txt', 'tests/CMakeLists.txt', 'cmake/FetchFirebirdHeaders.cmake') }}
+        restore-keys: fetchcontent-linux-
+
+    - name: Cache PowerShell Modules
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.local/share/powershell/Modules/PSFirebird
+          ~/.local/share/powershell/Modules/InvokeBuild
+        key: psmodules-linux-${{ hashFiles('install-prerequisites.ps1') }}
+        restore-keys: psmodules-linux-
+
     - name: Install Prerequisites
       shell: pwsh
       run: ./install-prerequisites.ps1
