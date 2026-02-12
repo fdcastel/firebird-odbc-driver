@@ -4,7 +4,7 @@
 **Status**: Authoritative reference for all known issues, improvements, and roadmap  
 **Benchmark**: PostgreSQL ODBC driver (psqlodbc) — 30+ years of development, 49 regression tests, battle-tested
 **Last Updated**: February 11, 2026  
-**Version**: 3.7
+**Version**: 3.8
 
 > This document consolidates all known issues and newly identified architectural deficiencies.
 > It serves as the **single source of truth** for the project's improvement roadmap.
@@ -1294,8 +1294,8 @@ The migration will be **incremental, not big-bang**. Each task replaces one IscD
 | **14.4.1** | **Replace `IscStatement`/`IscPreparedStatement` with `fbcpp::Statement`** — The most complex migration. fb-cpp's `Statement` combines prepare + execute + fetch. | Hard | ❌ |
 | **14.4.2** | **Migrate parameter binding** — Replace `Sqlda::setValue()` with `fbcpp::Statement::setInt32()`, `setString()`, etc. The ODBC layer still uses `OdbcConvert` for type coercion; the IscDbc layer just needs to pass values to fb-cpp. | Hard | ❌ |
 | **14.4.3** | **Migrate result fetching** — Replace `IscResultSet::nextFetch()` with `fbcpp::Statement::fetchNext()`. Map fb-cpp's `std::optional` returns to SQLDA null indicators. | Hard | ❌ |
-| **14.4.4** | **Migrate batch execution** — fb-cpp doesn't expose `IBatch` yet (see FB_CPP_SUGGESTIONS.md). Keep the existing `IBatch` code in a thin wrapper until fb-cpp adds support. | Medium | ❌ |
-| **14.4.5** | **Migrate scrollable cursors** — fb-cpp exposes `fetchFirst()`, `fetchLast()`, `fetchPrior()`, `fetchAbsolute()`, `fetchRelative()`. Map to existing OdbcStatement scroll methods. | Medium | ❌ |
+| **14.4.4** | **Migrate batch execution** — Use fb-cpp's `Batch` class (contributed by us — see [FB_CPP_PLAN.md](FB_CPP_PLAN.md) Phase 1). Replace existing raw `IBatch` code in `IscStatement` with `fbcpp::Batch`. | Medium | ❌ |
+| **14.4.5** | **Migrate scrollable cursors** — Use fb-cpp's `CursorType::SCROLLABLE` option (contributed by us — see [FB_CPP_PLAN.md](FB_CPP_PLAN.md) Phase 2). Map to existing OdbcStatement scroll methods. fb-cpp defaults to forward-only, matching our performance needs. | Medium | ❌ |
 | **14.4.6** | **Delete `IscStatement.cpp/.h`, `IscPreparedStatement.cpp/.h`, `IscCallableStatement.cpp/.h`, `IscResultSet.cpp/.h`, `Sqlda.cpp/.h`** — After migration, ~3,000 lines removed. | Easy | ❌ |
 
 **Phase 14.5: Blob Migration**
@@ -1346,13 +1346,16 @@ The migration will be **incremental, not big-bang**. Each task replaces one IscD
 
 #### fb-cpp Gaps to Address
 
-Based on our review (see [FB_CPP_SUGGESTIONS.md](../FB_CPP_SUGGESTIONS.md)), fb-cpp currently lacks:
+Based on our review (see [FB_CPP_SUGGESTIONS.md](../FB_CPP_SUGGESTIONS.md)) and the author's response ([FB_CPP_REPLY.md](../FB_CPP_REPLY.md)), fb-cpp has the following gaps that we will **contribute back as PRs** (see [Docs/FB_CPP_PLAN.md](FB_CPP_PLAN.md)):
 
-1. **`IBatch` support** — Critical for array parameter binding. Until fb-cpp adds this, keep our existing `IBatch` wrapper in a thin compatibility layer.
-2. **Array support** — Firebird arrays require legacy ISC API (`isc_array_get_slice`). Keep minimal ISC function pointers for this.
-3. **Error vector access** — Need raw ISC error codes for SQLSTATE mapping. May need to extract from `DatabaseException` or use `IStatus` directly.
+1. **`IBatch` support** — Critical for array parameter binding. Author agreed to add it. We will contribute a `Batch` + `BatchCompletionState` class wrapping `IBatch`/`IBatchCompletionState`. **Must land before Phase 14.4.4.**
+2. **Error vector in `DatabaseException`** — Critical for SQLSTATE mapping. Author agreed ("should be copied from original status and exposed"). We will contribute `getErrors()`, `getSqlCode()`, `getErrorCode()` methods. **Must land before Phase 14.7.1.**
+3. **Scrollable cursor control** — Author agreed. We will contribute a `CursorType` enum to `StatementOptions`. **Must land before Phase 14.4.5.**
+4. **Move assignment** — Author agreed (`Statement` "should be movable"). We will contribute `operator=(Statement&&)` and `operator=(Attachment&&)`.
+5. **`Descriptor::alias`** — Author agreed ("could be added"). Small addition for ODBC `SQL_DESC_LABEL`.
+6. **Array support** — Firebird arrays require legacy ISC API (`isc_array_get_slice`). fb-cpp won't wrap these. Keep minimal ISC function pointers for this rare feature.
 
-These gaps don't block adoption — they just require thin wrappers around fb-cpp for specific features.
+Note: `Client::getUtil()` is already exposed (our suggestion #9 was withdrawn). `IResultSet` abstraction was also withdrawn — Firebird doesn't support multiple active result sets per statement.
 
 #### Success Criteria
 
@@ -1572,11 +1575,12 @@ A first-class ODBC driver should:
 - [SQLAsyncNotificationCallback Function](https://learn.microsoft.com/en-us/sql/odbc/reference/develop-driver/sqlasyncnotificationcallback-function)
 - [fb-cpp — Modern C++ Wrapper for Firebird](https://github.com/asfernandes/fb-cpp) — adopted in Phase 14
 - [fb-cpp Documentation](https://asfernandes.github.io/fb-cpp) — API reference
+- [fb-cpp Contribution Plan](FB_CPP_PLAN.md) — our PRs to fb-cpp (Batch, error vector, scrollable cursors, etc.)
 - [firebird-vcpkg-registry](https://github.com/asfernandes/firebird-vcpkg-registry) — vcpkg registry for Firebird packages
 - [vcpkg Documentation](https://learn.microsoft.com/en-us/vcpkg/) — C++ package manager
 
 
 ---
 
-*Document version: 3.7 — February 11, 2026*
+*Document version: 3.8 — February 11, 2026*
 *This is the single authoritative reference for all Firebird ODBC driver improvements.*
