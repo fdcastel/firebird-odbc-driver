@@ -21,7 +21,7 @@ jobs:
         base_image: raspios_lite_arm64:latest
         copy_repository_path: /opt/fb_odbc
         copy_artifact_path: |
-                    /opt/fb_odbc/build/libOdbcFb.so
+                    build/libOdbcFb.so
         commands: |
             sudo apt-get update
             sudo apt-get install -y cmake unixodbc unixodbc-dev
