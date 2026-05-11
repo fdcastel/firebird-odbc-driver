@@ -221,14 +221,14 @@ void CServiceTabStatistics::onStartStatistics()
 	}
 	catch ( std::exception &ex )
 	{
+		ExceptionInfo info = extractExceptionInfo(ex);
 		writeFooterToLogFile();
 		EnableWindow( GetDlgItem( hDlg, IDOK ), TRUE );
 		EnableWindow( GetDlgItem( hDlg, IDC_BUTTON_VIEW_LOG ), !logPathFile.IsEmpty() );
 
 		char buffer[1024];
-		SQLException &exception = (SQLException&)ex;
-		JString text = exception.getText();
-		sprintf(buffer, "sqlcode %d, fbcode %d - %s", exception.getSqlcode(), exception.getFbcode(), (const char*)text );
+		JString text = info.text;
+		sprintf(buffer, "sqlcode %d, fbcode %d - %s", info.sqlcode, info.fbcode, (const char*)text );
 		MessageBox( NULL, buffer, TEXT( "Error!" ), MB_ICONERROR | MB_OK );
 	}
 

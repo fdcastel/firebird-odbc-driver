@@ -48,6 +48,26 @@ public:
 	virtual const char	*getTrace() = 0;
 };
 
+// Type-safe extraction of error information from any std::exception caught
+// across an SQLException-aware boundary. Returns the SQLException's codes and
+// text if the caught exception really is one; otherwise sqlcode/fbcode are 0
+// and text comes from std::exception::what(). Replaces unchecked C-style
+// reinterpret-casts (`SQLException &e = (SQLException&)ex;`) which produced
+// garbled diagnostic records when a non-SQLException reached the catch block.
+struct ExceptionInfo
+{
+	int          sqlcode;
+	int          fbcode;
+	const char  *text;
+};
+
+inline ExceptionInfo extractExceptionInfo(std::exception &ex)
+{
+	if (SQLException *sqlEx = dynamic_cast<SQLException*>(&ex))
+		return { sqlEx->getSqlcode(), sqlEx->getFbcode(), sqlEx->getText() };
+	return { 0, 0, ex.what() };
+}
+
 }; // end namespace IscDbcLibrary
 
 #endif

@@ -263,6 +263,15 @@ OdbcError* OdbcObject::postError(const char * sqlState, SQLException &exception)
 	return postError( new OdbcError( exception.getSqlcode(), exception.getFbcode(), sqlState, exception.getText() ) );
 }
 
+// Type-safe overload: when only a std::exception& is in scope, dispatch
+// through extractExceptionInfo so a non-SQLException doesn't get reinterpreted
+// via an unchecked cast.
+OdbcError* OdbcObject::postError(const char * sqlState, std::exception &ex)
+{
+	ExceptionInfo info = extractExceptionInfo(ex);
+	return postError( new OdbcError( info.sqlcode, info.fbcode, sqlState, info.text ) );
+}
+
 const char * OdbcObject::getString(char * * temp, const UCHAR * string, int length, const char *defaultValue)
 {
 	if (!string)

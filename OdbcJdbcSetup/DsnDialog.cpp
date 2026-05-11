@@ -791,9 +791,9 @@ void CDsnDialog::OnTestConnection( HWND hDlg )
 	}
 	catch ( std::exception &ex )
 	{
-		SQLException &exception = (SQLException&)ex;
+		ExceptionInfo info = extractExceptionInfo(ex);
 		char buffer[2048];
-		JString text = exception.getText();
+		JString text = info.text;
 
 		sprintf( buffer, "%s\n%s", _TR( IDS_MESSAGE_02, "Connection failed!" ), (const char*)text );
 		removeNameFileDBfromMessage ( buffer );
