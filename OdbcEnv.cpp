@@ -134,8 +134,7 @@ SQLRETURN OdbcEnv::sqlEndTran(int operation)
 		}
 		catch ( std::exception &ex )
 		{
-			SQLException &exception = (SQLException&)ex;
-			postError ("HY000", exception);
+			postError ("HY000", ex);
 			return SQL_ERROR;
 		}
 
@@ -194,8 +193,7 @@ SQLRETURN OdbcEnv::sqlGetEnvAttr(int attribute, SQLPOINTER ptr, int bufferLength
 	}
 	catch ( std::exception &ex )
 	{
-		SQLException &exception = (SQLException&)ex;
-		postError ("HY000", exception);
+		postError ("HY000", ex);
 		return SQL_ERROR;
 	}
 
@@ -224,8 +222,7 @@ SQLRETURN OdbcEnv::sqlSetEnvAttr(int attribute, SQLPOINTER value, int length)
 	}
 	catch ( std::exception &ex )
 	{
-		SQLException &exception = (SQLException&)ex;
-		postError ("HY000", exception);
+		postError ("HY000", ex);
 		return SQL_ERROR;
 	}
 			

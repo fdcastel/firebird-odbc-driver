@@ -309,12 +309,12 @@ void CUsersTabUsers::onEditUser( enumEditUser enOption )
 	}
 	catch ( std::exception &ex )
 	{
+		ExceptionInfo info = extractExceptionInfo(ex);
 		EnableWindow( GetDlgItem( hDlg, IDC_BUTTON_GET_INFO ), TRUE );
 
 		char buffer[1024];
-		SQLException &exception = (SQLException&)ex;
-		JString text = exception.getText();
-		sprintf(buffer, "sqlcode %d, fbcode %d - %s", exception.getSqlcode(), exception.getFbcode(), (const char*)text );
+		JString text = info.text;
+		sprintf(buffer, "sqlcode %d, fbcode %d - %s", info.sqlcode, info.fbcode, (const char*)text );
 		MessageBox( NULL, buffer, TEXT( "Error!" ), MB_ICONERROR | MB_OK );
 	}
 
@@ -400,12 +400,12 @@ void CUsersTabUsers::onGetUsersList()
 	}
 	catch ( std::exception &ex )
 	{
+		ExceptionInfo info = extractExceptionInfo(ex);
 		EnableWindow( GetDlgItem( hDlg, IDC_BUTTON_GET_INFO ), TRUE );
 
 		char buffer[1024];
-		SQLException &exception = (SQLException&)ex;
-		JString text = exception.getText();
-		sprintf(buffer, "sqlcode %d, fbcode %d - %s", exception.getSqlcode(), exception.getFbcode(), (const char*)text );
+		JString text = info.text;
+		sprintf(buffer, "sqlcode %d, fbcode %d - %s", info.sqlcode, info.fbcode, (const char*)text );
 		MessageBox( NULL, buffer, TEXT( "Error!" ), MB_ICONERROR | MB_OK );
 	}
 

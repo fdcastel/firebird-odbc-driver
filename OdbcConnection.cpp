@@ -1028,8 +1028,7 @@ SQLRETURN OdbcConnection::sqlNativeSql( SQLCHAR * inStatementText, SQLINTEGER te
 	}
 	catch ( std::exception &ex )
 	{
-		SQLException &exception = (SQLException&)ex;
-		postError( "HY000", exception );
+		postError( "HY000", ex );
 		return SQL_ERROR;
 	}
 
@@ -1134,8 +1133,7 @@ SQLRETURN OdbcConnection::sqlDisconnect()
 	}
 	catch ( std::exception &ex )
 	{
-		SQLException &exception = (SQLException&)ex;
-		postError ("01002", exception);
+		postError ("01002", ex);
 		connection = NULL;
 		connected = false;
 		return SQL_SUCCESS_WITH_INFO;
@@ -1711,17 +1709,21 @@ SQLRETURN OdbcConnection::connect(const char *sharedLibrary, const char * databa
 	}
 	catch ( std::exception &ex )
 	{
-		SQLException &exception = (SQLException&)ex;
+		ExceptionInfo info = extractExceptionInfo(ex);
+
 		if ( env->envShare )
 			env->envShare = NULL;
 
 		if ( properties )
 			properties->release();
 
-		connection->close();
-		connection = NULL;
+		if ( connection )
+		{
+			connection->close();
+			connection = NULL;
+		}
 
-		return sqlReturn( SQL_ERROR, "08004", exception.getText(), exception.getSqlcode() );
+		return sqlReturn( SQL_ERROR, "08004", info.text, info.sqlcode );
 	}
 
 	connected = true;
@@ -1748,8 +1750,7 @@ SQLRETURN OdbcConnection::sqlEndTran(int operation)
 		}
 		catch ( std::exception &ex )
 		{
-			SQLException &exception = (SQLException&)ex;
-			postError ("S1000", exception);
+			postError ("S1000", ex);
 			return SQL_ERROR;
 		}
 
@@ -1766,8 +1767,7 @@ SQLRETURN OdbcConnection::sqlExecuteCreateDatabase(const char * sqlString)
 	}
 	catch ( std::exception &ex )
 	{
-		SQLException &exception = (SQLException&)ex;
-		postError( "HY000", exception );
+		postError( "HY000", ex );
 		return SQL_ERROR;
 	}
 
@@ -2180,8 +2180,7 @@ void OdbcConnection::initUserEvents( PODBC_EVENTS_BLOCK_INFO infoEvents )
 	}
 	catch ( std::exception &ex )
 	{
-		SQLException &exception = (SQLException&)ex;
-		postError( "HY000", exception );
+		postError( "HY000", ex );
 	}
 }
 
@@ -2201,8 +2200,7 @@ void OdbcConnection::updateResultEvents( char *updated )
 	}
 	catch ( std::exception &ex )
 	{
-		SQLException &exception = (SQLException&)ex;
-		postError( "HY000", exception );
+		postError( "HY000", ex );
 	}
 }
 
@@ -2214,8 +2212,7 @@ void OdbcConnection::requeueEvents()
 	}
 	catch ( std::exception &ex )
 	{
-		SQLException &exception = (SQLException&)ex;
-		postError( "HY000", exception );
+		postError( "HY000", ex );
 	}
 }
 
