@@ -1001,20 +1001,27 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 		}
 		break;
 	case SQL_C_GUID:
-		// Wire-side (input parameter binding) — Firebird's IPD describes the slot
-		// as either BINARY(16) / CHAR(16) OCTETS, a text VARCHAR/CHAR, or (FB4+)
-		// genuine BINARY. Route to dedicated wire-only conversions; leave the
-		// pre-existing convGuidToString / convGuidToStringW untouched for the
-		// app-side fetch path below.
+		// Wire-side (input parameter binding) — Firebird's IPD describes the
+		// slot as either (VAR)BINARY(16) / (VAR)CHAR(16) CHARACTER SET OCTETS
+		// (subtype 1, sqllen 16) or a text VARCHAR/CHAR. Route to dedicated
+		// wire-only conversions; leave the pre-existing convGuidToString /
+		// convGuidToStringW untouched for the app-side fetch path below.
 		if ( to->isIndicatorSqlDa )
 		{
-			// BINARY(16) / CHAR(16) CHARACTER SET OCTETS — 16 raw bytes
+			// BINARY(16) / VARBINARY(16) — i.e. (VAR)CHAR(16) CHARACTER SET
+			// OCTETS, which is how Firebird represents native FB4+ BINARY types
+			// on the wire (subtype 1, sqllen 16). Send 16 raw canonical bytes.
+			// setTypeText() converts a SQL_VARYING wire (VARBINARY) to SQL_TEXT
+			// so convGuidToBinary can write at offset 0 with no length prefix;
+			// without it Firebird reads the first GUID bytes as a VARYING length
+			// prefix and over-reads the buffer (SEGFAULT on FB6). A fixed
+			// CHAR(16) wire is already SQL_TEXT, so this is a no-op there.
 			if ( to->headSqlVarPtr->getSqlSubtype() == 1
 				&& to->headSqlVarPtr->getSqlLen() == 16 )
+			{
+				to->headSqlVarPtr->setTypeText();
 				return &OdbcConvert::convGuidToBinary;
-			// FB4+ BINARY/VARBINARY described directly as SQL_C_BINARY
-			if ( to->conciseType == SQL_C_BINARY )
-				return &OdbcConvert::convGuidToBinary;
+			}
 			// Text wire (VARCHAR/CHAR, any charset) — 36-char canonical UUID.
 			// setTypeText() converts SQL_VARYING to SQL_TEXT so convGuidToVarString
 			// can write the bytes without a length prefix.
@@ -1031,8 +1038,6 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 			return &OdbcConvert::convGuidToString;
 		case SQL_C_WCHAR:
 			return &OdbcConvert::convGuidToStringW;
-		case SQL_C_BINARY:
-			return &OdbcConvert::convGuidToBinary;
 		default:
 			return &OdbcConvert::notYetImplemented;
 		}

@@ -608,6 +608,61 @@ TEST_F(GuidParamBindingTest, BindGuidToUuidToCharRoundtrip) {
         << "Got: '" << text << "' — this is the corruption pattern from issue #295.";
 }
 
+// Bind SQL_C_GUID to a VARCHAR(16) CHARACTER SET OCTETS parameter — the
+// wire form of a native FB4+ VARBINARY(16). Unlike CHAR(16) OCTETS (a
+// fixed SQL_TEXT slot, covered by BindGuidToCharOctets16), this is a
+// SQL_VARYING slot, so it exercises convGuidToBinary writing into a
+// length-prefixed wire buffer. The dispatch calls setTypeText() to convert
+// the varying wire to SQL_TEXT before writing 16 raw bytes; without that the
+// first GUID bytes are read as a VARYING length prefix and the buffer is
+// over-read (SEGFAULT on the FB6 snapshot, silent on FB5).
+//
+// Skipped on FB6: even with the fix, the current FB6 master snapshot aborts
+// this parameterized OCTETS-VARYING insert with a server-side "Stack
+// overflow" — the same parameterized-query incompatibility already guarded
+// across the suite (see SKIP_ON_FIREBIRD6 usages). Exercised on FB 3/4/5.
+TEST_F(GuidParamBindingTest, BindGuidToVarcharOctets16) {
+    REQUIRE_FIREBIRD_CONNECTION();
+    SKIP_ON_FIREBIRD6();
+
+    TempTable table(this, "TEST_PB_GUID_VOCT",
+        "ID INTEGER NOT NULL PRIMARY KEY, "
+        "VAL VARCHAR(16) CHARACTER SET OCTETS");
+
+    SQLGUID guid = makeKnownGuid();
+    SQLLEN guidInd = sizeof(guid);
+    SQLINTEGER id = 1;
+    SQLLEN idInd = sizeof(id);
+
+    SQLRETURN ret = SQLBindParameter(hStmt, 1, SQL_PARAM_INPUT,
+        SQL_C_SLONG, SQL_INTEGER, 0, 0, &id, sizeof(id), &idInd);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLBindParameter(hStmt, 2, SQL_PARAM_INPUT,
+        SQL_C_GUID, SQL_GUID, 16, 0, &guid, sizeof(guid), &guidInd);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    ret = SQLExecDirect(hStmt,
+        (SQLCHAR*)"INSERT INTO TEST_PB_GUID_VOCT (ID, VAL) VALUES (?, ?)", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    Commit();
+    ReallocStmt();
+
+    ExecDirect("SELECT UUID_TO_CHAR(VAL) FROM TEST_PB_GUID_VOCT WHERE ID = 1");
+    ret = SQLFetch(hStmt);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    SQLCHAR buf[64] = {};
+    SQLLEN ind = 0;
+    ret = SQLGetData(hStmt, 1, SQL_C_CHAR, buf, sizeof(buf), &ind);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    std::string text((char*)buf);
+    while (!text.empty() && text.back() == ' ') text.pop_back();
+    EXPECT_EQ(text, kCanonicalText)
+        << "VARBINARY(16) (VARCHAR(16) OCTETS) GUID round-trip failed. "
+        << "Got: '" << text << "'";
+}
+
 // Test: DECFLOAT column insertion and retrieval on Firebird 4+
 TEST_F(Fb4PlusTest, DecfloatInsertAndRetrieve) {
     GTEST_SKIP() << "Requires Phase 8: SQL_GUID type mapping and FB4+ types (not yet merged)";
