@@ -1001,45 +1001,50 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 		}
 		break;
 	case SQL_C_GUID:
-		// Wire-side (input parameter binding) — Firebird's IPD describes the
-		// slot as either (VAR)BINARY(16) / (VAR)CHAR(16) CHARACTER SET OCTETS
-		// (subtype 1, sqllen 16) or a text VARCHAR/CHAR. Route to dedicated
-		// wire-only conversions; leave the pre-existing convGuidToString /
+		// Wire-side (input parameter binding): Firebird's IPD describes the
+		// slot as either BINARY(16) / VARBINARY(16) — i.e. (VAR)CHAR(16)
+		// CHARACTER SET OCTETS, the FB4+ standard-compliant aliases per the
+		// LangRef — or a text (VAR)CHAR. Route to dedicated wire-only
+		// conversions; leave the pre-existing convGuidToString /
 		// convGuidToStringW untouched for the app-side fetch path below.
 		if ( to->isIndicatorSqlDa )
 		{
-			// BINARY(16) / VARBINARY(16) — i.e. (VAR)CHAR(16) CHARACTER SET
-			// OCTETS, which is how Firebird represents native FB4+ BINARY types
-			// on the wire (subtype 1, sqllen 16). Send 16 raw canonical bytes.
-			// setTypeText() converts a SQL_VARYING wire (VARBINARY) to SQL_TEXT
-			// so convGuidToBinary can write at offset 0 with no length prefix;
-			// without it Firebird reads the first GUID bytes as a VARYING length
-			// prefix and over-reads the buffer (SEGFAULT on FB6). A fixed
-			// CHAR(16) wire is already SQL_TEXT, so this is a no-op there.
-			if ( to->headSqlVarPtr->getSqlSubtype() == 1
-				&& to->headSqlVarPtr->getSqlLen() == 16 )
+			// BINARY(16) or VARBINARY(16). setTypeText() converts a varying
+			// OCTETS wire (VARBINARY) to fixed SQL_TEXT so convGuidToBinary
+			// can write at offset 0 with no VARYING length prefix; OCTETS
+			// charset is preserved.  For a fixed BINARY (SQL_TEXT already)
+			// it's a no-op.  Without this, Firebird reads the first GUID
+			// bytes as a VARYING length prefix and over-reads the buffer
+			// (SEGFAULT on the FB6 snapshot, silent on FB5).
+			if ( to->headSqlVarPtr->getSqlLen() == GUID_BINARY_LEN
+				&& ( to->headSqlVarPtr->isBinary()
+				  || to->headSqlVarPtr->isVarBinary() ) )
 			{
 				to->headSqlVarPtr->setTypeText();
 				return &OdbcConvert::convGuidToBinary;
 			}
-			// Text wire (VARCHAR/CHAR, any charset) — 36-char canonical UUID.
-			// setTypeText() converts SQL_VARYING to SQL_TEXT so convGuidToVarString
-			// can write the bytes without a length prefix.
+			// Text wire (VARCHAR/CHAR, any non-OCTETS charset) — 36-char
+			// canonical UUID.  setTypeText() converts SQL_VARYING to
+			// SQL_TEXT so convGuidToVarString can write the bytes without
+			// a length prefix.
 			to->headSqlVarPtr->setTypeText();
 			return &OdbcConvert::convGuidToVarString;
 		}
-		// App-side output (fetching a column described as SQL_GUID into the
-		// application's bound buffer). Currently unreachable because the column
-		// side of SQL_GUID mapping is task T5-5 (open), but kept intact for when
-		// that lands.
-		switch(to->conciseType)
+		else
 		{
-		case SQL_C_CHAR:
-			return &OdbcConvert::convGuidToString;
-		case SQL_C_WCHAR:
-			return &OdbcConvert::convGuidToStringW;
-		default:
-			return &OdbcConvert::notYetImplemented;
+			// App-side output (fetching a column described as SQL_GUID into
+			// the application's bound buffer).  Currently unreachable
+			// because the column-side SQL_GUID mapping is open task T5-5
+			// (#287), but kept intact for when that lands.
+			switch(to->conciseType)
+			{
+			case SQL_C_CHAR:
+				return &OdbcConvert::convGuidToString;
+			case SQL_C_WCHAR:
+				return &OdbcConvert::convGuidToStringW;
+			default:
+				return &OdbcConvert::notYetImplemented;
+			}
 		}
 		break;
 
@@ -1719,8 +1724,10 @@ int OdbcConvert::convGuidToStringW(DescRecord * from, DescRecord * to)
 	return SQL_SUCCESS;
 }
 
-// Write SQLGUID as 16 bytes in canonical UUID byte order (Data1/2/3 big-endian, Data4 unchanged).
-// Used when the target is BINARY(16) / CHAR(16) CHARACTER SET OCTETS or SQL_C_BINARY.
+// Write SQLGUID as 16 bytes in canonical UUID byte order (Data1/2/3
+// big-endian, Data4 unchanged).  Used when the wire is BINARY(16) or
+// VARBINARY(16) (i.e. (VAR)CHAR(16) CHARACTER SET OCTETS) — see
+// getAdressFunction dispatch for SQL_C_GUID.
 int OdbcConvert::convGuidToBinary(DescRecord * from, DescRecord * to)
 {
 	char* pointer = (char*)getAdressBindDataTo((char*)to->dataPtr);
@@ -1731,7 +1738,7 @@ int OdbcConvert::convGuidToBinary(DescRecord * from, DescRecord * to)
 
 	SQLGUID *g = (SQLGUID*)getAdressBindDataFrom((char*)from->dataPtr);
 
-	unsigned char buf[16];
+	unsigned char buf[GUID_BINARY_LEN];
 	buf[0]  = (unsigned char)((g->Data1 >> 24) & 0xFF);
 	buf[1]  = (unsigned char)((g->Data1 >> 16) & 0xFF);
 	buf[2]  = (unsigned char)((g->Data1 >>  8) & 0xFF);
@@ -1742,27 +1749,39 @@ int OdbcConvert::convGuidToBinary(DescRecord * from, DescRecord * to)
 	buf[7]  = (unsigned char)( g->Data3        & 0xFF);
 	memcpy(buf + 8, g->Data4, 8);
 
+	// The dispatcher only routes here when sqllen == GUID_BINARY_LEN, so
+	// this defensive check should not fire in practice — but a truncated
+	// GUID is corrupted (not just "shorter"), so signal it as a hard
+	// error rather than silently storing 8 (or whatever) bytes.  ODBC
+	// SQLSTATE 22001 "String data, right truncation".
 	int outlen = (int)to->length;
-	int len = outlen < 16 ? outlen : 16;
+	if ( outlen < GUID_BINARY_LEN )
+	{
+		if ( parentStmt )
+			parentStmt->postError( new OdbcError( 0, "22001",
+				"String data, right truncation - GUID requires 16 bytes" ) );
+		return SQL_ERROR;
+	}
 
-	if ( len > 0 )
-		memcpy(pointer, buf, len);
+	memcpy( pointer, buf, GUID_BINARY_LEN );
 
 	if ( to->isIndicatorSqlDa ) {
-		to->headSqlVarPtr->setSqlLen(len);
+		to->headSqlVarPtr->setSqlLen( GUID_BINARY_LEN );
 	} else
 	if ( indicatorTo )
-		setIndicatorPtr(indicatorTo, len, to);
+		setIndicatorPtr( indicatorTo, GUID_BINARY_LEN, to );
 
 	return SQL_SUCCESS;
 }
 
 // Write SQLGUID as the 36-char canonical UUID string into a Firebird text
-// parameter slot (VARCHAR/CHAR of any text charset). The wire-side SQLDA
-// buffer for an untyped `?` placeholder is sized for VARCHAR(0) — too small
-// for 36 bytes — so we stage the string in the DescRecord's local buffer
-// and redirect Firebird to read from there via setSqlData(), mirroring the
-// idiom transferStringToAllowedType already uses for app→wire string moves.
+// parameter slot (VARCHAR/CHAR of any non-OCTETS charset).  The wire-side
+// SQLDA buffer for an untyped `?` placeholder is described by Firebird as
+// VARCHAR(0) — its default-sized local buffer is just 1 byte, nowhere near
+// the 36 we need — so we stage the string in the DescRecord's local
+// buffer (sized explicitly to GUID_STRING_LEN + 1) and redirect Firebird
+// to read from there via setSqlData(), mirroring the idiom that
+// transferStringToAllowedType already uses for app→wire string moves.
 // The dispatch in getAdressFunction has already called setTypeText() to
 // convert SQL_VARYING wires to SQL_TEXT (no length prefix), so we just
 // write 36 raw bytes and set sqllen.
@@ -1775,16 +1794,23 @@ int OdbcConvert::convGuidToVarString(DescRecord * from, DescRecord * to)
 
 	SQLGUID *g = (SQLGUID*)getAdressBindDataFrom((char*)from->dataPtr);
 
-	char tmp[37];
+	char tmp[GUID_STRING_LEN + 1];
 	int srcLen = snprintf(tmp, sizeof(tmp),
 		"%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X",
 		(unsigned int) g->Data1, g->Data2, g->Data3,
 		g->Data4[0], g->Data4[1], g->Data4[2], g->Data4[3],
 		g->Data4[4], g->Data4[5], g->Data4[6], g->Data4[7]);
-	if ( srcLen < 0 || srcLen > 36 ) srcLen = 36;
+	if ( srcLen < 0 || srcLen > (int)GUID_STRING_LEN )
+		srcLen = (int)GUID_STRING_LEN;
 
-	if ( !to->isLocalDataPtr )
-		to->allocateLocalDataPtr( srcLen + 1 );
+	// Always (re)allocate to guarantee the local buffer holds 36 chars +
+	// NUL.  DescRecord::allocateLocalDataPtr() frees any existing buffer
+	// first, so this is safe to call unconditionally — and necessary,
+	// because the previous "if ( !to->isLocalDataPtr )" guard was unsafe
+	// when a smaller default-sized buffer already existed (an untyped `?`
+	// described as VARCHAR(0) yields a 1-byte default buffer, which the
+	// 36-byte memcpy would overflow).
+	to->allocateLocalDataPtr( (int)GUID_STRING_LEN + 1 );
 
 	memcpy(to->localDataPtr, tmp, srcLen);
 	to->headSqlVarPtr->setSqlLen((short)srcLen);

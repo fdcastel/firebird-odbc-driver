@@ -105,6 +105,28 @@ public:
 	inline char *	getSqlData() { return sqlvar->sqldata; }
 	inline short *	getSqlInd() { return sqlvar->sqlind; }
 
+	// Charset id for CHARACTER SET OCTETS.  In Firebird's XSQLVAR, when
+	// sqltype is SQL_TEXT or SQL_VARYING the sqlsubtype field carries the
+	// CHARACTER SET id (not a BLOB-style subtype); OCTETS is charset id 1
+	// (see IscDbc/MultibyteConvert.cpp CODE_CHARSETS(OCTETS, 1, 1)).
+	static constexpr short CHARSET_OCTETS = 1;
+
+	// True iff the slot describes a Firebird BINARY(n) — the FB4+ alias for
+	// CHAR(n) CHARACTER SET OCTETS.
+	inline bool		isBinary()
+	{
+		return sqlvar->sqltype == SQL_TEXT
+			&& sqlvar->sqlsubtype == CHARSET_OCTETS;
+	}
+
+	// True iff the slot describes a Firebird VARBINARY(n) — the FB4+ alias
+	// for VARCHAR(n) CHARACTER SET OCTETS.
+	inline bool		isVarBinary()
+	{
+		return sqlvar->sqltype == SQL_VARYING
+			&& sqlvar->sqlsubtype == CHARSET_OCTETS;
+	}
+
 	// not used
 	//void		setSqlInd( short *ind ) { sqlvar->sqlind = ind; }
 	//void		setSqlType ( short type ) { sqlvar->sqltype = type; }
