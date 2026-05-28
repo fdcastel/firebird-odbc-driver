@@ -1025,10 +1025,10 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 			}
 			// Text wire (VARCHAR/CHAR, any non-OCTETS charset) — 36-char
 			// canonical UUID.  setTypeText() converts SQL_VARYING to
-			// SQL_TEXT so convGuidToVarString can write the bytes without
+			// SQL_TEXT so convGuidToWireString can write the bytes without
 			// a length prefix.
 			to->headSqlVarPtr->setTypeText();
-			return &OdbcConvert::convGuidToVarString;
+			return &OdbcConvert::convGuidToWireString;
 		}
 		else
 		{
@@ -1774,18 +1774,22 @@ int OdbcConvert::convGuidToBinary(DescRecord * from, DescRecord * to)
 	return SQL_SUCCESS;
 }
 
-// Write SQLGUID as the 36-char canonical UUID string into a Firebird text
-// parameter slot (VARCHAR/CHAR of any non-OCTETS charset).  The wire-side
-// SQLDA buffer for an untyped `?` placeholder is described by Firebird as
-// VARCHAR(0) — its default-sized local buffer is just 1 byte, nowhere near
-// the 36 we need — so we stage the string in the DescRecord's local
-// buffer (sized explicitly to GUID_STRING_LEN + 1) and redirect Firebird
-// to read from there via setSqlData(), mirroring the idiom that
-// transferStringToAllowedType already uses for app→wire string moves.
-// The dispatch in getAdressFunction has already called setTypeText() to
-// convert SQL_VARYING wires to SQL_TEXT (no length prefix), so we just
-// write 36 raw bytes and set sqllen.
-int OdbcConvert::convGuidToVarString(DescRecord * from, DescRecord * to)
+// Wire-side counterpart of convGuidToString — writes SQLGUID as the 36-char
+// canonical UUID into a Firebird text parameter slot (VARCHAR/CHAR of any
+// non-OCTETS charset).  Where convGuidToString writes into an app-supplied
+// buffer that the application sized (the SQLGetData fetch path, currently
+// dormant until column-side SQL_GUID mapping lands in T5-5 / #287), this
+// writes into the *wire* slot — and for an untyped `?` placeholder Firebird
+// describes that slot as VARCHAR(0), whose default-sized backing buffer is
+// just 1 byte, nowhere near the 36 we need.
+//
+// So we stage the string in DescRecord::localDataPtr (sized explicitly to
+// GUID_STRING_LEN + 1) and redirect Firebird to read from there via
+// HeadSqlVar::setSqlData() — the same idiom transferStringToAllowedType
+// uses for app→wire string moves.  The dispatch has already called
+// setTypeText() so the wire is SQL_TEXT (no length prefix); we just write
+// 36 raw bytes and set sqllen.
+int OdbcConvert::convGuidToWireString(DescRecord * from, DescRecord * to)
 {
 	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
 	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
@@ -1800,8 +1804,8 @@ int OdbcConvert::convGuidToVarString(DescRecord * from, DescRecord * to)
 		(unsigned int) g->Data1, g->Data2, g->Data3,
 		g->Data4[0], g->Data4[1], g->Data4[2], g->Data4[3],
 		g->Data4[4], g->Data4[5], g->Data4[6], g->Data4[7]);
-	if ( srcLen < 0 || srcLen > (int)GUID_STRING_LEN )
-		srcLen = (int)GUID_STRING_LEN;
+	if ( srcLen < 0 || srcLen > GUID_STRING_LEN )
+		srcLen = GUID_STRING_LEN;
 
 	// Always (re)allocate to guarantee the local buffer holds 36 chars +
 	// NUL.  DescRecord::allocateLocalDataPtr() frees any existing buffer
@@ -1810,7 +1814,7 @@ int OdbcConvert::convGuidToVarString(DescRecord * from, DescRecord * to)
 	// when a smaller default-sized buffer already existed (an untyped `?`
 	// described as VARCHAR(0) yields a 1-byte default buffer, which the
 	// 36-byte memcpy would overflow).
-	to->allocateLocalDataPtr( (int)GUID_STRING_LEN + 1 );
+	to->allocateLocalDataPtr( GUID_STRING_LEN + 1 );
 
 	memcpy(to->localDataPtr, tmp, srcLen);
 	to->headSqlVarPtr->setSqlLen((short)srcLen);

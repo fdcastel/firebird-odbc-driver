@@ -524,7 +524,6 @@ public:
 	//virtual void		setSqlSubType ( short subtype ) = 0;
 	virtual void		setSqlLen ( short len ) = 0;
 	virtual short		getSqlMultiple () = 0;
-	virtual short		getSqlSubtype () = 0;
 	virtual short		getSqlLen () = 0;
 
 	// True for Firebird BINARY(n) / VARBINARY(n), i.e. CHAR(n) / VARCHAR(n)
