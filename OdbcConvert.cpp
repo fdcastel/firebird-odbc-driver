@@ -1674,6 +1674,21 @@ int OdbcConvert::notYetImplemented(DescRecord * from, DescRecord * to)
 // Guid
 ////////////////////////////////////////////////////////////////////////
 
+// Format a SQLGUID as the 36-char canonical UUID string (8-4-4-4-12 hex,
+// upper-case, no NUL counted).  `out` must hold at least GUID_STRING_LEN + 1
+// bytes.  Returns snprintf's character count — always GUID_STRING_LEN for a
+// well-formed call, or negative on a (practically impossible) encoding error.
+// A GUID never formats to any other length, so callers treat
+// "result != GUID_STRING_LEN" as a hard error rather than clamping.
+static int formatGuidCanonical(char* out, size_t cap, const SQLGUID* g)
+{
+	return snprintf(out, cap,
+		"%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X",
+		(unsigned int) g->Data1, g->Data2, g->Data3,
+		g->Data4[0], g->Data4[1], g->Data4[2], g->Data4[3],
+		g->Data4[4], g->Data4[5], g->Data4[6], g->Data4[7]);
+}
+
 int OdbcConvert::convGuidToString(DescRecord * from, DescRecord * to)
 {
 	char* pointer = (char*)getAdressBindDataTo((char*)to->dataPtr);
@@ -1683,20 +1698,39 @@ int OdbcConvert::convGuidToString(DescRecord * from, DescRecord * to)
 	ODBCCONVERT_CHECKNULL( pointer );
 
 	SQLGUID *g = (SQLGUID*)getAdressBindDataFrom((char*)from->dataPtr);
-	int len, outlen = to->length;
 
-	len = snprintf(pointer, outlen, "%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X",
-		(unsigned int) g->Data1, g->Data2, g->Data3, g->Data4[0], g->Data4[1], g->Data4[2], g->Data4[3], g->Data4[4], g->Data4[5], g->Data4[6], g->Data4[7]);
+	char buf[GUID_STRING_LEN + 1];
+	if ( formatGuidCanonical(buf, sizeof(buf), g) != GUID_STRING_LEN )
+	{
+		if ( parentStmt )
+			parentStmt->postError( new OdbcError( 0, "HY000", "Internal error formatting GUID" ) );
+		return SQL_ERROR;
+	}
 
-	if ( len == -1 ) len = outlen;
+	// Copy into the application buffer honoring its size.  ODBC reports the
+	// full (untruncated) length via the indicator and raises 01004 when the
+	// buffer cannot hold all 36 chars + NUL terminator.
+	int outlen = to->length;
+	SQLRETURN ret = SQL_SUCCESS;
+	int copy = GUID_STRING_LEN;
+	if ( outlen <= GUID_STRING_LEN )
+	{
+		copy = outlen > 0 ? outlen - 1 : 0;
+		if ( parentStmt )
+			parentStmt->postError( new OdbcError( 0, "01004", "Data truncated" ) );
+		ret = SQL_SUCCESS_WITH_INFO;
+	}
+	if ( copy > 0 )
+		memcpy( pointer, buf, copy );
+	pointer[copy] = 0;
 
 	if ( to->isIndicatorSqlDa ) {
-		to->headSqlVarPtr->setSqlLen(len);
+		to->headSqlVarPtr->setSqlLen( (short)GUID_STRING_LEN );
 	} else
 	if ( indicatorTo )
-		setIndicatorPtr(indicatorTo, len, to);
+		setIndicatorPtr( indicatorTo, GUID_STRING_LEN, to );
 
-	return SQL_SUCCESS;
+	return ret;
 }
 
 int OdbcConvert::convGuidToStringW(DescRecord * from, DescRecord * to)
@@ -1799,25 +1833,23 @@ int OdbcConvert::convGuidToWireString(DescRecord * from, DescRecord * to)
 	SQLGUID *g = (SQLGUID*)getAdressBindDataFrom((char*)from->dataPtr);
 
 	char tmp[GUID_STRING_LEN + 1];
-	int srcLen = snprintf(tmp, sizeof(tmp),
-		"%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X",
-		(unsigned int) g->Data1, g->Data2, g->Data3,
-		g->Data4[0], g->Data4[1], g->Data4[2], g->Data4[3],
-		g->Data4[4], g->Data4[5], g->Data4[6], g->Data4[7]);
-	if ( srcLen < 0 || srcLen > GUID_STRING_LEN )
-		srcLen = GUID_STRING_LEN;
+	if ( formatGuidCanonical(tmp, sizeof(tmp), g) != GUID_STRING_LEN )
+	{
+		if ( parentStmt )
+			parentStmt->postError( new OdbcError( 0, "HY000", "Internal error formatting GUID" ) );
+		return SQL_ERROR;
+	}
 
 	// Always (re)allocate to guarantee the local buffer holds 36 chars +
 	// NUL.  DescRecord::allocateLocalDataPtr() frees any existing buffer
 	// first, so this is safe to call unconditionally — and necessary,
-	// because the previous "if ( !to->isLocalDataPtr )" guard was unsafe
-	// when a smaller default-sized buffer already existed (an untyped `?`
-	// described as VARCHAR(0) yields a 1-byte default buffer, which the
+	// because a smaller default-sized buffer may already exist (an untyped
+	// `?` described as VARCHAR(0) yields a 1-byte default buffer, which the
 	// 36-byte memcpy would overflow).
 	to->allocateLocalDataPtr( GUID_STRING_LEN + 1 );
 
-	memcpy(to->localDataPtr, tmp, srcLen);
-	to->headSqlVarPtr->setSqlLen((short)srcLen);
+	memcpy(to->localDataPtr, tmp, GUID_STRING_LEN);
+	to->headSqlVarPtr->setSqlLen((short)GUID_STRING_LEN);
 	to->headSqlVarPtr->setSqlData(to->localDataPtr);
 
 	return SQL_SUCCESS;
