@@ -542,9 +542,14 @@ TEST_F(GuidParamBindingTest, BindGuidToCharOctets16) {
         << "the canonical UUID. Got: '" << text << "'";
 }
 
-// Bind SQL_C_GUID to a VARCHAR parameter (Firebird infers VARCHAR for an
-// untyped `?` slot inside CHAR_TO_UUID(?)). The driver must send the 36-char
-// canonical UUID string.
+// Bind SQL_C_GUID to a text parameter. Firebird describes the `?` inside
+// CHAR_TO_UUID(?) as CHAR(36) in the connection charset. With CHARSET=UTF8
+// that slot is 144 bytes and the driver maps it to SQL_C_WCHAR; before the
+// fix the wide-char writer put UTF-16 on the wire, which is the "hex digit
+// at position 2" failure from issue #295. With CHARSET=NONE the slot is
+// CHAR(36) ASCII and the old code passed on Windows by accident (_snprintf
+// fits exactly 36 chars), so this test guards the regression only under
+// UTF8 or on Linux. The driver must send the 36-char canonical UUID string.
 TEST_F(GuidParamBindingTest, BindGuidToVarcharViaCharToUuid) {
     REQUIRE_FIREBIRD_CONNECTION();
 
@@ -661,6 +666,138 @@ TEST_F(GuidParamBindingTest, BindGuidToVarcharOctets16) {
     EXPECT_EQ(text, kCanonicalText)
         << "VARBINARY(16) (VARCHAR(16) OCTETS) GUID round-trip failed. "
         << "Got: '" << text << "'";
+}
+
+// ODBC defines no GUID conversion to numeric or date/time SQL types (see
+// "C to SQL: GUID"), so the driver must reject the bind with 07006 instead
+// of sending a string and letting Firebird fail on the conversion.
+TEST_F(GuidParamBindingTest, BindGuidToIntegerParamIsRejected) {
+    REQUIRE_FIREBIRD_CONNECTION();
+
+    SQLGUID guid = makeKnownGuid();
+    SQLLEN guidInd = sizeof(guid);
+
+    SQLRETURN ret = SQLBindParameter(hStmt, 1, SQL_PARAM_INPUT,
+        SQL_C_GUID, SQL_GUID, 16, 0, &guid, sizeof(guid), &guidInd);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    ret = SQLExecDirect(hStmt,
+        (SQLCHAR*)"SELECT CAST(? AS INTEGER) FROM rdb$database", SQL_NTS);
+    EXPECT_EQ(ret, SQL_ERROR);
+    EXPECT_EQ(GetSqlState(SQL_HANDLE_STMT, hStmt), "07006")
+        << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+}
+
+// An OCTETS slot shorter than 16 bytes cannot hold a GUID. A truncated GUID
+// is corrupt rather than merely short, so the driver reports 22001 instead
+// of writing a partial value.
+TEST_F(GuidParamBindingTest, BindGuidToUndersizedOctetsIsRejected) {
+    REQUIRE_FIREBIRD_CONNECTION();
+
+    SQLGUID guid = makeKnownGuid();
+    SQLLEN guidInd = sizeof(guid);
+
+    SQLRETURN ret = SQLBindParameter(hStmt, 1, SQL_PARAM_INPUT,
+        SQL_C_GUID, SQL_GUID, 16, 0, &guid, sizeof(guid), &guidInd);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    ret = SQLExecDirect(hStmt,
+        (SQLCHAR*)"SELECT CAST(? AS CHAR(8) CHARACTER SET OCTETS) FROM rdb$database",
+        SQL_NTS);
+    EXPECT_EQ(ret, SQL_ERROR);
+    EXPECT_EQ(GetSqlState(SQL_HANDLE_STMT, hStmt), "22001")
+        << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+}
+
+// Any OCTETS slot of 16 bytes or more receives the 16 raw bytes, not the
+// 36-char text: a VARBINARY(32) parameter carries a 16-byte value that
+// UUID_TO_CHAR decodes back to the canonical form.
+//
+// Skipped on FB6 for the same OCTETS-varying parameter limitation noted on
+// BindGuidToVarcharOctets16.
+TEST_F(GuidParamBindingTest, BindGuidToOversizedOctetsStoresRawBytes) {
+    REQUIRE_FIREBIRD_CONNECTION();
+    SKIP_ON_FIREBIRD6();
+
+    SQLGUID guid = makeKnownGuid();
+    SQLLEN guidInd = sizeof(guid);
+
+    SQLRETURN ret = SQLBindParameter(hStmt, 1, SQL_PARAM_INPUT,
+        SQL_C_GUID, SQL_GUID, 16, 0, &guid, sizeof(guid), &guidInd);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    ret = SQLExecDirect(hStmt,
+        (SQLCHAR*)"SELECT UUID_TO_CHAR(CAST(? AS VARCHAR(32) CHARACTER SET OCTETS)) "
+                  "FROM rdb$database",
+        SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    ret = SQLFetch(hStmt);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    SQLCHAR buf[64] = {};
+    SQLLEN ind = 0;
+    ret = SQLGetData(hStmt, 1, SQL_C_CHAR, buf, sizeof(buf), &ind);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    std::string text((char*)buf);
+    while (!text.empty() && text.back() == ' ') text.pop_back();
+    EXPECT_EQ(text, kCanonicalText)
+        << "VARBINARY(32) GUID round-trip failed. Got: '" << text << "'";
+}
+
+// Executing a prepared statement with a NULL GUID and then with a value must
+// clear the null flag on the wire, so the second execution sends the value.
+// Covers both the OCTETS and the text parameter paths.
+TEST_F(GuidParamBindingTest, BindGuidValueAfterNull) {
+    REQUIRE_FIREBIRD_CONNECTION();
+
+    const char* statements[] = {
+        "SELECT UUID_TO_CHAR(?) FROM rdb$database",
+        "SELECT UUID_TO_CHAR(CHAR_TO_UUID(?)) FROM rdb$database",
+    };
+
+    for (const char* sql : statements) {
+        SQLGUID guid = makeKnownGuid();
+        SQLLEN guidInd = SQL_NULL_DATA;
+
+        SQLRETURN ret = SQLBindParameter(hStmt, 1, SQL_PARAM_INPUT,
+            SQL_C_GUID, SQL_GUID, 16, 0, &guid, sizeof(guid), &guidInd);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+        ret = SQLPrepare(hStmt, (SQLCHAR*)sql, SQL_NTS);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << sql << ": " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+        // NULL in, NULL out.
+        ret = SQLExecute(hStmt);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << sql << ": " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+        ret = SQLFetch(hStmt);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << sql << ": " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+        SQLCHAR buf[64] = {};
+        SQLLEN ind = 0;
+        ret = SQLGetData(hStmt, 1, SQL_C_CHAR, buf, sizeof(buf), &ind);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret));
+        EXPECT_EQ(ind, SQL_NULL_DATA) << sql;
+        SQLCloseCursor(hStmt);
+
+        // Value in, value out.
+        guidInd = sizeof(guid);
+        ret = SQLExecute(hStmt);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << sql << ": " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+        ret = SQLFetch(hStmt);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << sql << ": " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+        memset(buf, 0, sizeof(buf));
+        ret = SQLGetData(hStmt, 1, SQL_C_CHAR, buf, sizeof(buf), &ind);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+        std::string text((char*)buf);
+        while (!text.empty() && text.back() == ' ') text.pop_back();
+        EXPECT_EQ(text, kCanonicalText) << sql << ": value after NULL was lost";
+
+        ReallocStmt();
+    }
 }
 
 // Test: DECFLOAT column insertion and retrieval on Firebird 4+
