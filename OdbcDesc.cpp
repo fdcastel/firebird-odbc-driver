@@ -85,9 +85,7 @@ void OdbcDesc::setDefaultImplDesc (StatementMetaData * ptMetaDataOut, StatementM
 
 		headAllocType = SQL_DESC_ALLOC_AUTO;
 		headArraySize = 1;
-		headArrayStatusPtr = (SQLUSMALLINT*)NULL;
 		headBindOffsetPtr = (SQLLEN*)NULL;
-		headRowsProcessedPtr = (SQLULEN*)NULL;
 		headCount = 0;
 
 		if(	metaDataOut == NULL )
