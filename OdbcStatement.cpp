@@ -2622,6 +2622,46 @@ SQLRETURN OdbcStatement::sqlGetStmtAttr(int attribute, SQLPOINTER ptr, int buffe
 			TRACE02(SQL_ATTR_ROW_STATUS_PTR,value);
 			break;
 
+		case SQL_ATTR_ROWS_FETCHED_PTR:
+			value = (intptr_t) implementationRowDescriptor->headRowsProcessedPtr;
+			TRACE02(SQL_ATTR_ROWS_FETCHED_PTR,value);
+			break;
+
+		case SQL_ATTR_ROW_BIND_OFFSET_PTR:
+			value = (intptr_t) applicationRowDescriptor->headBindOffsetPtr;
+			TRACE02(SQL_ATTR_ROW_BIND_OFFSET_PTR,value);
+			break;
+
+		case SQL_ATTR_ROW_OPERATION_PTR:
+			value = (intptr_t) applicationRowDescriptor->headArrayStatusPtr;
+			TRACE02(SQL_ATTR_ROW_OPERATION_PTR,value);
+			break;
+
+		case SQL_ATTR_PARAMS_PROCESSED_PTR:
+			value = (intptr_t) implementationParamDescriptor->headRowsProcessedPtr;
+			TRACE02(SQL_ATTR_PARAMS_PROCESSED_PTR,value);
+			break;
+
+		case SQL_ATTR_PARAM_BIND_OFFSET_PTR:
+			value = (intptr_t) applicationParamDescriptor->headBindOffsetPtr;
+			TRACE02(SQL_ATTR_PARAM_BIND_OFFSET_PTR,value);
+			break;
+
+		case SQL_ATTR_PARAM_OPERATION_PTR:
+			value = (intptr_t) applicationParamDescriptor->headArrayStatusPtr;
+			TRACE02(SQL_ATTR_PARAM_OPERATION_PTR,value);
+			break;
+
+		case SQL_ATTR_PARAM_STATUS_PTR:
+			value = (intptr_t) implementationParamDescriptor->headArrayStatusPtr;
+			TRACE02(SQL_ATTR_PARAM_STATUS_PTR,value);
+			break;
+
+		case SQL_ATTR_CURSOR_SCROLLABLE:
+			value = cursorScrollable;
+			TRACE02(SQL_ATTR_CURSOR_SCROLLABLE,value);
+			break;
+
 		case SQL_ATTR_USE_BOOKMARKS:
 			value = useBookmarks;
 			TRACE02(SQL_ATTR_USE_BOOKMARKS,value);
