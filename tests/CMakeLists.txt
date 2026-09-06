@@ -68,6 +68,7 @@ add_executable(firebird_odbc_tests
     test_prepare.cpp
     test_cursors.cpp
     test_cursor_commit.cpp
+    test_stmt_attrs.cpp
     test_cursor_name.cpp
     test_data_at_execution.cpp
     test_array_binding.cpp
