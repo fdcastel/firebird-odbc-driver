@@ -114,6 +114,21 @@ inline bool checkIndicatorPtr(SQLLEN* ptr, SQLLEN value, DescRecord* rec)
 	return rec->isIndicatorSqlDa ? *(short*)ptr == (short)value : *ptr == value;
 }
 
+// When a numeric / date / time C type binds to SQL_C_WCHAR, route
+// Firebird-side targets through the byte variant.  The wide variant would
+// write UTF-16 code units that Firebird would reinterpret as raw bytes and
+// store embedded NUL bytes as data.  These converters emit ASCII only
+// (digits, sign, '.', ':', ' ', 'e', '*'), which is identical in every
+// supported charset, so the byte variant is correct regardless of the
+// column charset.  Application-owned targets keep the wide variant.
+inline ADRESS_FUNCTION selectToStringConv(DescRecord *to,
+                                          ADRESS_FUNCTION byteFn,
+                                          ADRESS_FUNCTION wideFn)
+{
+	return to->isIndicatorSqlDa ? byteFn : wideFn;
+}
+
+
 //////////////////////////////////////////////////////////////////////
 // Construction/Destruction
 //////////////////////////////////////////////////////////////////////
@@ -208,7 +223,9 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 		case SQL_C_CHAR:
 			return &OdbcConvert::convTinyIntToString;
 		case SQL_C_WCHAR:
-			return &OdbcConvert::convTinyIntToStringW;
+			return selectToStringConv(to,
+				&OdbcConvert::convTinyIntToString,
+				&OdbcConvert::convTinyIntToStringW);
 		case SQL_DECIMAL:
 		case SQL_C_NUMERIC:
 			return &OdbcConvert::convTinyIntToTagNumeric;
@@ -263,7 +280,9 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 		case SQL_C_CHAR:
 			return &OdbcConvert::convShortToString;
 		case SQL_C_WCHAR:
-			return &OdbcConvert::convShortToStringW;
+			return selectToStringConv(to,
+				&OdbcConvert::convShortToString,
+				&OdbcConvert::convShortToStringW);
 		case SQL_DECIMAL:
 		case SQL_C_NUMERIC:
 			return &OdbcConvert::convShortToTagNumeric;
@@ -320,7 +339,9 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 		case SQL_C_CHAR:
 			return &OdbcConvert::convLongToString;
 		case SQL_C_WCHAR:
-			return &OdbcConvert::convLongToStringW;
+			return selectToStringConv(to,
+				&OdbcConvert::convLongToString,
+				&OdbcConvert::convLongToStringW);
 		case SQL_DECIMAL:
 		case SQL_C_NUMERIC:
 			return &OdbcConvert::convLongToTagNumeric;
@@ -357,7 +378,9 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 		case SQL_C_CHAR:
 			return &OdbcConvert::convFloatToString;
 		case SQL_C_WCHAR:
-			return &OdbcConvert::convFloatToStringW;
+			return selectToStringConv(to,
+				&OdbcConvert::convFloatToString,
+				&OdbcConvert::convFloatToStringW);
 		default:
 			return &OdbcConvert::notYetImplemented;
 		}
@@ -391,7 +414,9 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 		case SQL_C_CHAR:
 			return &OdbcConvert::convDoubleToString;
 		case SQL_C_WCHAR:
-			return &OdbcConvert::convDoubleToStringW;
+			return selectToStringConv(to,
+				&OdbcConvert::convDoubleToString,
+				&OdbcConvert::convDoubleToStringW);
 		case SQL_DECIMAL:
 		case SQL_C_NUMERIC:
 			return &OdbcConvert::convDoubleToTagNumeric;
@@ -435,7 +460,9 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 		case SQL_C_CHAR:
 			return &OdbcConvert::convBigintToString;
 		case SQL_C_WCHAR:
-			return &OdbcConvert::convBigintToStringW;
+			return selectToStringConv(to,
+				&OdbcConvert::convBigintToString,
+				&OdbcConvert::convBigintToStringW);
 		case SQL_DECIMAL:
 		case SQL_C_NUMERIC:
 			return &OdbcConvert::convBigintToTagNumeric;
@@ -523,7 +550,9 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 		case SQL_C_CHAR:
 			return &OdbcConvert::convDateToString;
 		case SQL_C_WCHAR:
-			return &OdbcConvert::convDateToStringW;
+			return selectToStringConv(to,
+				&OdbcConvert::convDateToString,
+				&OdbcConvert::convDateToStringW);
 		default:
 			return &OdbcConvert::notYetImplemented;
 		}
@@ -560,7 +589,9 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 		case SQL_C_CHAR:
 			return &OdbcConvert::convTimeToString;
 		case SQL_C_WCHAR:
-			return &OdbcConvert::convTimeToStringW;
+			return selectToStringConv(to,
+				&OdbcConvert::convTimeToString,
+				&OdbcConvert::convTimeToStringW);
 		default:
 			return &OdbcConvert::notYetImplemented;
 		}
@@ -596,7 +627,9 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 		case SQL_C_CHAR:
 			return &OdbcConvert::convDateTimeToString;
 		case SQL_C_WCHAR:
-			return &OdbcConvert::convDateTimeToStringW;
+			return selectToStringConv(to,
+				&OdbcConvert::convDateTimeToString,
+				&OdbcConvert::convDateTimeToStringW);
 		default:
 			return &OdbcConvert::notYetImplemented;
 		}
@@ -1042,6 +1075,11 @@ SQLLEN * OdbcConvert::getAdressBindIndTo(char * pointer)
 	return pointer ? (SQLLEN *)(pointer + *bindOffsetPtrIndTo) : NULL;
 }
 
+// A sqlda target keeps its null flag between executes, so a transfer that is not
+// null has to clear the flag a previous null left behind, the same way
+// ODBCCONVERT_CHECKNULL_COMMON and ODBCCONVERT_CHECKNULL_SQLDA below do.  An
+// application target gets its indicator written with the transferred length by
+// the converter itself, so nothing is cleared there.
 #define ODBCCONVERT_CHECKNULL(pointerTo)					\
 	if( checkIndicatorPtr( indicatorFrom, SQL_NULL_DATA, from ) ) \
 	{														\
@@ -1051,6 +1089,8 @@ SQLLEN * OdbcConvert::getAdressBindIndTo(char * pointer)
 			*(char*)pointerTo = 0;                          \
 		return SQL_SUCCESS;									\
 	}														\
+	else if ( indicatorTo && to->isIndicatorSqlDa )			\
+		setIndicatorPtr( indicatorTo, 0, to );				\
 	if ( !pointerTo )										\
 		return SQL_SUCCESS;
 
@@ -1063,6 +1103,8 @@ SQLLEN * OdbcConvert::getAdressBindIndTo(char * pointer)
 			*(wchar_t*)pointerTo = 0;                          \
 		return SQL_SUCCESS;									\
 	}														\
+	else if ( indicatorTo && to->isIndicatorSqlDa )			\
+		setIndicatorPtr( indicatorTo, 0, to );				\
 	if ( !pointerTo )										\
 		return SQL_SUCCESS;
 
@@ -1384,6 +1426,9 @@ int OdbcConvert::conv##TYPE_FROM##ToStringW(DescRecord * from, DescRecord * to)	
 																								\
 	ODBCCONVERT_CHECKNULLW( pointer );															\
 																								\
+	/* getAdressFunction routes Firebird-side targets to the byte variant */			\
+	/* (see selectToStringConv), so this wide variant only runs against   */			\
+	/* application-owned buffers.                                         */			\
 	int len = to->length;																		\
 																								\
 	if ( !len && to->dataPtr)																	\
