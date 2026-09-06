@@ -178,8 +178,8 @@ public:
 	void setArray(CAttrSqlVar* var, Value* value, IscStatement* stmt);
 	void setValue(int slot, Value* value, IscStatement* stmt);
 	const char* getTableName(int index);
-	int getSqlType(CAttrSqlVar* var, int& realSqlType);
-	const char* getSqlTypeName(CAttrSqlVar* var);
+	int getSqlType(const SqlProperties* var, const CAttrArray* array, int& realSqlType);
+	const char* getSqlTypeName(const SqlProperties* var);
 	bool isNullable(int index);
 	int getScale(int index);
 	int getPrecision(int index);
@@ -207,6 +207,19 @@ public:
 	void clearSqlda();
 	CAttrSqlVar* Var(int index) { return &sqlvar.at(index - 1); }
 	const SqlProperties* orgVarSqlProperties(int index) { return &sqlvar.at(index - 1).orgSqlProperties; }
+
+	// Properties an index should be *described* with.
+	//
+	// An INPUT parameter is always described from the prepare-time snapshot: the
+	// conversion layer rewrites the live sqlvar to match whatever C type was last
+	// bound (OdbcConvert::setHeadSqlVar), so the live one tells us how the previous
+	// transfer was shaped, not what the statement was prepared with.  Describing
+	// from it makes a bind on an already-used parameter see that shape and keep it
+	// forever.  OUTPUT columns are never rewritten, so they use the live sqlvar.
+	const SqlProperties* describedSqlProperties(int index)
+	{
+		return (SqldaDir == SQLDA_INPUT) ? orgVarSqlProperties(index) : Var(index);
+	}
 
 	Sqlda(IscConnection* conn, e_sqlda_dir dir);
 	~Sqlda();
