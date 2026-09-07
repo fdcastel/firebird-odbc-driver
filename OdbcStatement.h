@@ -61,7 +61,7 @@ public:
 	SQLRETURN sqlMoreResults();
 	inline SQLRETURN fetchData();
 	inline SQLRETURN returnData();
-	inline SQLRETURN returnDataFromExtendedFetch();
+	inline SQLRETURN returnDataFromExtendedFetch( int row, SQLLEN bindOffset );
 #ifdef _WIN64
 	SQLRETURN sqlColAttribute( int column, int fieldId, SQLPOINTER attributePtr, int bufferLength, SQLSMALLINT *strLengthPtr, SQLLEN *numericAttributePtr );
 #else
@@ -134,7 +134,7 @@ public:
 	~OdbcStatement();
 	bool isStaticCursor(){ return cursorType != SQL_CURSOR_FORWARD_ONLY && cursorScrollable == SQL_SCROLLABLE || isResultSetFromSystemCatalog; }
 	int getCurrentFetched(){ return countFetched; }
-	bool getSchemaFetchData(){ return applicationRowDescriptor->headBindType || applicationRowDescriptor->headBindOffsetPtr; }
+	bool getSchemaFetchData(){ return applicationRowDescriptor->headBindType != SQL_BIND_BY_COLUMN; }
 	inline StatementMetaData	*getStatementMetaDataIRD();
 	inline void clearErrors();
 	SQLRETURN prepareGetData(int column, DescRecord *recordARD);
