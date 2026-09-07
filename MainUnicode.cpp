@@ -887,7 +887,7 @@ SQLRETURN SQL_API SQLDriversW( SQLHENV hEnv, SQLUSMALLINT fDirection,
 SQLRETURN SQL_API SQLColAttributeW( SQLHSTMT hStmt, SQLUSMALLINT columnNumber,
 								   SQLUSMALLINT fieldIdentifier, SQLPOINTER characterAttribute,
 								   SQLSMALLINT bufferLength, SQLSMALLINT *stringLength,
-#ifdef _WIN64
+#if defined(_WIN64) || !defined(_WIN32)
 								   SQLLEN *numericAttribute )
 #else
 								   SQLPOINTER numericAttribute )

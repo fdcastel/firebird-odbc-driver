@@ -214,6 +214,8 @@ SQLRETURN OdbcDesc::operator =(OdbcDesc &sour)
 
 		if ( srcrec )
 		{
+			sour.defineImplRecord( n, srcrec );
+
 			rec = srcrec;
 			rec.sizeColumnExtendedFetch = srcrec->sizeColumnExtendedFetch;
 		}
@@ -326,12 +328,89 @@ OdbcObjectType OdbcDesc::getType()
 	return odbcTypeDescriptor;
 }
 
+// An implementation record keeps the concise SQL type in `type` and the
+// converter's C type in `conciseType`. The descriptor API reports ODBC's
+// verbose type, concise type and datetime interval code, all derived from
+// the SQL type; an application may also have stored the verbose form with
+// its interval code in an IPD record.
+SQLSMALLINT OdbcDesc::conciseSqlType( int type, int datetimeIntervalCode )
+{
+	if ( type == SQL_DATETIME )
+	{
+		switch ( datetimeIntervalCode )
+		{
+		case SQL_CODE_DATE:
+			return SQL_TYPE_DATE;
+		case SQL_CODE_TIME:
+			return SQL_TYPE_TIME;
+		case SQL_CODE_TIMESTAMP:
+			return SQL_TYPE_TIMESTAMP;
+		}
+	}
+	return (SQLSMALLINT)type;
+}
+
+SQLSMALLINT OdbcDesc::verboseSqlType( int conciseSqlType )
+{
+	switch ( conciseSqlType )
+	{
+	case SQL_TYPE_DATE:
+	case SQL_TYPE_TIME:
+	case SQL_TYPE_TIMESTAMP:
+	case SQL_TIME:
+	case SQL_TIMESTAMP:
+		return SQL_DATETIME;
+	}
+	return (SQLSMALLINT)conciseSqlType;
+}
+
+SQLSMALLINT OdbcDesc::datetimeIntervalCodeOf( int conciseSqlType )
+{
+	switch ( conciseSqlType )
+	{
+	case SQL_TYPE_DATE:
+		return SQL_CODE_DATE;
+	case SQL_TYPE_TIME:
+	case SQL_TIME:
+		return SQL_CODE_TIME;
+	case SQL_TYPE_TIMESTAMP:
+	case SQL_TIMESTAMP:
+		return SQL_CODE_TIMESTAMP;
+	}
+	return 0;
+}
+
+// SQLPrepare sizes the implementation descriptors but fills a record only
+// when its column or parameter is bound or the statement executes. The
+// descriptor API fills it the same way before reading or copying it.
+void OdbcDesc::defineImplRecord( int recNumber, DescRecord * record )
+{
+	if ( !recNumber || record->isDefined )
+		return;
+
+	if ( headType == odtImplementationRow )
+	{
+		if ( metaDataOut )
+			defFromMetaDataOut( recNumber, record );
+	}
+	else if ( headType == odtImplementationParameter )
+	{
+		int countIn = metaDataIn ? metaDataIn->getColumnCount() : 0;
+
+		if ( recNumber <= countIn )
+			defFromMetaDataIn( recNumber, record );
+		else if ( metaDataOut && recNumber - countIn <= metaDataOut->getColumnCount() )
+			defFromMetaDataOut( recNumber - countIn, record );
+	}
+}
+
 SQLRETURN OdbcDesc::sqlGetDescField(int recNumber, int fieldId, SQLPOINTER ptr, int bufferLength, SQLINTEGER *lengthPtr)
 {
     clearErrors();
 	SQLINTEGER size = 0;
 	SQLCHAR *string = NULL;
 	DescRecord *record = NULL;
+	const bool implRecord = headType == odtImplementationRow || headType == odtImplementationParameter;
 
 	if ( bDefined == false )
 	{
@@ -369,6 +448,7 @@ SQLRETURN OdbcDesc::sqlGetDescField(int recNumber, int fieldId, SQLPOINTER ptr, 
 			if ( !recNumber && headType == odtImplementationParameter )
 					return sqlReturn (SQL_ERROR, "HY091", "Invalid descriptor field identifier");
 			record = getDescRecord (recNumber);
+			defineImplRecord( recNumber, record );
 	}
 
 	try
@@ -468,19 +548,19 @@ SQLRETURN OdbcDesc::sqlGetDescField(int recNumber, int fieldId, SQLPOINTER ptr, 
 // Record
 		case SQL_DESC_TYPE:
 			if (record && ptr)
-				*(SQLSMALLINT*) ptr = record->type,
+				*(SQLSMALLINT*) ptr = implRecord ? verboseSqlType( conciseSqlType( record->type, record->datetimeIntervalCode ) ) : record->type,
 				size = sizeof (SQLSMALLINT);
 			break;
 
 		case SQL_DESC_DATETIME_INTERVAL_CODE:
 			if (record && ptr)
-				*(SQLSMALLINT*) ptr = record->datetimeIntervalCode,
+				*(SQLSMALLINT*) ptr = implRecord ? datetimeIntervalCodeOf( conciseSqlType( record->type, record->datetimeIntervalCode ) ) : record->datetimeIntervalCode,
 				size = sizeof (SQLSMALLINT);
 			break;
 
 		case SQL_DESC_CONCISE_TYPE:
 			if (record && ptr)
-				*(SQLSMALLINT*) ptr = record->conciseType,
+				*(SQLSMALLINT*) ptr = implRecord ? conciseSqlType( record->type, record->datetimeIntervalCode ) : record->conciseType,
 				size = sizeof (SQLSMALLINT);
 			break;
 
@@ -549,8 +629,8 @@ SQLRETURN OdbcDesc::sqlGetDescField(int recNumber, int fieldId, SQLPOINTER ptr, 
 			if(headType ==  odtImplementationRow)
 			{
 				if (record && ptr)
-					*(SQLINTEGER*) ptr = record->displaySize,
-					size = sizeof (SQLINTEGER);
+					*(SQLLEN*) ptr = record->displaySize,
+					size = sizeof (SQLLEN);
 			}
 			else
 				return sqlReturn (SQL_ERROR, "HY091", "Invalid descriptor field identifier");
@@ -612,8 +692,8 @@ SQLRETURN OdbcDesc::sqlGetDescField(int recNumber, int fieldId, SQLPOINTER ptr, 
 
 		case SQL_DESC_LENGTH:
 			if (record && ptr)
-				*(SQLUINTEGER*) ptr = record->length,
-				size = sizeof (SQLUINTEGER);
+				*(SQLULEN*) ptr = record->length,
+				size = sizeof (SQLULEN);
 			break;
 
 		case SQL_DESC_NAME:
@@ -651,8 +731,8 @@ SQLRETURN OdbcDesc::sqlGetDescField(int recNumber, int fieldId, SQLPOINTER ptr, 
 			
 		case SQL_DESC_OCTET_LENGTH:
 			if (record && ptr)
-				*(SQLINTEGER*) ptr = record->octetLength,
-				size = sizeof (SQLINTEGER);	
+				*(SQLLEN*) ptr = record->octetLength,
+				size = sizeof (SQLLEN);
 			break;
 			
 		case SQL_DESC_OCTET_LENGTH_PTR:
@@ -1211,7 +1291,11 @@ SQLRETURN OdbcDesc::sqlGetDescRec(	SQLSMALLINT recNumber,
 	DescRecord *record = NULL;
 
 	if ( bDefined == false )
+	{
+		if ( headType == odtImplementationRow )
+			return sqlReturn (SQL_ERROR, "HY007", "Associated statement is not prepared");
 		return sqlReturn (SQL_ERROR, "HY091", "Invalid descriptor field identifier");
+	}
 
 	if ( recNumber > headCount )
 		return sqlReturn (SQL_NO_DATA_FOUND, "HY021", "Inconsistent descriptor information");
@@ -1220,6 +1304,8 @@ SQLRETURN OdbcDesc::sqlGetDescRec(	SQLSMALLINT recNumber,
 			return sqlReturn (SQL_ERROR, "HY091", "Invalid descriptor field identifier");
 
 	record = getDescRecord (recNumber);
+	defineImplRecord( recNumber, record );
+	const bool implRecord = headType == odtImplementationRow || headType == odtImplementationParameter;
 
 	try
 	{
@@ -1227,8 +1313,8 @@ SQLRETURN OdbcDesc::sqlGetDescRec(	SQLSMALLINT recNumber,
 		if( rc )
 			return rc;
 
-		*typePtr = record->type;
-		*subTypePtr = record->datetimeIntervalCode;
+		*typePtr = implRecord ? verboseSqlType( conciseSqlType( record->type, record->datetimeIntervalCode ) ) : record->type;
+		*subTypePtr = implRecord ? datetimeIntervalCodeOf( conciseSqlType( record->type, record->datetimeIntervalCode ) ) : record->datetimeIntervalCode;
 		*lengthPtr = record->octetLength;
 		*precisionPtr = record->precision;
 		*scalePtr = record->scale;
