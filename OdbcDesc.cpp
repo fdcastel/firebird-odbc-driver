@@ -336,7 +336,22 @@ SQLRETURN OdbcDesc::sqlGetDescField(int recNumber, int fieldId, SQLPOINTER ptr, 
 	DescRecord *record = NULL;
 
 	if ( bDefined == false )
-		return sqlReturn (SQL_ERROR, "HY091", "Invalid descriptor field identifier");
+	{
+		switch (fieldId)
+		{
+		case SQL_DESC_ALLOC_TYPE:
+		case SQL_DESC_ARRAY_SIZE:
+		case SQL_DESC_ARRAY_STATUS_PTR:
+		case SQL_DESC_BIND_OFFSET_PTR:
+		case SQL_DESC_BIND_TYPE:
+		case SQL_DESC_ROWS_PROCESSED_PTR:
+			break;	// header fields do not depend on the result set
+		default:
+			if ( headType == odtImplementationRow )
+				return sqlReturn (SQL_ERROR, "HY007", "Associated statement is not prepared");
+			return sqlReturn (SQL_ERROR, "HY091", "Invalid descriptor field identifier");
+		}
+	}
 
 	if ( recNumber > headCount )
 		return sqlReturn (SQL_NO_DATA_FOUND, "HY021", "Inconsistent descriptor information");
