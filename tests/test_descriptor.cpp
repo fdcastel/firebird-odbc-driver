@@ -672,3 +672,25 @@ TEST_F(DescriptorTest, ColAttributeTypeFieldsFollowOdbc) {
         EXPECT_EQ(intervalCode, e.intervalCode) << "column " << e.col;
     }
 }
+
+// ===== SQLColAttribute writes its numeric attribute at full width (#316) =====
+TEST_F(DescriptorTest, ColAttributeNumericAttributeIsFullWidth) {
+    SQLRETURN ret = SQLPrepare(hStmt,
+        (SQLCHAR*)"SELECT CAST('x' AS VARCHAR(5)) AS A FROM RDB$DATABASE", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    SQLSMALLINT dataType = 0, decimalDigits = 0, nullable = 0;
+    SQLULEN columnSize = 0;
+    ret = SQLDescribeCol(hStmt, 1, NULL, 0, NULL, &dataType, &columnSize, &decimalDigits, &nullable);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    // The same read into a zeroed and into an all-ones SQLLEN: a 32-bit write
+    // leaves the upper half of the second one set and the two differ, and a
+    // negative type code read from the zeroed one comes out as a large positive.
+    SQLLEN zeroed = 0, poisoned = -1;
+    ret = SQLColAttribute(hStmt, 1, SQL_DESC_CONCISE_TYPE, NULL, 0, NULL, &zeroed);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    ret = SQLColAttribute(hStmt, 1, SQL_DESC_CONCISE_TYPE, NULL, 0, NULL, &poisoned);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    EXPECT_EQ(zeroed, (SQLLEN)dataType);
+    EXPECT_EQ(poisoned, (SQLLEN)dataType);
+}
