@@ -316,7 +316,7 @@ TEST_F(ArrayBindingTest, ColumnWiseWithNulls) {
 // 5. SQL_ATTR_PARAM_OPERATION_PTR — skip individual rows
 // ============================================================================
 TEST_F(ArrayBindingTest, ParamOperationPtrSkipRows) {
-    GTEST_SKIP() << "Vanilla driver does not properly handle SQL_ATTR_PARAM_OPERATION_PTR";
+    SKIP_ON_FIREBIRD6();
     const int ARRAY_SIZE = 5;
     SQLRETURN ret;
 
@@ -894,7 +894,7 @@ TEST_F(ArrayBindingTest, ColumnWiseIntegerOnly) {
 // 16. Row-wise with SQL_ATTR_PARAM_OPERATION_PTR
 // ============================================================================
 TEST_F(ArrayBindingTest, RowWiseWithOperationPtr) {
-    GTEST_SKIP() << "Vanilla driver does not properly handle SQL_ATTR_PARAM_OPERATION_PTR";
+    SKIP_ON_FIREBIRD6();
     const int ARRAY_SIZE = 4;
     SQLRETURN ret;
 
