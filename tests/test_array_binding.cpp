@@ -1235,3 +1235,65 @@ TEST_F(ArrayBindingTest, RowCountAfterArrayUpdate) {
     EXPECT_EQ(GetValue(1), "uno");
     EXPECT_EQ(GetValue(2), "dos");
 }
+
+// ============================================================================
+// 22. A server error inside the array marks the failed set, counts it, and
+//     leaves the handle usable for the next execute (#309)
+// ============================================================================
+TEST_F(ArrayBindingTest, ServerErrorInsideArray) {
+    SKIP_ON_FIREBIRD6();
+    const int N = 5;
+    SQLINTEGER ids[N] = {1, 2, 3, 4, 5};
+    SQLCHAR strs[N][20] = {"a", "b", "c", "d", "e"};
+    SQLLEN id_ind[N] = {0, 0, SQL_NULL_DATA, 0, 0};   // set 3 violates NOT NULL on I
+    SQLLEN str_ind[N] = {SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS};
+    SQLUSMALLINT status[N] = {9, 9, 9, 9, 9};
+    SQLULEN nprocessed = 0;
+    SQLRETURN ret;
+
+    ret = SQLSetStmtAttr(hStmt, SQL_ATTR_PARAMSET_SIZE, (SQLPOINTER)(intptr_t)N, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLSetStmtAttr(hStmt, SQL_ATTR_PARAMS_PROCESSED_PTR, &nprocessed, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLSetStmtAttr(hStmt, SQL_ATTR_PARAM_STATUS_PTR, status, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLBindParameter(hStmt, 1, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0,
+                           ids, 0, id_ind);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLBindParameter(hStmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 19, 0,
+                           strs, 20, str_ind);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    ret = SQLExecDirect(hStmt, (SQLCHAR*)"INSERT INTO ARRAY_BIND_TEST (I, T) VALUES (?, ?)", SQL_NTS);
+    EXPECT_EQ(ret, SQL_ERROR);
+    EXPECT_EQ(GetSqlState(SQL_HANDLE_STMT, hStmt), "23000");
+    EXPECT_EQ(nprocessed, (SQLULEN)3) << "the failed set counts as processed";
+    EXPECT_EQ(status[0], SQL_PARAM_SUCCESS);
+    EXPECT_EQ(status[1], SQL_PARAM_SUCCESS);
+    EXPECT_EQ(status[2], SQL_PARAM_ERROR);
+    EXPECT_EQ(status[3], SQL_PARAM_UNUSED);
+    EXPECT_EQ(status[4], SQL_PARAM_UNUSED);
+
+    // The same handle, one row
+    ret = SQLFreeStmt(hStmt, SQL_RESET_PARAMS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLSetStmtAttr(hStmt, SQL_ATTR_PARAMSET_SIZE, (SQLPOINTER)1, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    SQLINTEGER id = 7;
+    SQLCHAR str[] = "seven";
+    SQLLEN idInd = 0, strInd = SQL_NTS;
+    ret = SQLBindParameter(hStmt, 1, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0,
+                           &id, 0, &idInd);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLBindParameter(hStmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 19, 0,
+                           str, sizeof(str), &strInd);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLExecDirect(hStmt, (SQLCHAR*)"INSERT INTO ARRAY_BIND_TEST (I, T) VALUES (?, ?)", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    Commit();
+    EXPECT_EQ(CountRows(), 3);
+    EXPECT_EQ(GetValue(1), "a");
+    EXPECT_EQ(GetValue(2), "b");
+    EXPECT_EQ(GetValue(7), "seven");
+}

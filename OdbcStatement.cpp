@@ -3065,6 +3065,12 @@ SQLRETURN OdbcStatement::executeStatementParamArray()
 	SQLLEN	bindOffsetPtrTmp = headBindOffsetPtr ? *headBindOffsetPtr : 0;
 	bool arrayColumnWiseBinding = rowSize == SQL_PARAM_BIND_BY_COLUMN;
 
+	auto restoreBindOffset = [&]()
+	{
+		headBindOffsetPtr = bindOffsetPtrSave;
+		convert->setBindOffsetPtrFrom ( applicationParamDescriptor->headBindOffsetPtr, applicationParamDescriptor->headBindOffsetPtr );
+	};
+
 	headBindOffsetPtr = &bindOffsetPtrTmp;
 	*rowCountPt = rowNumberParamArray = 0;
 	updateCountParamArray = 0;
@@ -3087,16 +3093,26 @@ SQLRETURN OdbcStatement::executeStatementParamArray()
 		if ( arrayColumnWiseBinding )
 			bindOffsetIndColumnWiseBinding = ( bindOffsetPtrTmp + rowNumberParamArray ) * sizeof ( SQLLEN );
 
-		if ( (ret = inputParam( arrayColumnWiseBinding ), ret) && ret != SQL_SUCCESS_WITH_INFO )
+		try
 		{
-			headBindOffsetPtr = bindOffsetPtrSave;
-			convert->setBindOffsetPtrFrom ( applicationParamDescriptor->headBindOffsetPtr, applicationParamDescriptor->headBindOffsetPtr );
+			if ( (ret = inputParam( arrayColumnWiseBinding ), ret) && ret != SQL_SUCCESS_WITH_INFO )
+			{
+				restoreBindOffset();
+				if ( statusPtr )
+					statusPtr[rowNumberParamArray] = SQL_PARAM_ERROR;
+				return ret;
+			}
+
+			statement->executeStatement();
+		}
+		catch ( ... )
+		{
+			restoreBindOffset();
 			if ( statusPtr )
 				statusPtr[rowNumberParamArray] = SQL_PARAM_ERROR;
-			return ret;
+			throw;
 		}
 
-		statement->executeStatement();
 		updateCountParamArray += statement->getUpdateCount();
 
 		if ( statusPtr )
@@ -3107,8 +3123,7 @@ SQLRETURN OdbcStatement::executeStatementParamArray()
 		++rowNumberParamArray;
 	}
 
-	headBindOffsetPtr = bindOffsetPtrSave;
-	convert->setBindOffsetPtrFrom ( applicationParamDescriptor->headBindOffsetPtr, applicationParamDescriptor->headBindOffsetPtr );
+	restoreBindOffset();
 
 	if ( statement->getMoreResults() )
 		setResultSet (statement->getResultSet(), false);
