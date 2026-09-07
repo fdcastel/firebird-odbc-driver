@@ -801,8 +801,9 @@ SQLRETURN OdbcStatement::fetchData()
 			}
 			else // if ( schemaExtendedFetchData )
 			{
-				SQLLEN	bindOffsetPtrData = 0;
-				SQLLEN	bindOffsetPtrInd = 0;
+				SQLLEN	bindOffset = bindOffsetPtrSave ? *bindOffsetPtrSave : 0;
+				SQLLEN	bindOffsetPtrData = bindOffset;
+				SQLLEN	bindOffsetPtrInd = bindOffset;
 				convert->setBindOffsetPtrTo(&bindOffsetPtrData, &bindOffsetPtrInd);
 				while ( nRow < nCountRow && (resultSet->*fetchNext)() )
 				{
@@ -810,10 +811,9 @@ SQLRETURN OdbcStatement::fetchData()
 					++rowNumber; // Should stand only here!!!
 
 					if ( fetchRetData == SQL_RD_ON )
-						returnDataFromExtendedFetch();
+						returnDataFromExtendedFetch( nRow, bindOffset );
 					
 					bindOffsetPtrInd += sizeof(SQLLEN);
-					++bindOffsetPtrTmp;
 					++nRow;
 					
 					if ( maxRows && nRow == maxRows )
@@ -1136,8 +1136,9 @@ SQLRETURN OdbcStatement::sqlFetchScrollCursorStatic(int orientation, int offset)
 			}
 			else
 			{
-				SQLLEN	bindOffsetPtrData = 0;
-				SQLLEN	bindOffsetPtrInd = 0;
+				SQLLEN	bindOffset = bindOffsetPtrSave ? *bindOffsetPtrSave : 0;
+				SQLLEN	bindOffsetPtrData = bindOffset;
+				SQLLEN	bindOffsetPtrInd = bindOffset;
 				convert->setBindOffsetPtrTo(&bindOffsetPtrData, &bindOffsetPtrInd);
 				while ( nRow < rowsetSize && rowNumber < sqlDiagCursorRowCount )
 				{
@@ -1145,10 +1146,9 @@ SQLRETURN OdbcStatement::sqlFetchScrollCursorStatic(int orientation, int offset)
 					++countFetched;
 					++rowNumber; // Should stand only here!!!
 
-					returnDataFromExtendedFetch();
+					returnDataFromExtendedFetch( nRow, bindOffset );
 
 					bindOffsetPtrInd += sizeof(SQLLEN);
-					++bindOffsetPtrTmp;
 					++nRow;
 					
 					if ( maxRows && nRow == maxRows )
@@ -3392,11 +3392,10 @@ SQLRETURN OdbcStatement::returnData()
 }
 
 inline
-SQLRETURN OdbcStatement::returnDataFromExtendedFetch()
+SQLRETURN OdbcStatement::returnDataFromExtendedFetch( int row, SQLLEN bindOffset )
 {
 	SQLRETURN retCode, ret = SQL_SUCCESS;
 	SQLLEN	&bindOffsetPtrTo = convert->getBindOffsetPtrTo();
-	SQLLEN	&currentRow = *applicationRowDescriptor->headBindOffsetPtr;
 	int count = listBindOut->GetCount();
 	convert->statusReturnData = true;
 
@@ -3409,7 +3408,7 @@ SQLRETURN OdbcStatement::returnDataFromExtendedFetch()
 			DescRecord *& imp = bindCol->impRecord;
 			DescRecord *& app = bindCol->appRecord;
 
-			bindOffsetPtrTo = app->sizeColumnExtendedFetch * currentRow;
+			bindOffsetPtrTo = bindOffset + app->sizeColumnExtendedFetch * row;
 			retCode = (convert->*imp->fnConv)(imp, app);
 			if ( retCode != SQL_SUCCESS )
 			{

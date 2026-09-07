@@ -57,6 +57,54 @@ protected:
         }
     }
 
+    // Column-wise binding with SQL_ATTR_ROW_BIND_OFFSET_PTR: every bound
+    // address is shifted by the offset and the rows still step by element
+    // size. Two rowsets, the second with the offset back at zero.
+    void ColumnWiseOffsetCase(bool useFetchScroll) {
+        constexpr SQLULEN kSlots = 32;
+        SQLINTEGER values[kSlots];
+        SQLLEN indicators[kSlots];
+        for (SQLULEN i = 0; i < kSlots; i++) {
+            values[i] = -1;
+            indicators[i] = -99;
+        }
+        // A multiple of both element sizes, so the shifted rows start on an
+        // element boundary of each array.
+        SQLLEN offset = 8 * sizeof(SQLLEN);
+        const SQLULEN valueBase = offset / sizeof(SQLINTEGER);
+        const SQLULEN indBase = offset / sizeof(SQLLEN);
+
+        SetRowsetAttrs();
+        ASSERT_TRUE(SQL_SUCCEEDED(SQLSetStmtAttr(hStmt, SQL_ATTR_ROW_BIND_OFFSET_PTR, &offset, 0)));
+        ExecDirect(SixRowsSql());
+        ASSERT_TRUE(SQL_SUCCEEDED(SQLBindCol(hStmt, 1, SQL_C_SLONG, values, 0, indicators)));
+
+        ResetOutputs();
+        SQLRETURN ret = useFetchScroll ? SQLFetchScroll(hStmt, SQL_FETCH_NEXT, 0) : SQLFetch(hStmt);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+        EXPECT_EQ(rowsFetched_, 4u);
+        for (SQLULEN i = 0; i < kArraySize; i++) {
+            EXPECT_EQ(rowStatus_[i], SQL_ROW_SUCCESS) << "row status " << i;
+            EXPECT_EQ(values[valueBase + i], (SQLINTEGER)(i + 1)) << "shifted value " << i;
+            EXPECT_EQ(indicators[indBase + i], (SQLLEN)sizeof(SQLINTEGER)) << "shifted indicator " << i;
+            EXPECT_EQ(values[i], -1) << "unshifted slot " << i << " must be untouched";
+        }
+
+        // Dropping the offset to zero before the next fetch moves the rows
+        // back to the start of the arrays.
+        offset = 0;
+        ResetOutputs();
+        ret = useFetchScroll ? SQLFetchScroll(hStmt, SQL_FETCH_NEXT, 0) : SQLFetch(hStmt);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+        EXPECT_EQ(rowsFetched_, 2u);
+        EXPECT_EQ(values[0], 5);
+        EXPECT_EQ(values[1], 6);
+        EXPECT_EQ(indicators[0], (SQLLEN)sizeof(SQLINTEGER));
+        EXPECT_EQ(indicators[1], (SQLLEN)sizeof(SQLINTEGER));
+        EXPECT_EQ(values[2], -1) << "slot 2 must be untouched by a two-row rowset";
+        EXPECT_EQ(values[valueBase], 1) << "the first rowset must stay where it was written";
+    }
+
     // One SQLFetchScroll, expected to return `expectRows` rows starting at
     // `firstValue`, with the counter and the status array written.
     void FetchScrollExpect(SQLSMALLINT orientation, SQLLEN offset,
@@ -339,49 +387,15 @@ TEST_F(BlockCursorTest, RowWiseBinding) {
 // written to the same (shifted) first element while the counter and the
 // status array still report a full rowset.
 TEST_F(BlockCursorTest, ColumnWiseBindingWithOffset) {
-    GTEST_SKIP() << "Driver defect: column-wise binding with SQL_ATTR_ROW_BIND_OFFSET_PTR "
-                    "writes every row of a rowset to the same address (row stride 0)";
+    ColumnWiseOffsetCase(false);
+}
 
-    constexpr SQLULEN kSlots = 32;
-    SQLINTEGER values[kSlots];
-    SQLLEN indicators[kSlots];
-    for (SQLULEN i = 0; i < kSlots; i++) {
-        values[i] = -1;
-        indicators[i] = -99;
-    }
-    // A multiple of both element sizes, so the shifted rows start on an
-    // element boundary of each array.
-    SQLLEN offset = 8 * sizeof(SQLLEN);
-    const SQLULEN valueBase = offset / sizeof(SQLINTEGER);
-    const SQLULEN indBase = offset / sizeof(SQLLEN);
-
-    SetRowsetAttrs();
-    ASSERT_TRUE(SQL_SUCCEEDED(SQLSetStmtAttr(hStmt, SQL_ATTR_ROW_BIND_OFFSET_PTR, &offset, 0)));
-    ExecDirect(SixRowsSql());
-    ASSERT_TRUE(SQL_SUCCEEDED(SQLBindCol(hStmt, 1, SQL_C_SLONG, values, 0, indicators)));
-
-    ResetOutputs();
-    SQLRETURN ret = SQLFetch(hStmt);
-    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
-    EXPECT_EQ(rowsFetched_, 4u);
-    for (SQLULEN i = 0; i < kArraySize; i++) {
-        EXPECT_EQ(values[valueBase + i], (SQLINTEGER)(i + 1)) << "shifted value " << i;
-        EXPECT_EQ(indicators[indBase + i], (SQLLEN)sizeof(SQLINTEGER)) << "shifted indicator " << i;
-        EXPECT_EQ(values[i], -1) << "unshifted slot " << i << " must be untouched";
-    }
-
-    // Dropping the offset to zero before the next fetch moves the rows back
-    // to the start of the arrays.
-    offset = 0;
-    ResetOutputs();
-    ret = SQLFetch(hStmt);
-    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
-    EXPECT_EQ(rowsFetched_, 2u);
-    EXPECT_EQ(values[0], 5);
-    EXPECT_EQ(values[1], 6);
-    EXPECT_EQ(indicators[0], (SQLLEN)sizeof(SQLINTEGER));
-    EXPECT_EQ(indicators[1], (SQLLEN)sizeof(SQLINTEGER));
-    EXPECT_EQ(values[2], -1) << "slot 2 must be untouched by a two-row rowset";
+TEST_F(BlockCursorTest, ColumnWiseBindingWithOffsetStaticCursor) {
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLSetStmtAttr(hStmt, SQL_ATTR_CURSOR_TYPE,
+                                             (SQLPOINTER)SQL_CURSOR_STATIC, 0)));
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLSetStmtAttr(hStmt, SQL_ATTR_CURSOR_SCROLLABLE,
+                                             (SQLPOINTER)SQL_SCROLLABLE, 0)));
+    ColumnWiseOffsetCase(true);
 }
 
 // A static scrollable cursor fetches rowsets in every orientation and
