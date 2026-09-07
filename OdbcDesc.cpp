@@ -331,6 +331,41 @@ OdbcObjectType OdbcDesc::getType()
 	return odbcTypeDescriptor;
 }
 
+// An implementation row record keeps the concise SQL type in `type` and the
+// converter's C type in `conciseType`. The descriptor API reports ODBC's
+// verbose type, concise type and datetime interval code, all derived from
+// the SQL type.
+static SQLSMALLINT verboseSqlType( int sqlType )
+{
+	switch ( sqlType )
+	{
+	case SQL_TYPE_DATE:
+	case SQL_TYPE_TIME:
+	case SQL_TYPE_TIMESTAMP:
+	case SQL_TIME:
+	case SQL_TIMESTAMP:
+		return SQL_DATETIME;
+	}
+	return (SQLSMALLINT)sqlType;
+}
+
+static SQLSMALLINT datetimeIntervalCodeOf( int sqlType )
+{
+	switch ( sqlType )
+	{
+	case SQL_TYPE_DATE:
+	case SQL_DATE:
+		return SQL_CODE_DATE;
+	case SQL_TYPE_TIME:
+	case SQL_TIME:
+		return SQL_CODE_TIME;
+	case SQL_TYPE_TIMESTAMP:
+	case SQL_TIMESTAMP:
+		return SQL_CODE_TIMESTAMP;
+	}
+	return 0;
+}
+
 SQLRETURN OdbcDesc::sqlGetDescField(int recNumber, int fieldId, SQLPOINTER ptr, int bufferLength, SQLINTEGER *lengthPtr)
 {
     clearErrors();
@@ -475,19 +510,19 @@ SQLRETURN OdbcDesc::sqlGetDescField(int recNumber, int fieldId, SQLPOINTER ptr, 
 // Record
 		case SQL_DESC_TYPE:
 			if (record && ptr)
-				*(SQLSMALLINT*) ptr = record->type,
+				*(SQLSMALLINT*) ptr = headType == odtImplementationRow ? verboseSqlType( record->type ) : record->type,
 				size = sizeof (SQLSMALLINT);
 			break;
 
 		case SQL_DESC_DATETIME_INTERVAL_CODE:
 			if (record && ptr)
-				*(SQLSMALLINT*) ptr = record->datetimeIntervalCode,
+				*(SQLSMALLINT*) ptr = headType == odtImplementationRow ? datetimeIntervalCodeOf( record->type ) : record->datetimeIntervalCode,
 				size = sizeof (SQLSMALLINT);
 			break;
 
 		case SQL_DESC_CONCISE_TYPE:
 			if (record && ptr)
-				*(SQLSMALLINT*) ptr = record->conciseType,
+				*(SQLSMALLINT*) ptr = headType == odtImplementationRow ? record->type : record->conciseType,
 				size = sizeof (SQLSMALLINT);
 			break;
 
@@ -1236,8 +1271,8 @@ SQLRETURN OdbcDesc::sqlGetDescRec(	SQLSMALLINT recNumber,
 		if( rc )
 			return rc;
 
-		*typePtr = record->type;
-		*subTypePtr = record->datetimeIntervalCode;
+		*typePtr = headType == odtImplementationRow ? verboseSqlType( record->type ) : record->type;
+		*subTypePtr = headType == odtImplementationRow ? datetimeIntervalCodeOf( record->type ) : record->datetimeIntervalCode;
 		*lengthPtr = record->octetLength;
 		*precisionPtr = record->precision;
 		*scalePtr = record->scale;
