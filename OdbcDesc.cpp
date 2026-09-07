@@ -591,8 +591,8 @@ SQLRETURN OdbcDesc::sqlGetDescField(int recNumber, int fieldId, SQLPOINTER ptr, 
 			if(headType ==  odtImplementationRow)
 			{
 				if (record && ptr)
-					*(SQLINTEGER*) ptr = record->displaySize,
-					size = sizeof (SQLINTEGER);
+					*(SQLLEN*) ptr = record->displaySize,
+					size = sizeof (SQLLEN);
 			}
 			else
 				return sqlReturn (SQL_ERROR, "HY091", "Invalid descriptor field identifier");
@@ -654,8 +654,8 @@ SQLRETURN OdbcDesc::sqlGetDescField(int recNumber, int fieldId, SQLPOINTER ptr, 
 
 		case SQL_DESC_LENGTH:
 			if (record && ptr)
-				*(SQLUINTEGER*) ptr = record->length,
-				size = sizeof (SQLUINTEGER);
+				*(SQLULEN*) ptr = record->length,
+				size = sizeof (SQLULEN);
 			break;
 
 		case SQL_DESC_NAME:
@@ -693,8 +693,8 @@ SQLRETURN OdbcDesc::sqlGetDescField(int recNumber, int fieldId, SQLPOINTER ptr, 
 			
 		case SQL_DESC_OCTET_LENGTH:
 			if (record && ptr)
-				*(SQLINTEGER*) ptr = record->octetLength,
-				size = sizeof (SQLINTEGER);	
+				*(SQLLEN*) ptr = record->octetLength,
+				size = sizeof (SQLLEN);
 			break;
 			
 		case SQL_DESC_OCTET_LENGTH_PTR:
