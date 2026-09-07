@@ -759,7 +759,18 @@ const char* Sqlda::getColumnName(int index)
 
 int Sqlda::getPrecision(int index)
 {
-	CAttrSqlVar *var = Var(index);
+	CAttrSqlVar *curVar = Var(index);
+
+	// An INPUT parameter's precision is fixed at prepare time, but the
+	// conversion layer shrinks the live sqlvar's sqllen to the length of
+	// the value it last wrote.  Read the prepare-time snapshot so a rebind
+	// never describes the parameter from that shrunken length; this mirrors
+	// getColumnDisplaySize above.  OUTPUT always uses the live sqlvar, and
+	// SQL_ARRAY needs the mutable CAttrSqlVar for its `array` pointer.
+	const SqlProperties *var =
+		(SqldaDir == SQLDA_INPUT && curVar->sqltype != SQL_ARRAY)
+			? orgVarSqlProperties(index)
+			: curVar;
 
 	switch (var->sqltype)
 	{
@@ -799,7 +810,7 @@ int Sqlda::getPrecision(int index)
 										MAX_QUAD_LENGTH);
 
 	case SQL_ARRAY:	
-		return var->array->arrOctetLength;
+		return curVar->array->arrOctetLength;
 //		return MAX_ARRAY_LENGTH;
 	
 	case SQL_BLOB:		
