@@ -193,3 +193,28 @@ TEST_F(ScrollableCursorTest, RewindAfterEnd) {
     ASSERT_TRUE(SQL_SUCCEEDED(ret));
     EXPECT_EQ(FetchID(), 1);
 }
+
+// ===== SQL_ATTR_KEYSET_SIZE is its own attribute, not the rowset size (#307) =====
+TEST_F(ScrollableCursorTest, KeysetSizeDoesNotChangeRowArraySize) {
+    SQLULEN v = 0;
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLGetStmtAttr(hStmt, SQL_ATTR_ROW_ARRAY_SIZE, &v, 0, NULL)));
+    EXPECT_EQ(v, 1u);
+
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLSetStmtAttr(hStmt, SQL_ATTR_KEYSET_SIZE, (SQLPOINTER)7, 0)));
+    v = 0;
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLGetStmtAttr(hStmt, SQL_ATTR_ROW_ARRAY_SIZE, &v, 0, NULL)));
+    EXPECT_EQ(v, 1u) << "SQL_ATTR_KEYSET_SIZE must not touch the rowset size";
+    v = 0;
+    SQLRETURN ret = SQLGetStmtAttr(hStmt, SQL_ATTR_KEYSET_SIZE, &v, 0, NULL);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    EXPECT_EQ(v, 7u);
+
+    // The ODBC 2 name of the rowset size still sets it, and leaves the keyset size alone
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLSetStmtAttr(hStmt, SQL_ROWSET_SIZE, (SQLPOINTER)3, 0)));
+    v = 0;
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLGetStmtAttr(hStmt, SQL_ATTR_ROW_ARRAY_SIZE, &v, 0, NULL)));
+    EXPECT_EQ(v, 3u);
+    v = 0;
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLGetStmtAttr(hStmt, SQL_ATTR_KEYSET_SIZE, &v, 0, NULL)));
+    EXPECT_EQ(v, 7u);
+}
