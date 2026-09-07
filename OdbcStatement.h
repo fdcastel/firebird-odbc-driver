@@ -62,7 +62,7 @@ public:
 	inline SQLRETURN fetchData();
 	inline SQLRETURN returnData();
 	inline SQLRETURN returnDataFromExtendedFetch();
-#ifdef _WIN64
+#if defined(_WIN64) || !defined(_WIN32)
 	SQLRETURN sqlColAttribute( int column, int fieldId, SQLPOINTER attributePtr, int bufferLength, SQLSMALLINT *strLengthPtr, SQLLEN *numericAttributePtr );
 #else
 	SQLRETURN sqlColAttribute( int column, int fieldId, SQLPOINTER attributePtr, int bufferLength, SQLSMALLINT *strLengthPtr, SQLPOINTER numericAttributePtr );

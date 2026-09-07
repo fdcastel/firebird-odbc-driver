@@ -3668,7 +3668,7 @@ SQLRETURN OdbcStatement::sqlRowCount(SQLLEN *rowCount)
 	return sqlSuccess();
 }
 
-#ifdef _WIN64
+#if defined(_WIN64) || !defined(_WIN32)
 SQLRETURN OdbcStatement::sqlColAttribute( int column, int fieldId, SQLPOINTER attributePtr, int bufferLength, SQLSMALLINT *strLengthPtr, SQLLEN *numericAttributePtr )
 #else
 SQLRETURN OdbcStatement::sqlColAttribute( int column, int fieldId, SQLPOINTER attributePtr, int bufferLength, SQLSMALLINT *strLengthPtr, SQLPOINTER numericAttributePtr )
@@ -3820,13 +3820,8 @@ SQLRETURN OdbcStatement::sqlColAttribute( int column, int fieldId, SQLPOINTER at
 		setString (string, (SQLCHAR*) attributePtr, bufferLength, strLengthPtr);
 	else if (numericAttributePtr)
 	{
-#ifdef _WIN64
 		*(SQLLEN*) numericAttributePtr = value;
 		if ( strLengthPtr ) *strLengthPtr = sizeof ( SQLLEN );
-#else
-		*(SQLINTEGER*) numericAttributePtr = value;
-		if ( strLengthPtr ) *strLengthPtr = sizeof ( SQLINTEGER );
-#endif
 	}
 
 	return sqlSuccess();
