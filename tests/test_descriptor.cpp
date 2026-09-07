@@ -461,7 +461,7 @@ TEST_F(DescriptorTest, IrdRecordsDescribeColumnsAfterPrepare) {
         ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
 
         EXPECT_NE(descType, SQL_C_DEFAULT) << "column " << col << " still holds the record default";
-        EXPECT_NE(conciseType, SQL_C_DEFAULT) << "column " << col;
+        EXPECT_EQ(conciseType, dataType) << "column " << col;
         EXPECT_STREQ((char*)descName, (char*)colName) << "column " << col;
         EXPECT_NE(recType, SQL_C_DEFAULT) << "column " << col;
         EXPECT_STREQ((char*)recName, (char*)colName) << "column " << col;
@@ -497,4 +497,51 @@ TEST_F(DescriptorTest, CopyDescFromIrdAfterPrepare) {
     ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_DESC, hCopy);
     EXPECT_EQ(descType, dataType);
     SQLFreeHandle(SQL_HANDLE_DESC, hCopy);
+}
+
+// ===== IRD type fields: verbose type, concise type, datetime interval code (#316) =====
+TEST_F(DescriptorTest, IrdTypeFieldsFollowOdbc) {
+    SQLRETURN ret = SQLPrepare(hStmt,
+        (SQLCHAR*)"SELECT CAST(1 AS INTEGER) AS C1, CAST('x' AS VARCHAR(5)) AS C2, "
+                  "CAST('2020-01-02' AS DATE) AS C3, "
+                  "CAST('2020-01-02 03:04:05' AS TIMESTAMP) AS C4 FROM RDB$DATABASE",
+        SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    SQLHDESC hIrd = SQL_NULL_HDESC;
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLGetStmtAttr(hStmt, SQL_ATTR_IMP_ROW_DESC, &hIrd, 0, NULL)));
+
+    // A verbose type of 0 means "same as the concise type SQLDescribeCol reports"
+    struct { SQLSMALLINT col, verboseType, intervalCode; } expected[] = {
+        {1, SQL_INTEGER, 0},
+        {2, 0, 0},
+        {3, SQL_DATETIME, SQL_CODE_DATE},
+        {4, SQL_DATETIME, SQL_CODE_TIMESTAMP},
+    };
+    for (auto& e : expected) {
+        SQLCHAR colName[64] = {};
+        SQLSMALLINT colNameLen = 0, dataType = 0, decimalDigits = 0, nullable = 0;
+        SQLULEN columnSize = 0;
+        ret = SQLDescribeCol(hStmt, e.col, colName, sizeof(colName), &colNameLen, &dataType,
+                             &columnSize, &decimalDigits, &nullable);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+        SQLSMALLINT verboseType = e.verboseType ? e.verboseType : dataType;
+
+        SQLSMALLINT descType = 0, conciseType = 0, intervalCode = -1;
+        ASSERT_TRUE(SQL_SUCCEEDED(SQLGetDescField(hIrd, e.col, SQL_DESC_TYPE, &descType, 0, NULL)));
+        ASSERT_TRUE(SQL_SUCCEEDED(SQLGetDescField(hIrd, e.col, SQL_DESC_CONCISE_TYPE, &conciseType, 0, NULL)));
+        ASSERT_TRUE(SQL_SUCCEEDED(SQLGetDescField(hIrd, e.col, SQL_DESC_DATETIME_INTERVAL_CODE, &intervalCode, 0, NULL)));
+        EXPECT_EQ(descType, verboseType) << "column " << e.col;
+        EXPECT_EQ(conciseType, dataType) << "column " << e.col;
+        EXPECT_EQ(intervalCode, e.intervalCode) << "column " << e.col;
+
+        SQLCHAR recName[64] = {};
+        SQLSMALLINT recNameLen = 0, recType = 0, recSubType = -1, recPrecision = 0, recScale = 0,
+                    recNullable = 0;
+        SQLLEN recLength = 0;
+        ret = SQLGetDescRec(hIrd, e.col, recName, sizeof(recName), &recNameLen, &recType, &recSubType,
+                            &recLength, &recPrecision, &recScale, &recNullable);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_DESC, hIrd);
+        EXPECT_EQ(recType, verboseType) << "column " << e.col;
+        EXPECT_EQ(recSubType, e.intervalCode) << "column " << e.col;
+    }
 }
