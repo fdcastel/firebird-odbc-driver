@@ -1987,7 +1987,11 @@ SQLRETURN OdbcStatement::sqlExecute()
 		enFetch = NoneFetch;
 		releaseResultSet();
 		parameterNeedData = 0;
-		retcode = (this->*execute)();
+		if ( statement->isActiveModify() && applicationParamDescriptor->headArraySize > 1
+			&& execute != &OdbcStatement::executeStatementParamArray )
+			retcode = executeStatementParamArray();
+		else
+			retcode = (this->*execute)();
 	}
 	catch (const SQLException &ex)
 	{
@@ -2015,7 +2019,11 @@ SQLRETURN OdbcStatement::sqlExecDirect(SQLCHAR * sql, int sqlLength)
 	{
 		enFetch = NoneFetch;
 		parameterNeedData = 0;
-		retcode = (this->*execute)();
+		if ( statement->isActiveModify() && applicationParamDescriptor->headArraySize > 1
+			&& execute != &OdbcStatement::executeStatementParamArray )
+			retcode = executeStatementParamArray();
+		else
+			retcode = (this->*execute)();
 	}
 	catch (const SQLException &ex)
 	{
