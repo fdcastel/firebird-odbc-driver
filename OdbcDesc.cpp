@@ -216,6 +216,9 @@ SQLRETURN OdbcDesc::operator =(OdbcDesc &sour)
 
 		if ( srcrec )
 		{
+			if ( sour.headType == odtImplementationRow && n && !srcrec->isDefined )
+				sour.defFromMetaDataOut( n, srcrec );
+
 			rec = srcrec;
 			rec.sizeColumnExtendedFetch = srcrec->sizeColumnExtendedFetch;
 		}
@@ -371,6 +374,8 @@ SQLRETURN OdbcDesc::sqlGetDescField(int recNumber, int fieldId, SQLPOINTER ptr, 
 			if ( !recNumber && headType == odtImplementationParameter )
 					return sqlReturn (SQL_ERROR, "HY091", "Invalid descriptor field identifier");
 			record = getDescRecord (recNumber);
+			if ( headType == odtImplementationRow && recNumber && !record->isDefined )
+				defFromMetaDataOut( recNumber, record );
 	}
 
 	try
@@ -1222,6 +1227,8 @@ SQLRETURN OdbcDesc::sqlGetDescRec(	SQLSMALLINT recNumber,
 			return sqlReturn (SQL_ERROR, "HY091", "Invalid descriptor field identifier");
 
 	record = getDescRecord (recNumber);
+	if ( headType == odtImplementationRow && recNumber && !record->isDefined )
+		defFromMetaDataOut( recNumber, record );
 
 	try
 	{
