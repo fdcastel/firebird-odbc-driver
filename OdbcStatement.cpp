@@ -3054,6 +3054,7 @@ SQLRETURN OdbcStatement::executeStatementParamArray()
 							: &rowCount;
 	SQLUSMALLINT *statusPtr = implementationParamDescriptor->headArrayStatusPtr ? implementationParamDescriptor->headArrayStatusPtr
 								: NULL;
+	SQLUSMALLINT *operationPtr = applicationParamDescriptor->headArrayStatusPtr;
 	int rowSize = applicationParamDescriptor->headBindType;
 	int nCountRow = applicationParamDescriptor->headArraySize;
 	SQLLEN	*&headBindOffsetPtr = applicationParamDescriptor->headBindOffsetPtr;
@@ -3064,8 +3065,21 @@ SQLRETURN OdbcStatement::executeStatementParamArray()
 	headBindOffsetPtr = &bindOffsetPtrTmp;
 	*rowCountPt = rowNumberParamArray = 0;
 
+	if ( statusPtr )
+		for ( int n = 0; n < nCountRow; ++n )
+			statusPtr[n] = SQL_PARAM_UNUSED;
+
 	while ( rowNumberParamArray < nCountRow )
 	{
+		if ( operationPtr && operationPtr[rowNumberParamArray] == SQL_PARAM_IGNORE )
+		{
+			bindOffsetPtrTmp += rowSize;
+			++rowNumberParamArray;
+			continue;
+		}
+
+		++*rowCountPt;
+
 		if ( arrayColumnWiseBinding )
 			bindOffsetIndColumnWiseBinding = ( bindOffsetPtrTmp + rowNumberParamArray ) * sizeof ( SQLLEN );
 
@@ -3074,21 +3088,20 @@ SQLRETURN OdbcStatement::executeStatementParamArray()
 			headBindOffsetPtr = bindOffsetPtrSave;
 			convert->setBindOffsetPtrFrom ( applicationParamDescriptor->headBindOffsetPtr, applicationParamDescriptor->headBindOffsetPtr );
 			if ( statusPtr )
-				*statusPtr = SQL_PARAM_ERROR;
+				statusPtr[rowNumberParamArray] = SQL_PARAM_ERROR;
 			return ret;
 		}
 
 		statement->executeStatement();
 
 		if ( statusPtr )
-			*statusPtr++ = ret == SQL_SUCCESS_WITH_INFO ? SQL_PARAM_SUCCESS_WITH_INFO : SQL_PARAM_SUCCESS;
+			statusPtr[rowNumberParamArray] = ret == SQL_SUCCESS_WITH_INFO ? SQL_PARAM_SUCCESS_WITH_INFO : SQL_PARAM_SUCCESS;
 
 		bindOffsetPtrTmp += rowSize;
 		parameterNeedData = 1;
 		++rowNumberParamArray;
 	}
 
-	*rowCountPt = rowNumberParamArray;
 	headBindOffsetPtr = bindOffsetPtrSave;
 	convert->setBindOffsetPtrFrom ( applicationParamDescriptor->headBindOffsetPtr, applicationParamDescriptor->headBindOffsetPtr );
 
