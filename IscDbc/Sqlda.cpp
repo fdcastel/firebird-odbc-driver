@@ -684,7 +684,7 @@ void Sqlda::print()
 //
 int Sqlda::getColumnDisplaySize(int index)
 {
-	const SqlProperties *var = (SqldaDir == SQLDA_INPUT) ? orgVarSqlProperties(index) : Var(index);
+	const SqlProperties *var = describedSqlProperties(index);
 
 	switch (var->sqltype)
 	{
@@ -843,7 +843,7 @@ int Sqlda::getNumPrecRadix(int index)
 
 int Sqlda::getScale(int index)
 {
-	CAttrSqlVar *var = Var(index);
+	const SqlProperties *var = describedSqlProperties(index);
 
 	switch (var->sqltype)
 	{
@@ -862,20 +862,20 @@ bool Sqlda::isNullable(int index)
 
 int Sqlda::getColumnType(int index, int &realSqlType)
 {
-	return getSqlType ( Var(index), realSqlType );
+	return getSqlType ( describedSqlProperties(index), Var(index)->array, realSqlType );
 }
 
 const char* Sqlda::getColumnTypeName(int index)
 {
-	return getSqlTypeName ( Var(index) );
+	return getSqlTypeName ( describedSqlProperties(index) );
 }
 
 short Sqlda::getSubType(int index)
 {
-	return Var( index )->sqlsubtype;
+	return describedSqlProperties( index )->sqlsubtype;
 }
 
-int Sqlda::getSqlType(CAttrSqlVar *var, int &realSqlType)
+int Sqlda::getSqlType(const SqlProperties *var, const CAttrArray *array, int &realSqlType)
 {
 	switch (var->sqltype)
 	{
@@ -935,7 +935,7 @@ int Sqlda::getSqlType(CAttrSqlVar *var, int &realSqlType)
 		return (realSqlType = JDBC_DATE);
 
 	case SQL_ARRAY:
-		if ( var->array->arrOctetLength < MAX_VARCHAR_LENGTH )
+		if ( array->arrOctetLength < MAX_VARCHAR_LENGTH )
 			return (realSqlType = JDBC_VARCHAR);
 		return (realSqlType = JDBC_LONGVARCHAR);
 	}
@@ -943,7 +943,7 @@ int Sqlda::getSqlType(CAttrSqlVar *var, int &realSqlType)
 	return (realSqlType = 0);
 }
 
-const char* Sqlda::getSqlTypeName ( CAttrSqlVar *var )
+const char* Sqlda::getSqlTypeName ( const SqlProperties *var )
 {
 	switch (var->sqltype)
 	{

@@ -87,6 +87,98 @@ protected:
         SQLCloseCursor(hStmt);
         return std::string((char*)buf);
     }
+
+    // Read a single column back as a string ("NULL" for a null value).
+    std::string readBack(const char* colName, int id) {
+        char selectSql[256];
+        snprintf(selectSql, sizeof(selectSql),
+            "SELECT %s FROM ODBC_TEST_PCONV WHERE ID = %d", colName, id);
+        SQLRETURN ret = SQLExecDirect(hStmt, (SQLCHAR*)selectSql, SQL_NTS);
+        if (!SQL_SUCCEEDED(ret)) return "<select-error>";
+
+        SQLCHAR buf[256] = {};
+        SQLLEN ind = 0;
+        SQLBindCol(hStmt, 1, SQL_C_CHAR, buf, sizeof(buf), &ind);
+        ret = SQLFetch(hStmt);
+        if (!SQL_SUCCEEDED(ret)) return "<fetch-error>";
+        SQLCloseCursor(hStmt);
+        SQLFreeStmt(hStmt, SQL_UNBIND);
+        return ind == SQL_NULL_DATA ? "NULL" : std::string((char*)buf);
+    }
+
+    // Send one NULL row and one value row through a single prepared statement,
+    // binding the NULL with SQL_C_DEFAULT (which resolves to SQL_C_CHAR for
+    // SQL_NUMERIC, SQL_DECIMAL and SQL_BIGINT) and the value with SQL_C_SLONG.
+    // Returns the value row read back.
+    std::string nullThenValueRebind(const char* colName, bool resetParams) {
+        const int nullId = nextId_++;
+        const int valueId = nextId_++;
+
+        char sql[256];
+        snprintf(sql, sizeof(sql),
+            "UPDATE OR INSERT INTO ODBC_TEST_PCONV (ID, %s) VALUES (?, ?)", colName);
+        SQLRETURN ret = SQLPrepare(hStmt, (SQLCHAR*)sql, SQL_NTS);
+        EXPECT_TRUE(SQL_SUCCEEDED(ret))
+            << "SQLPrepare failed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+        if (!SQL_SUCCEEDED(ret)) return "<prepare-error>";
+
+        SQLSMALLINT paramType = 0, decimals = 0, nullable = 0;
+        SQLULEN paramSize = 0;
+        ret = SQLDescribeParam(hStmt, 2, &paramType, &paramSize, &decimals, &nullable);
+        EXPECT_TRUE(SQL_SUCCEEDED(ret))
+            << "SQLDescribeParam failed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+        if (!SQL_SUCCEEDED(ret)) return "<describe-error>";
+
+        SQLINTEGER idVal = nullId;
+        SQLLEN idInd = sizeof(idVal);
+        SQLINTEGER value = 0;
+        SQLLEN valueInd = SQL_NULL_DATA;
+
+        auto bindId = [&]() {
+            return SQLBindParameter(hStmt, 1, SQL_PARAM_INPUT,
+                SQL_C_SLONG, SQL_INTEGER, 0, 0, &idVal, sizeof(idVal), &idInd);
+        };
+
+        ret = bindId();
+        EXPECT_TRUE(SQL_SUCCEEDED(ret)) << "bind of ID failed";
+
+        // The NULL row: no C type of its own, no data pointer - only the indicator.
+        ret = SQLBindParameter(hStmt, 2, SQL_PARAM_INPUT,
+            SQL_C_DEFAULT, paramType, paramSize, decimals, NULL, 0, &valueInd);
+        EXPECT_TRUE(SQL_SUCCEEDED(ret))
+            << "bind of NULL failed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+        ret = SQLExecute(hStmt);
+        EXPECT_TRUE(SQL_SUCCEEDED(ret))
+            << "execute of the NULL row failed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+        // The value row, rebound with a numeric C type.
+        idVal = valueId;
+        value = 60;
+        valueInd = sizeof(value);
+
+        SQLFreeStmt(hStmt, SQL_CLOSE);
+        if (resetParams) {
+            SQLFreeStmt(hStmt, SQL_RESET_PARAMS);
+            ret = bindId();
+            EXPECT_TRUE(SQL_SUCCEEDED(ret)) << "rebind of ID failed";
+        }
+
+        ret = SQLBindParameter(hStmt, 2, SQL_PARAM_INPUT,
+            SQL_C_SLONG, paramType, paramSize, decimals, &value, sizeof(value), &valueInd);
+        EXPECT_TRUE(SQL_SUCCEEDED(ret))
+            << "rebind of the value failed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+        ret = SQLExecute(hStmt);
+        EXPECT_TRUE(SQL_SUCCEEDED(ret))
+            << "execute of the value row failed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+        Commit();
+        ReallocStmt();
+
+        EXPECT_EQ(readBack(colName, nullId), "NULL") << "the NULL row did not stay NULL";
+        return readBack(colName, valueId);
+    }
 };
 
 // ===== String → Integer =====
@@ -275,6 +367,84 @@ TEST_F(ParamConversionsTest, NumericAsCharParam) {
     std::string result = insertAndReadBack("VAL_NUMERIC",
         SQL_C_CHAR, SQL_NUMERIC, val, 0, &ind);
     EXPECT_NEAR(atof(result.c_str()), 1234.5678, 0.001);
+}
+
+// ===== A character-typed bind must not retype the parameter =====
+//
+// SQL_C_DEFAULT resolves to SQL_C_CHAR for SQL_NUMERIC, SQL_DECIMAL and SQL_BIGINT,
+// so an application that binds its NULLs with SQL_C_DEFAULT and its values with the
+// value's own C type sends a character transfer first.  That transfer used to retype
+// the parameter for the rest of the statement's life: every later bind was described
+// as CHAR, and rows following the NULL reached the server as NULL with SQL_SUCCESS.
+// SQL_INTEGER / SQL_SMALLINT / SQL_DOUBLE were unaffected only because their
+// SQL_C_DEFAULT never resolves to a character C type.
+
+TEST_F(ParamConversionsTest, NullAsDefaultThenBigintRebind) {
+    SKIP_ON_FIREBIRD6();
+    EXPECT_EQ(atoi(nullThenValueRebind("VAL_BIGINT", false).c_str()), 60);
+}
+
+TEST_F(ParamConversionsTest, NullAsDefaultThenNumericRebind) {
+    SKIP_ON_FIREBIRD6();
+    EXPECT_NEAR(atof(nullThenValueRebind("VAL_NUMERIC", false).c_str()), 60.0, 0.001);
+}
+
+TEST_F(ParamConversionsTest, NullAsDefaultThenIntegerRebind) {
+    SKIP_ON_FIREBIRD6();
+    EXPECT_EQ(atoi(nullThenValueRebind("VAL_INT", false).c_str()), 60);
+}
+
+// SQLFreeStmt(SQL_RESET_PARAMS) does not help: the state that was lost lived in the
+// parameter itself, not in the descriptors the reset clears.
+TEST_F(ParamConversionsTest, NullAsDefaultThenBigintRebindAfterResetParams) {
+    SKIP_ON_FIREBIRD6();
+    EXPECT_EQ(atoi(nullThenValueRebind("VAL_BIGINT", true).c_str()), 60);
+}
+
+// The same retyping was visible directly: SQLDescribeParam reported CHAR for a
+// BIGINT parameter once a character transfer had gone through it.
+TEST_F(ParamConversionsTest, DescribeParamStableAfterCharBind) {
+    SKIP_ON_FIREBIRD6();
+
+    SQLRETURN ret = SQLPrepare(hStmt,
+        (SQLCHAR*)"UPDATE OR INSERT INTO ODBC_TEST_PCONV (ID, VAL_BIGINT) VALUES (?, ?)",
+        SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret))
+        << "SQLPrepare failed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    SQLSMALLINT typeBefore = 0, decimals = 0, nullable = 0;
+    SQLULEN paramSize = 0;
+    ret = SQLDescribeParam(hStmt, 2, &typeBefore, &paramSize, &decimals, &nullable);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret))
+        << "SQLDescribeParam failed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    EXPECT_EQ(typeBefore, SQL_BIGINT);
+
+    SQLINTEGER idVal = nextId_++;
+    SQLLEN idInd = sizeof(idVal);
+    SQLLEN valueInd = SQL_NULL_DATA;
+
+    ret = SQLBindParameter(hStmt, 1, SQL_PARAM_INPUT,
+        SQL_C_SLONG, SQL_INTEGER, 0, 0, &idVal, sizeof(idVal), &idInd);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << "bind of ID failed";
+
+    ret = SQLBindParameter(hStmt, 2, SQL_PARAM_INPUT,
+        SQL_C_CHAR, SQL_BIGINT, paramSize, decimals, NULL, 0, &valueInd);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret))
+        << "bind of NULL failed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    ret = SQLExecute(hStmt);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret))
+        << "SQLExecute failed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    SQLSMALLINT typeAfter = 0;
+    ret = SQLDescribeParam(hStmt, 2, &typeAfter, &paramSize, &decimals, &nullable);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret))
+        << "second SQLDescribeParam failed: " << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    EXPECT_EQ(typeAfter, typeBefore)
+        << "the parameter was redescribed after a character-typed bind";
+
+    Commit();
+    ReallocStmt();
 }
 
 // ===== Already-covered round-trip tests from test_data_types.cpp =====
