@@ -175,6 +175,7 @@ OdbcStatement::OdbcStatement(OdbcConnection *connect, int statementNumber)
 	bulkInsert = NULL;
 	execute = &OdbcStatement::executeStatement;
 	keysetSize = 0;
+	updateCountParamArray = -1;
 	fetchNext = &ResultSet::nextFetch;
 	schemaFetchData = true;
 	metaData = NULL;
@@ -1988,6 +1989,7 @@ SQLRETURN OdbcStatement::sqlExecute()
 		enFetch = NoneFetch;
 		releaseResultSet();
 		parameterNeedData = 0;
+		updateCountParamArray = -1;
 		if ( statement->isActiveModify() && applicationParamDescriptor->headArraySize > 1
 			&& execute != &OdbcStatement::executeStatementParamArray )
 			retcode = executeStatementParamArray();
@@ -2020,6 +2022,7 @@ SQLRETURN OdbcStatement::sqlExecDirect(SQLCHAR * sql, int sqlLength)
 	{
 		enFetch = NoneFetch;
 		parameterNeedData = 0;
+		updateCountParamArray = -1;
 		if ( statement->isActiveModify() && applicationParamDescriptor->headArraySize > 1
 			&& execute != &OdbcStatement::executeStatementParamArray )
 			retcode = executeStatementParamArray();
@@ -3064,6 +3067,7 @@ SQLRETURN OdbcStatement::executeStatementParamArray()
 
 	headBindOffsetPtr = &bindOffsetPtrTmp;
 	*rowCountPt = rowNumberParamArray = 0;
+	updateCountParamArray = 0;
 
 	if ( statusPtr )
 		for ( int n = 0; n < nCountRow; ++n )
@@ -3093,6 +3097,7 @@ SQLRETURN OdbcStatement::executeStatementParamArray()
 		}
 
 		statement->executeStatement();
+		updateCountParamArray += statement->getUpdateCount();
 
 		if ( statusPtr )
 			statusPtr[rowNumberParamArray] = ret == SQL_SUCCESS_WITH_INFO ? SQL_PARAM_SUCCESS_WITH_INFO : SQL_PARAM_SUCCESS;
@@ -3721,7 +3726,7 @@ SQLRETURN OdbcStatement::sqlRowCount(SQLLEN *rowCount)
 			if ( enFetch != NoneFetch )
 				*rowCount = rowNumber;
 			else if ( statement->isActive() )
-				*rowCount = statement->getUpdateCount();
+				*rowCount = updateCountParamArray >= 0 ? updateCountParamArray : statement->getUpdateCount();
 			else 
 				*rowCount = -1;
 		}

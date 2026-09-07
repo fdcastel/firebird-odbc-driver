@@ -805,23 +805,23 @@ TEST_F(ArrayBindingTest, ParamsetSizeOneIsNormal) {
 }
 
 // ============================================================================
-// 13. SQLGetInfo reports SQL_PARC_BATCH for SQL_PARAM_ARRAY_ROW_COUNTS
+// 13. SQLGetInfo reports SQL_PARC_NO_BATCH for SQL_PARAM_ARRAY_ROW_COUNTS
 // ============================================================================
 TEST_F(ArrayBindingTest, GetInfoParamArrayRowCounts) {
     SQLUINTEGER value = 0;
     SQLRETURN ret = SQLGetInfo(hDbc, SQL_PARAM_ARRAY_ROW_COUNTS, &value, sizeof(value), NULL);
     ASSERT_TRUE(SQL_SUCCEEDED(ret));
-    EXPECT_EQ(value, (SQLUINTEGER)SQL_PARC_BATCH);
+    EXPECT_EQ(value, (SQLUINTEGER)SQL_PARC_NO_BATCH);
 }
 
 // ============================================================================
-// 14. SQLGetInfo reports SQL_PAS_BATCH for SQL_PARAM_ARRAY_SELECTS
+// 14. SQLGetInfo reports SQL_PAS_NO_SELECT for SQL_PARAM_ARRAY_SELECTS
 // ============================================================================
 TEST_F(ArrayBindingTest, GetInfoParamArraySelects) {
     SQLUINTEGER value = 0;
     SQLRETURN ret = SQLGetInfo(hDbc, SQL_PARAM_ARRAY_SELECTS, &value, sizeof(value), NULL);
     ASSERT_TRUE(SQL_SUCCEEDED(ret));
-    EXPECT_EQ(value, (SQLUINTEGER)SQL_PAS_BATCH);
+    EXPECT_EQ(value, (SQLUINTEGER)SQL_PAS_NO_SELECT);
 }
 
 // ============================================================================
@@ -1148,4 +1148,90 @@ TEST_F(ArrayBindingTest, ColumnWiseFixedLengthTypesBufferLengthZero) {
         EXPECT_EQ(stamp.second, stamps[i].second) << "Row " << i;
     }
     EXPECT_EQ(SQLFetch(hStmt), SQL_NO_DATA);
+}
+
+// ============================================================================
+// 20. SQLRowCount after an array INSERT is the total over all parameter sets
+//     (SQL_PARC_NO_BATCH); SQLMoreResults has nothing further
+// ============================================================================
+TEST_F(ArrayBindingTest, RowCountAfterArrayInsert) {
+    SKIP_ON_FIREBIRD6();
+    const int N = 5;
+    SQLINTEGER ids[N] = {1, 2, 3, 4, 5};
+    SQLCHAR strs[N][20] = {"a", "b", "c", "d", "e"};
+    SQLLEN id_ind[N] = {0, 0, 0, 0, 0};
+    SQLLEN str_ind[N] = {SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS, SQL_NTS};
+    SQLULEN nprocessed = 0;
+    SQLRETURN ret;
+
+    ret = SQLSetStmtAttr(hStmt, SQL_ATTR_PARAMSET_SIZE, (SQLPOINTER)(intptr_t)N, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLSetStmtAttr(hStmt, SQL_ATTR_PARAMS_PROCESSED_PTR, &nprocessed, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLBindParameter(hStmt, 1, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0,
+                           ids, 0, id_ind);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLBindParameter(hStmt, 2, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 19, 0,
+                           strs, 20, str_ind);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    ret = SQLExecDirect(hStmt, (SQLCHAR*)"INSERT INTO ARRAY_BIND_TEST (I, T) VALUES (?, ?)", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    EXPECT_EQ(nprocessed, (SQLULEN)N);
+
+    SQLLEN rowCount = -1;
+    ret = SQLRowCount(hStmt, &rowCount);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    EXPECT_EQ(rowCount, (SQLLEN)N);
+    EXPECT_EQ(SQLMoreResults(hStmt), SQL_NO_DATA);
+
+    Commit();
+    EXPECT_EQ(CountRows(), N);
+}
+
+// ============================================================================
+// 21. SQLRowCount after an array UPDATE adds up the rows each set touched;
+//     a set that matches nothing contributes zero
+// ============================================================================
+TEST_F(ArrayBindingTest, RowCountAfterArrayUpdate) {
+    SKIP_ON_FIREBIRD6();
+    ExecDirect("INSERT INTO ARRAY_BIND_TEST (I, T) VALUES (1, 'one')");
+    ExecDirect("INSERT INTO ARRAY_BIND_TEST (I, T) VALUES (2, 'two')");
+    ExecDirect("INSERT INTO ARRAY_BIND_TEST (I, T) VALUES (2, 'two')");
+    ExecDirect("INSERT INTO ARRAY_BIND_TEST (I, T) VALUES (2, 'two')");
+    Commit();
+    ReallocStmt();
+
+    // Three sets: I = 1 touches one row, I = 2 touches three, I = 999 touches none
+    const int N = 3;
+    SQLINTEGER ids[N] = {1, 2, 999};
+    SQLCHAR strs[N][20] = {"uno", "dos", "none"};
+    SQLLEN id_ind[N] = {0, 0, 0};
+    SQLLEN str_ind[N] = {SQL_NTS, SQL_NTS, SQL_NTS};
+    SQLULEN nprocessed = 0;
+    SQLRETURN ret;
+
+    ret = SQLSetStmtAttr(hStmt, SQL_ATTR_PARAMSET_SIZE, (SQLPOINTER)(intptr_t)N, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLSetStmtAttr(hStmt, SQL_ATTR_PARAMS_PROCESSED_PTR, &nprocessed, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLBindParameter(hStmt, 1, SQL_PARAM_INPUT, SQL_C_CHAR, SQL_VARCHAR, 19, 0,
+                           strs, 20, str_ind);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLBindParameter(hStmt, 2, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0,
+                           ids, 0, id_ind);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    ret = SQLExecDirect(hStmt, (SQLCHAR*)"UPDATE ARRAY_BIND_TEST SET T = ? WHERE I = ?", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    EXPECT_EQ(nprocessed, (SQLULEN)N);
+
+    SQLLEN rowCount = -1;
+    ret = SQLRowCount(hStmt, &rowCount);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    EXPECT_EQ(rowCount, (SQLLEN)4);
+
+    Commit();
+    EXPECT_EQ(GetValue(1), "uno");
+    EXPECT_EQ(GetValue(2), "dos");
 }

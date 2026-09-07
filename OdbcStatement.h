@@ -193,6 +193,7 @@ public:
 	int					rowNumber;
 	int					rowNumberParamArray;
 	SQLULEN				keysetSize;
+	SQLLEN				updateCountParamArray;
 	int					lastRowsetSize;
 	SQLLEN				indicatorRowNumber;
 	int					maxRows;
