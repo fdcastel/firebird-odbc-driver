@@ -2744,6 +2744,18 @@ void OdbcStatement::bindInputOutputParam(int param, DescRecord * recordApp)
 
 		recordApp->fnConv = convert->getAdressFunction( recordApp, record );
 
+		switch ( recordApp->conciseType )
+		{
+		case SQL_C_CHAR:
+		case SQL_C_WCHAR:
+		case SQL_C_BINARY:
+			break;
+
+		default:
+			if ( !recordApp->sizeColumnExtendedFetch )
+				recordApp->sizeColumnExtendedFetch = ipd->getConciseSize( recordApp->conciseType, recordApp->length );
+		}
+
 //		if ( convert->isIdentity() )
 			addBindParam ( param, record, recordApp );
 	}

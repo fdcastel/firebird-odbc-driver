@@ -1566,6 +1566,9 @@ int OdbcDesc::getConciseSize(int type, int length)
 	case SQL_C_UBIGINT:
 		return 8;
 
+	case SQL_C_GUID:
+		return sizeof(SQLGUID);
+
 	case SQL_DECIMAL:
 	case SQL_C_NUMERIC:
 		return sizeof(tagSQL_NUMERIC_STRUCT);
