@@ -68,7 +68,7 @@ protected:
 //    (ported from psqlodbc arraybinding-test.c test 1)
 // ============================================================================
 TEST_F(ArrayBindingTest, ColumnWiseInsert) {
-    GTEST_SKIP() << "Crashes on vanilla master: sizeof(SQLINTEGER) vs sizeof(SQLLEN) bug in OdbcStatement.cpp line 2891";
+    SKIP_ON_FIREBIRD6();
     const int ARRAY_SIZE = 100;
     SQLRETURN ret;
 
@@ -134,7 +134,7 @@ TEST_F(ArrayBindingTest, ColumnWiseInsert) {
 // 2. Column-wise binding — using SQLPrepare + SQLExecute
 // ============================================================================
 TEST_F(ArrayBindingTest, ColumnWisePrepareExecute) {
-    GTEST_SKIP() << "Crashes on vanilla master: sizeof(SQLINTEGER) vs sizeof(SQLLEN) bug in OdbcStatement.cpp line 2891";
+    SKIP_ON_FIREBIRD6();
     const int ARRAY_SIZE = 10;
     SQLRETURN ret;
 
@@ -257,7 +257,7 @@ TEST_F(ArrayBindingTest, RowWiseInsert) {
 // 4. Column-wise binding with NULL values
 // ============================================================================
 TEST_F(ArrayBindingTest, ColumnWiseWithNulls) {
-    GTEST_SKIP() << "Crashes on vanilla master: sizeof(SQLINTEGER) vs sizeof(SQLLEN) bug in OdbcStatement.cpp line 2891";
+    SKIP_ON_FIREBIRD6();
     const int ARRAY_SIZE = 5;
     SQLRETURN ret;
 
@@ -316,7 +316,7 @@ TEST_F(ArrayBindingTest, ColumnWiseWithNulls) {
 // 5. SQL_ATTR_PARAM_OPERATION_PTR — skip individual rows
 // ============================================================================
 TEST_F(ArrayBindingTest, ParamOperationPtrSkipRows) {
-    GTEST_SKIP() << "Crashes on vanilla master: sizeof(SQLINTEGER) vs sizeof(SQLLEN) bug in OdbcStatement.cpp line 2891";
+    GTEST_SKIP() << "Vanilla driver does not properly handle SQL_ATTR_PARAM_OPERATION_PTR";
     const int ARRAY_SIZE = 5;
     SQLRETURN ret;
 
@@ -384,7 +384,7 @@ TEST_F(ArrayBindingTest, ParamOperationPtrSkipRows) {
 // 6. Large array — column-wise (like psqlodbc's 10000-row test)
 // ============================================================================
 TEST_F(ArrayBindingTest, LargeColumnWiseArray) {
-    GTEST_SKIP() << "Crashes on vanilla master: sizeof(SQLINTEGER) vs sizeof(SQLLEN) bug in OdbcStatement.cpp line 2891";
+    SKIP_ON_FIREBIRD6();
     const int ARRAY_SIZE = 1000;
     SQLRETURN ret;
 
@@ -442,7 +442,7 @@ TEST_F(ArrayBindingTest, LargeColumnWiseArray) {
 //    (from psqlodbc params-batch-exec-test.c)
 // ============================================================================
 TEST_F(ArrayBindingTest, ReExecuteWithDifferentData) {
-    GTEST_SKIP() << "Crashes on vanilla master: sizeof(SQLINTEGER) vs sizeof(SQLLEN) bug in OdbcStatement.cpp line 2891";
+    SKIP_ON_FIREBIRD6();
     const int BATCH_SIZE = 5;
     SQLRETURN ret;
 
@@ -516,7 +516,7 @@ TEST_F(ArrayBindingTest, ReExecuteWithDifferentData) {
 //     SQLSetStmtAttr survive SQLFreeStmt")
 // ============================================================================
 TEST_F(ArrayBindingTest, NewHandleAfterArrayExec) {
-    GTEST_SKIP() << "Crashes on vanilla master: sizeof(SQLINTEGER) vs sizeof(SQLLEN) bug in OdbcStatement.cpp line 2891";
+    SKIP_ON_FIREBIRD6();
     const int ARRAY_SIZE = 3;
     SQLRETURN ret;
 
@@ -658,7 +658,7 @@ TEST_F(ArrayBindingTest, RowWiseMultipleTypes) {
 // 10. Column-wise binding with UPDATE statement
 // ============================================================================
 TEST_F(ArrayBindingTest, ColumnWiseUpdate) {
-    GTEST_SKIP() << "Crashes on vanilla master: sizeof(SQLINTEGER) vs sizeof(SQLLEN) bug in OdbcStatement.cpp line 2891";
+    SKIP_ON_FIREBIRD6();
     // Insert some initial data
     {
         SQLHSTMT hStmt2 = SQL_NULL_HSTMT;
@@ -717,7 +717,7 @@ TEST_F(ArrayBindingTest, ColumnWiseUpdate) {
 // 11. Column-wise binding with DELETE statement
 // ============================================================================
 TEST_F(ArrayBindingTest, ColumnWiseDelete) {
-    GTEST_SKIP() << "Crashes on vanilla master: sizeof(SQLINTEGER) vs sizeof(SQLLEN) bug in OdbcStatement.cpp line 2891";
+    SKIP_ON_FIREBIRD6();
     // Insert initial data
     {
         SQLHSTMT hStmt2 = SQL_NULL_HSTMT;
@@ -828,7 +828,7 @@ TEST_F(ArrayBindingTest, GetInfoParamArraySelects) {
 // 15. Column-wise binding with integer-only (no strings)
 // ============================================================================
 TEST_F(ArrayBindingTest, ColumnWiseIntegerOnly) {
-    GTEST_SKIP() << "Crashes on vanilla master: sizeof(SQLINTEGER) vs sizeof(SQLLEN) bug in OdbcStatement.cpp line 2891";
+    SKIP_ON_FIREBIRD6();
     // Recreate table with integer-only columns
     ExecIgnoreError("DROP TABLE ARRAY_BIND_TEST");
     Commit();
@@ -959,7 +959,7 @@ TEST_F(ArrayBindingTest, RowWiseWithOperationPtr) {
 // 17. Without status/processed pointers (optional per spec)
 // ============================================================================
 TEST_F(ArrayBindingTest, WithoutStatusPointers) {
-    GTEST_SKIP() << "Crashes on vanilla master: sizeof(SQLINTEGER) vs sizeof(SQLLEN) bug in OdbcStatement.cpp line 2891";
+    SKIP_ON_FIREBIRD6();
     const int ARRAY_SIZE = 3;
     SQLRETURN ret;
 
@@ -986,4 +986,166 @@ TEST_F(ArrayBindingTest, WithoutStatusPointers) {
 
     Commit();
     EXPECT_EQ(CountRows(), ARRAY_SIZE);
+}
+
+// ============================================================================
+// 18. Column-wise binding, fixed-length C types with BufferLength = 0 (#299)
+//     The ODBC specification ignores BufferLength for fixed-length C types,
+//     so the element stride must come from the C type size.
+// ============================================================================
+TEST_F(ArrayBindingTest, ColumnWiseFixedLengthBufferLengthZero) {
+    SKIP_ON_FIREBIRD6();
+    ExecIgnoreError("DROP TABLE ARRAY_BIND_TEST");
+    Commit();
+    ReallocStmt();
+    ExecDirect("CREATE TABLE ARRAY_BIND_TEST (I INTEGER, V BIGINT)");
+    Commit();
+    ReallocStmt();
+
+    const int N = 5;
+    SQLINTEGER ids[N] = {1, 2, 3, 4, 5};
+    SQLBIGINT vals[N] = {10, 20, 30, 40, 50};
+    SQLLEN id_ind[N] = {0, 0, 0, 0, 0};
+    SQLLEN val_ind[N] = {0, 0, SQL_NULL_DATA, 0, 0};
+    SQLUSMALLINT status[N] = {};
+    SQLULEN nprocessed = 0;
+    SQLRETURN ret;
+
+    ret = SQLSetStmtAttr(hStmt, SQL_ATTR_PARAM_BIND_TYPE, SQL_PARAM_BIND_BY_COLUMN, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLSetStmtAttr(hStmt, SQL_ATTR_PARAMSET_SIZE, (SQLPOINTER)(intptr_t)N, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLSetStmtAttr(hStmt, SQL_ATTR_PARAMS_PROCESSED_PTR, &nprocessed, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLSetStmtAttr(hStmt, SQL_ATTR_PARAM_STATUS_PTR, status, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    ret = SQLPrepare(hStmt, (SQLCHAR*)"INSERT INTO ARRAY_BIND_TEST (I, V) VALUES (?, ?)", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    // BufferLength = 0 on both parameters
+    ret = SQLBindParameter(hStmt, 1, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0,
+                           ids, 0, id_ind);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLBindParameter(hStmt, 2, SQL_PARAM_INPUT, SQL_C_SBIGINT, SQL_BIGINT, 0, 0,
+                           vals, 0, val_ind);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    ret = SQLExecute(hStmt);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    EXPECT_EQ(nprocessed, (SQLULEN)N);
+    for (int i = 0; i < N; i++) {
+        EXPECT_EQ(status[i], SQL_PARAM_SUCCESS) << "Row " << i;
+    }
+    Commit();
+    ReallocStmt();
+
+    ret = SQLExecDirect(hStmt, (SQLCHAR*)"SELECT I, V FROM ARRAY_BIND_TEST ORDER BY I", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    SQLINTEGER id = 0;
+    SQLBIGINT val = 0;
+    SQLLEN idInd = 0, valInd = 0;
+    SQLBindCol(hStmt, 1, SQL_C_SLONG, &id, sizeof(id), &idInd);
+    SQLBindCol(hStmt, 2, SQL_C_SBIGINT, &val, sizeof(val), &valInd);
+    for (int i = 0; i < N; i++) {
+        ret = SQLFetch(hStmt);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << "Row " << i;
+        EXPECT_EQ(id, ids[i]) << "Row " << i;
+        if (val_ind[i] == SQL_NULL_DATA) {
+            EXPECT_EQ(valInd, SQL_NULL_DATA) << "Row " << i;
+        } else {
+            EXPECT_NE(valInd, SQL_NULL_DATA) << "Row " << i;
+            EXPECT_EQ(val, vals[i]) << "Row " << i;
+        }
+    }
+    EXPECT_EQ(SQLFetch(hStmt), SQL_NO_DATA);
+}
+
+// ============================================================================
+// 19. Column-wise binding, BufferLength = 0 across DOUBLE, DATE and TIMESTAMP
+// ============================================================================
+TEST_F(ArrayBindingTest, ColumnWiseFixedLengthTypesBufferLengthZero) {
+    SKIP_ON_FIREBIRD6();
+    ExecIgnoreError("DROP TABLE ARRAY_BIND_TEST");
+    Commit();
+    ReallocStmt();
+    ExecDirect("CREATE TABLE ARRAY_BIND_TEST (I INTEGER, D DOUBLE PRECISION, DT DATE, TS TIMESTAMP)");
+    Commit();
+    ReallocStmt();
+
+    const int N = 3;
+    SQLINTEGER ids[N] = {1, 2, 3};
+    double dbls[N] = {1.5, 2.5, 3.5};
+    SQL_DATE_STRUCT dates[N] = {};
+    SQL_TIMESTAMP_STRUCT stamps[N] = {};
+    SQLLEN ind[N] = {0, 0, 0};
+    SQLULEN nprocessed = 0;
+    SQLRETURN ret;
+
+    for (int i = 0; i < N; i++) {
+        dates[i].year = (SQLSMALLINT)(2020 + i);
+        dates[i].month = (SQLUSMALLINT)(1 + i);
+        dates[i].day = (SQLUSMALLINT)(10 + i);
+        stamps[i].year = (SQLSMALLINT)(2021 + i);
+        stamps[i].month = (SQLUSMALLINT)(2 + i);
+        stamps[i].day = (SQLUSMALLINT)(20 + i);
+        stamps[i].hour = (SQLUSMALLINT)i;
+        stamps[i].minute = 30;
+        stamps[i].second = 45;
+        stamps[i].fraction = 0;
+    }
+
+    ret = SQLSetStmtAttr(hStmt, SQL_ATTR_PARAM_BIND_TYPE, SQL_PARAM_BIND_BY_COLUMN, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLSetStmtAttr(hStmt, SQL_ATTR_PARAMSET_SIZE, (SQLPOINTER)(intptr_t)N, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLSetStmtAttr(hStmt, SQL_ATTR_PARAMS_PROCESSED_PTR, &nprocessed, 0);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    ret = SQLBindParameter(hStmt, 1, SQL_PARAM_INPUT, SQL_C_SLONG, SQL_INTEGER, 0, 0,
+                           ids, 0, ind);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLBindParameter(hStmt, 2, SQL_PARAM_INPUT, SQL_C_DOUBLE, SQL_DOUBLE, 0, 0,
+                           dbls, 0, ind);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLBindParameter(hStmt, 3, SQL_PARAM_INPUT, SQL_C_TYPE_DATE, SQL_TYPE_DATE, 0, 0,
+                           dates, 0, ind);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+    ret = SQLBindParameter(hStmt, 4, SQL_PARAM_INPUT, SQL_C_TYPE_TIMESTAMP, SQL_TYPE_TIMESTAMP, 0, 0,
+                           stamps, 0, ind);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret));
+
+    ret = SQLExecDirect(hStmt, (SQLCHAR*)"INSERT INTO ARRAY_BIND_TEST (I, D, DT, TS) VALUES (?, ?, ?, ?)", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    EXPECT_EQ(nprocessed, (SQLULEN)N);
+    Commit();
+    ReallocStmt();
+
+    ret = SQLExecDirect(hStmt, (SQLCHAR*)"SELECT I, D, DT, TS FROM ARRAY_BIND_TEST ORDER BY I", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    SQLINTEGER id = 0;
+    double dbl = 0;
+    SQL_DATE_STRUCT date = {};
+    SQL_TIMESTAMP_STRUCT stamp = {};
+    SQLLEN idInd = 0, dblInd = 0, dateInd = 0, stampInd = 0;
+    SQLBindCol(hStmt, 1, SQL_C_SLONG, &id, sizeof(id), &idInd);
+    SQLBindCol(hStmt, 2, SQL_C_DOUBLE, &dbl, sizeof(dbl), &dblInd);
+    SQLBindCol(hStmt, 3, SQL_C_TYPE_DATE, &date, sizeof(date), &dateInd);
+    SQLBindCol(hStmt, 4, SQL_C_TYPE_TIMESTAMP, &stamp, sizeof(stamp), &stampInd);
+    for (int i = 0; i < N; i++) {
+        ret = SQLFetch(hStmt);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << "Row " << i;
+        EXPECT_EQ(id, ids[i]) << "Row " << i;
+        EXPECT_DOUBLE_EQ(dbl, dbls[i]) << "Row " << i;
+        EXPECT_EQ(date.year, dates[i].year) << "Row " << i;
+        EXPECT_EQ(date.month, dates[i].month) << "Row " << i;
+        EXPECT_EQ(date.day, dates[i].day) << "Row " << i;
+        EXPECT_EQ(stamp.year, stamps[i].year) << "Row " << i;
+        EXPECT_EQ(stamp.month, stamps[i].month) << "Row " << i;
+        EXPECT_EQ(stamp.day, stamps[i].day) << "Row " << i;
+        EXPECT_EQ(stamp.hour, stamps[i].hour) << "Row " << i;
+        EXPECT_EQ(stamp.minute, stamps[i].minute) << "Row " << i;
+        EXPECT_EQ(stamp.second, stamps[i].second) << "Row " << i;
+    }
+    EXPECT_EQ(SQLFetch(hStmt), SQL_NO_DATA);
 }
