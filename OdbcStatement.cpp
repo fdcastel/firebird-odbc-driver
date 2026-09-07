@@ -3714,9 +3714,16 @@ SQLRETURN OdbcStatement::sqlColAttribute( int column, int fieldId, SQLPOINTER at
 				value = metaData->getColumnCount();
 			break;
 
-		case SQL_DESC_TYPE:
 		case SQL_DESC_CONCISE_TYPE:
 			value = metaData->getColumnType (column, realSqlType);
+			break;
+
+		case SQL_DESC_TYPE:
+			value = OdbcDesc::verboseSqlType( metaData->getColumnType (column, realSqlType) );
+			break;
+
+		case SQL_DESC_DATETIME_INTERVAL_CODE:
+			value = OdbcDesc::datetimeIntervalCodeOf( metaData->getColumnType (column, realSqlType) );
 			break;
 
 		case SQL_COLUMN_LENGTH:
