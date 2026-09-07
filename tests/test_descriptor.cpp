@@ -366,3 +366,59 @@ TEST_F(CopyDescCrashTest, SetDescCountToZeroUnbindsAll) {
 
     SQLFreeHandle(SQL_HANDLE_DESC, hDesc);
 }
+
+// ===== IRD before SQLPrepare (#307) =====
+TEST_F(DescriptorTest, IrdHeaderFieldsReadableBeforePrepare) {
+    SQLHDESC hIrd = SQL_NULL_HDESC;
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLGetStmtAttr(hStmt, SQL_ATTR_IMP_ROW_DESC, &hIrd, 0, NULL)));
+    ASSERT_NE(hIrd, (SQLHDESC)SQL_NULL_HDESC);
+
+    SQLULEN rowsFetched = 0;
+    SQLUSMALLINT rowStatus[4] = {};
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLSetStmtAttr(hStmt, SQL_ATTR_ROWS_FETCHED_PTR, &rowsFetched, 0)));
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLSetStmtAttr(hStmt, SQL_ATTR_ROW_STATUS_PTR, rowStatus, 0)));
+
+    SQLPOINTER ptr = NULL;
+    SQLRETURN ret = SQLGetDescField(hIrd, 0, SQL_DESC_ROWS_PROCESSED_PTR, &ptr, 0, NULL);
+    if (ret == SQL_ERROR && GetSqlState(SQL_HANDLE_DESC, hIrd) == "HY007") {
+        // unixODBC answers HY007 for an unprepared IRD before the driver sees the call
+        GTEST_SKIP() << "the driver manager enforces HY007 itself: " << GetOdbcError(SQL_HANDLE_DESC, hIrd);
+    }
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_DESC, hIrd);
+    EXPECT_EQ(ptr, (SQLPOINTER)&rowsFetched);
+
+    ptr = NULL;
+    ret = SQLGetDescField(hIrd, 0, SQL_DESC_ARRAY_STATUS_PTR, &ptr, 0, NULL);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_DESC, hIrd);
+    EXPECT_EQ(ptr, (SQLPOINTER)rowStatus);
+
+    SQLSMALLINT allocType = 0;
+    ret = SQLGetDescField(hIrd, 0, SQL_DESC_ALLOC_TYPE, &allocType, 0, NULL);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_DESC, hIrd);
+    EXPECT_EQ(allocType, SQL_DESC_ALLOC_AUTO);
+}
+
+TEST_F(DescriptorTest, IrdRecordFieldsBeforePrepareAreHY007) {
+    SQLHDESC hIrd = SQL_NULL_HDESC;
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLGetStmtAttr(hStmt, SQL_ATTR_IMP_ROW_DESC, &hIrd, 0, NULL)));
+    ASSERT_NE(hIrd, (SQLHDESC)SQL_NULL_HDESC);
+
+    SQLSMALLINT count = -1;
+    SQLRETURN ret = SQLGetDescField(hIrd, 0, SQL_DESC_COUNT, &count, 0, NULL);
+    EXPECT_EQ(ret, SQL_ERROR);
+    EXPECT_EQ(GetSqlState(SQL_HANDLE_DESC, hIrd), "HY007");
+
+    SQLSMALLINT type = 0;
+    ret = SQLGetDescField(hIrd, 1, SQL_DESC_TYPE, &type, 0, NULL);
+    EXPECT_EQ(ret, SQL_ERROR);
+    EXPECT_EQ(GetSqlState(SQL_HANDLE_DESC, hIrd), "HY007");
+
+    // Both answer once the statement is prepared
+    ret = SQLPrepare(hStmt, (SQLCHAR*)"SELECT 1 AS A FROM RDB$DATABASE", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    ret = SQLGetDescField(hIrd, 0, SQL_DESC_COUNT, &count, 0, NULL);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_DESC, hIrd);
+    EXPECT_EQ(count, 1);
+    ret = SQLGetDescField(hIrd, 1, SQL_DESC_TYPE, &type, 0, NULL);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_DESC, hIrd);
+}

@@ -192,6 +192,7 @@ public:
 	bool				asyncEnable;
 	int					rowNumber;
 	int					rowNumberParamArray;
+	SQLULEN				keysetSize;
 	int					lastRowsetSize;
 	SQLLEN				indicatorRowNumber;
 	int					maxRows;

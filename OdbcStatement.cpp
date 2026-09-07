@@ -174,6 +174,7 @@ OdbcStatement::OdbcStatement(OdbcConnection *connect, int statementNumber)
 	statement = connection->connection->createInternalStatement();
 	bulkInsert = NULL;
 	execute = &OdbcStatement::executeStatement;
+	keysetSize = 0;
 	fetchNext = &ResultSet::nextFetch;
 	schemaFetchData = true;
 	metaData = NULL;
@@ -2577,6 +2578,11 @@ SQLRETURN OdbcStatement::sqlGetStmtAttr(int attribute, SQLPOINTER ptr, int buffe
 			TRACE02(SQL_ROWSET_SIZE,value);
 			break;
 
+		case SQL_ATTR_KEYSET_SIZE:
+			value = keysetSize;
+			TRACE02(SQL_ATTR_KEYSET_SIZE,value);
+			break;
+
 		case SQL_ATTR_MAX_ROWS:					// SQL_MAX_ROWS 1
 			value = maxRows;
 			TRACE02(SQL_ATTR_MAX_ROWS,value);
@@ -3473,6 +3479,10 @@ SQLRETURN OdbcStatement::sqlSetStmtAttr(int attribute, SQLPOINTER ptr, int lengt
 			break;
 
 		case SQL_ATTR_KEYSET_SIZE:           // 8
+			keysetSize = (uintptr_t) ptr;
+			TRACE02(SQL_ATTR_KEYSET_SIZE,(intptr_t) ptr);
+		    break;
+
 		case SQL_ROWSET_SIZE:                // 9
 			applicationRowDescriptor->headArraySize = (intptr_t) ptr;
 			TRACE02(SQL_ROWSET_SIZE,(intptr_t) ptr);
