@@ -525,6 +525,12 @@ public:
 	virtual void		setSqlLen ( short len ) = 0;
 	virtual short		getSqlMultiple () = 0;
 
+	// True for Firebird BINARY(n) / VARBINARY(n), i.e. CHAR(n) / VARCHAR(n)
+	// CHARACTER SET OCTETS at the wire layer (the FB4+ standard-compliant
+	// aliases).  Implementation in IscHeadSqlVar.h.
+	virtual bool		isBinary () = 0;
+	virtual bool		isVarBinary () = 0;
+
 	virtual char *		getSqlData() = 0;
 	virtual short *		getSqlInd() = 0;
 	virtual void		setSqlData( char *data ) = 0;

@@ -48,6 +48,13 @@ class DescRecord;
 class OdbcConvert;
 class OdbcStatement;
 
+// Canonical SQLGUID wire sizes.
+// - GUID_BINARY_LEN: 16 raw bytes, the BINARY(16) / VARBINARY(16) wire form.
+// - GUID_STRING_LEN: 36 chars (8-4-4-4-12 hex+dashes, no NUL terminator),
+//   the canonical text form written into VARCHAR/CHAR slots.
+static constexpr int GUID_BINARY_LEN = 16;
+static constexpr int GUID_STRING_LEN = 36;
+
 typedef int (OdbcConvert::*ADRESS_FUNCTION)(DescRecord * from, DescRecord * to);
 
 class OdbcConvert
@@ -94,6 +101,7 @@ public:
 // Guid
 	int convGuidToString(DescRecord * from, DescRecord * to);
 	int convGuidToStringW(DescRecord * from, DescRecord * to);
+	int convGuidToBinary(DescRecord * from, DescRecord * to);
 
 // TinyInt
 	int convTinyIntToBoolean(DescRecord * from, DescRecord * to);

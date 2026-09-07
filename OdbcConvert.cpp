@@ -1004,9 +1004,29 @@ ADRESS_FUNCTION OdbcConvert::getAdressFunction(DescRecord * from, DescRecord * t
 		switch(to->conciseType)
 		{
 		case SQL_C_CHAR:
-			return &OdbcConvert::convGuidToString;
 		case SQL_C_WCHAR:
-			return &OdbcConvert::convGuidToStringW;
+			if ( to->isIndicatorSqlDa )
+			{
+				// Input parameter.  Firebird describes BINARY(n) / VARBINARY(n)
+				// as (VAR)CHAR(n) CHARACTER SET OCTETS and the driver maps both
+				// to SQL_C_CHAR, so raw bytes vs. text is decided from the
+				// sqlvar, not from conciseType.  setTypeText() turns a
+				// SQL_VARYING slot into SQL_TEXT so the converters write at
+				// offset 0 with no length prefix (a no-op for SQL_TEXT; the
+				// charset is kept either way).
+				const bool octets = to->headSqlVarPtr->isBinary()
+					|| to->headSqlVarPtr->isVarBinary();
+				to->headSqlVarPtr->setTypeText();
+				if ( octets )
+					return &OdbcConvert::convGuidToBinary;
+				return &OdbcConvert::convGuidToString;
+			}
+			// Fetching a column described as SQL_GUID into the application
+			// buffer.  Unreachable until the column-side SQL_GUID mapping
+			// lands (T5-5, #287).
+			if ( to->conciseType == SQL_C_WCHAR )
+				return &OdbcConvert::convGuidToStringW;
+			return &OdbcConvert::convGuidToString;
 		default:
 			return &OdbcConvert::notYetImplemented;
 		}
@@ -1638,29 +1658,90 @@ int OdbcConvert::notYetImplemented(DescRecord * from, DescRecord * to)
 // Guid
 ////////////////////////////////////////////////////////////////////////
 
+// Format a SQLGUID as the 36-char canonical UUID string (8-4-4-4-12 hex,
+// upper-case, no NUL counted).  `out` must hold at least GUID_STRING_LEN + 1
+// bytes.  Returns snprintf's character count — always GUID_STRING_LEN for a
+// well-formed call, or negative on a (practically impossible) encoding error.
+// A GUID never formats to any other length, so callers treat
+// "result != GUID_STRING_LEN" as a hard error rather than clamping.
+static int formatGuidCanonical(char* out, size_t cap, const SQLGUID* g)
+{
+	return snprintf(out, cap,
+		"%08X-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X",
+		(unsigned int) g->Data1, g->Data2, g->Data3,
+		g->Data4[0], g->Data4[1], g->Data4[2], g->Data4[3],
+		g->Data4[4], g->Data4[5], g->Data4[6], g->Data4[7]);
+}
+
+// Write SQLGUID as the 36-char canonical UUID string.
+//
+// Firebird side (to->isIndicatorSqlDa): the text is staged in
+// DescRecord::localDataPtr and sqldata is pointed at it, the idiom
+// transferStringToAllowedType uses, instead of being written into the wire
+// buffer directly.  That buffer is whatever Firebird described for the slot:
+// it may be SQL_VARYING (2-byte length prefix), shorter than 36 bytes
+// (CHAR(1), VARCHAR(10)), or a UTF8 / UNICODE_FSS text that the driver maps
+// to SQL_C_WCHAR (a CHAR(36) UTF8 slot is 144 bytes).  The dispatch has
+// already called setTypeText(); Sqlda::checkAndRebuild() then rebuilds the
+// message from the new type and length, and Firebird itself reports the
+// truncation when the slot cannot hold 36 chars.
+//
+// Application side: copy into the bound buffer honoring its size, report
+// the full length via the indicator and 01004 when it does not fit.
 int OdbcConvert::convGuidToString(DescRecord * from, DescRecord * to)
 {
 	char* pointer = (char*)getAdressBindDataTo((char*)to->dataPtr);
 	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
 	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
 
-	ODBCCONVERT_CHECKNULL( pointer );
+	if ( to->isIndicatorSqlDa )
+	{
+		ODBCCONVERT_CHECKNULL_SQLDA;
+	}
+	else
+	{
+		ODBCCONVERT_CHECKNULL( pointer );
+	}
 
 	SQLGUID *g = (SQLGUID*)getAdressBindDataFrom((char*)from->dataPtr);
-	int len, outlen = to->length;
 
-	len = snprintf(pointer, outlen, "%08lX-%04X-%04X-%02X%02X-%02X%02X%02X%02X%02X%02X",
-		(unsigned int) g->Data1, g->Data2, g->Data3, g->Data4[0], g->Data4[1], g->Data4[2], g->Data4[3], g->Data4[4], g->Data4[5], g->Data4[6], g->Data4[7]);
+	char buf[GUID_STRING_LEN + 1];
+	if ( formatGuidCanonical(buf, sizeof(buf), g) != GUID_STRING_LEN )
+	{
+		if ( parentStmt )
+			parentStmt->postError( new OdbcError( 0, "HY000", "Internal error formatting GUID" ) );
+		return SQL_ERROR;
+	}
 
-	if ( len == -1 ) len = outlen;
+	if ( to->isIndicatorSqlDa )
+	{
+		// allocateLocalDataPtr() frees any previous buffer first, so the
+		// staging area is always exactly GUID_STRING_LEN + 1 bytes.
+		to->allocateLocalDataPtr( GUID_STRING_LEN + 1 );
+		memcpy( to->localDataPtr, buf, GUID_STRING_LEN );
+		to->headSqlVarPtr->setSqlLen( (short)GUID_STRING_LEN );
+		to->headSqlVarPtr->setSqlData( to->localDataPtr );
+		return SQL_SUCCESS;
+	}
 
-	if ( to->isIndicatorSqlDa ) {
-		to->headSqlVarPtr->setSqlLen(len);
-	} else
+	int outlen = to->length;
+	SQLRETURN ret = SQL_SUCCESS;
+	int copy = GUID_STRING_LEN;
+	if ( outlen <= GUID_STRING_LEN )
+	{
+		copy = outlen > 0 ? outlen - 1 : 0;
+		if ( parentStmt )
+			parentStmt->postError( new OdbcError( 0, "01004", "Data truncated" ) );
+		ret = SQL_SUCCESS_WITH_INFO;
+	}
+	if ( copy > 0 )
+		memcpy( pointer, buf, copy );
+	pointer[copy] = 0;
+
 	if ( indicatorTo )
-		setIndicatorPtr(indicatorTo, len, to);
+		setIndicatorPtr( indicatorTo, GUID_STRING_LEN, to );
 
-	return SQL_SUCCESS;
+	return ret;
 }
 
 int OdbcConvert::convGuidToStringW(DescRecord * from, DescRecord * to)
@@ -1684,6 +1765,49 @@ int OdbcConvert::convGuidToStringW(DescRecord * from, DescRecord * to)
 	} else
 	if ( indicatorTo )
 		setIndicatorPtr(indicatorTo, len, to);
+
+	return SQL_SUCCESS;
+}
+
+// Write SQLGUID as 16 bytes in canonical UUID byte order (Data1/2/3
+// big-endian, Data4 unchanged) into a Firebird (VAR)CHAR(n) CHARACTER SET
+// OCTETS parameter, i.e. BINARY(n) / VARBINARY(n).  Input parameters only;
+// the dispatch has already called setTypeText(), so the write goes at
+// offset 0 of the wire buffer and sqllen reports the 16 bytes.
+int OdbcConvert::convGuidToBinary(DescRecord * from, DescRecord * to)
+{
+	char* pointer = (char*)getAdressBindDataTo((char*)to->dataPtr);
+	SQLLEN * indicatorTo = getAdressBindIndTo((char*)to->indicatorPtr);
+	SQLLEN * indicatorFrom = getAdressBindIndFrom((char*)from->indicatorPtr);
+
+	ODBCCONVERT_CHECKNULL_SQLDA;
+
+	SQLGUID *g = (SQLGUID*)getAdressBindDataFrom((char*)from->dataPtr);
+
+	unsigned char buf[GUID_BINARY_LEN];
+	buf[0]  = (unsigned char)((g->Data1 >> 24) & 0xFF);
+	buf[1]  = (unsigned char)((g->Data1 >> 16) & 0xFF);
+	buf[2]  = (unsigned char)((g->Data1 >>  8) & 0xFF);
+	buf[3]  = (unsigned char)( g->Data1        & 0xFF);
+	buf[4]  = (unsigned char)((g->Data2 >>  8) & 0xFF);
+	buf[5]  = (unsigned char)( g->Data2        & 0xFF);
+	buf[6]  = (unsigned char)((g->Data3 >>  8) & 0xFF);
+	buf[7]  = (unsigned char)( g->Data3        & 0xFF);
+	memcpy(buf + 8, g->Data4, 8);
+
+	// A slot shorter than 16 bytes cannot hold a GUID, and a truncated GUID
+	// is corrupt rather than merely short, so this is a hard error.  ODBC
+	// SQLSTATE 22001 "String data, right truncation".
+	if ( (int)to->length < GUID_BINARY_LEN )
+	{
+		if ( parentStmt )
+			parentStmt->postError( new OdbcError( 0, "22001",
+				"String data, right truncation - GUID requires 16 bytes" ) );
+		return SQL_ERROR;
+	}
+
+	memcpy( pointer, buf, GUID_BINARY_LEN );
+	to->headSqlVarPtr->setSqlLen( GUID_BINARY_LEN );
 
 	return SQL_SUCCESS;
 }

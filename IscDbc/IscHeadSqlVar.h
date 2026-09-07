@@ -103,6 +103,31 @@ public:
 	inline char *	getSqlData() { return sqlvar->sqldata; }
 	inline short *	getSqlInd() { return sqlvar->sqlind; }
 
+	// Charset id for CHARACTER SET OCTETS, used to identify Firebird's
+	// FB4+ BINARY / VARBINARY types at the wire layer.  SqlProperties
+	// carries the charset id in a dedicated `sqlcharset` field (separate
+	// from `sqlsubtype`, which is documented as "BLOBs & Text types only";
+	// see IscDbc/Sqlda.h).  Charset id 1 = OCTETS per the driver's charset
+	// table at IscDbc/MultibyteConvert.cpp and per Firebird's
+	// RDB$CHARACTER_SETS system table.
+	static constexpr unsigned CHARSET_OCTETS = 1;
+
+	// True iff the slot describes a Firebird BINARY(n) — the FB4+ alias for
+	// CHAR(n) CHARACTER SET OCTETS.
+	inline bool		isBinary()
+	{
+		return sqlvar->sqltype == SQL_TEXT
+			&& sqlvar->sqlcharset == CHARSET_OCTETS;
+	}
+
+	// True iff the slot describes a Firebird VARBINARY(n) — the FB4+ alias
+	// for VARCHAR(n) CHARACTER SET OCTETS.
+	inline bool		isVarBinary()
+	{
+		return sqlvar->sqltype == SQL_VARYING
+			&& sqlvar->sqlcharset == CHARSET_OCTETS;
+	}
+
 	// not used
 	//void		setSqlInd( short *ind ) { sqlvar->sqlind = ind; }
 	//void		setSqlType ( short type ) { sqlvar->sqltype = type; }
