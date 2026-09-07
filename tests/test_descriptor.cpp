@@ -422,3 +422,79 @@ TEST_F(DescriptorTest, IrdRecordFieldsBeforePrepareAreHY007) {
     ret = SQLGetDescField(hIrd, 1, SQL_DESC_TYPE, &type, 0, NULL);
     ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_DESC, hIrd);
 }
+
+// ===== IRD records after SQLPrepare, before any bind or execute (#316) =====
+TEST_F(DescriptorTest, IrdRecordsDescribeColumnsAfterPrepare) {
+    SQLRETURN ret = SQLPrepare(hStmt,
+        (SQLCHAR*)"SELECT CAST(1 AS INTEGER) AS INTCOL, CAST('x' AS VARCHAR(5)) AS VARCOL "
+                  "FROM RDB$DATABASE",
+        SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    SQLHDESC hIrd = SQL_NULL_HDESC;
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLGetStmtAttr(hStmt, SQL_ATTR_IMP_ROW_DESC, &hIrd, 0, NULL)));
+
+    // Descriptor reads first, before anything binds or executes the columns
+    for (SQLSMALLINT col = 1; col <= 2; col++) {
+        SQLSMALLINT descType = 0, conciseType = 0;
+        SQLCHAR descName[64] = {};
+        SQLINTEGER nameLen = 0;
+        ret = SQLGetDescField(hIrd, col, SQL_DESC_TYPE, &descType, 0, NULL);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_DESC, hIrd);
+        ret = SQLGetDescField(hIrd, col, SQL_DESC_CONCISE_TYPE, &conciseType, 0, NULL);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_DESC, hIrd);
+        ret = SQLGetDescField(hIrd, col, SQL_DESC_NAME, descName, sizeof(descName), &nameLen);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_DESC, hIrd);
+
+        SQLCHAR recName[64] = {};
+        SQLSMALLINT recNameLen = 0, recType = 0, recSubType = 0, recPrecision = 0, recScale = 0,
+                    recNullable = 0;
+        SQLLEN recLength = 0;
+        ret = SQLGetDescRec(hIrd, col, recName, sizeof(recName), &recNameLen, &recType, &recSubType,
+                            &recLength, &recPrecision, &recScale, &recNullable);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_DESC, hIrd);
+
+        SQLCHAR colName[64] = {};
+        SQLSMALLINT colNameLen = 0, dataType = 0, decimalDigits = 0, nullable = 0;
+        SQLULEN columnSize = 0;
+        ret = SQLDescribeCol(hStmt, col, colName, sizeof(colName), &colNameLen, &dataType,
+                             &columnSize, &decimalDigits, &nullable);
+        ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+        EXPECT_NE(descType, SQL_C_DEFAULT) << "column " << col << " still holds the record default";
+        EXPECT_NE(conciseType, SQL_C_DEFAULT) << "column " << col;
+        EXPECT_STREQ((char*)descName, (char*)colName) << "column " << col;
+        EXPECT_NE(recType, SQL_C_DEFAULT) << "column " << col;
+        EXPECT_STREQ((char*)recName, (char*)colName) << "column " << col;
+        if (col == 1) {
+            EXPECT_EQ(descType, dataType) << "INTEGER column";
+            EXPECT_EQ(recType, dataType) << "INTEGER column";
+        }
+    }
+}
+
+TEST_F(DescriptorTest, CopyDescFromIrdAfterPrepare) {
+    SQLRETURN ret = SQLPrepare(hStmt,
+        (SQLCHAR*)"SELECT CAST(1 AS INTEGER) AS INTCOL FROM RDB$DATABASE", SQL_NTS);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+    SQLHDESC hIrd = SQL_NULL_HDESC;
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLGetStmtAttr(hStmt, SQL_ATTR_IMP_ROW_DESC, &hIrd, 0, NULL)));
+
+    SQLCHAR colName[64] = {};
+    SQLSMALLINT colNameLen = 0, dataType = 0, decimalDigits = 0, nullable = 0;
+    SQLULEN columnSize = 0;
+    ret = SQLDescribeCol(hStmt, 1, colName, sizeof(colName), &colNameLen, &dataType,
+                         &columnSize, &decimalDigits, &nullable);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_STMT, hStmt);
+
+    // Copy the IRD before anything binds or executes the column
+    SQLHDESC hCopy = SQL_NULL_HDESC;
+    ASSERT_TRUE(SQL_SUCCEEDED(SQLAllocHandle(SQL_HANDLE_DESC, hDbc, &hCopy)));
+    ret = SQLCopyDesc(hIrd, hCopy);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_DESC, hCopy);
+
+    SQLSMALLINT descType = 0;
+    ret = SQLGetDescField(hCopy, 1, SQL_DESC_TYPE, &descType, 0, NULL);
+    ASSERT_TRUE(SQL_SUCCEEDED(ret)) << GetOdbcError(SQL_HANDLE_DESC, hCopy);
+    EXPECT_EQ(descType, dataType);
+    SQLFreeHandle(SQL_HANDLE_DESC, hCopy);
+}
