@@ -116,6 +116,10 @@ public:
 	void defFromMetaDataOut(int recNumber, DescRecord * record);
 	int getConciseType(int type);
 	int getConciseSize(int type, int length);
+	void defineImplRecord(int recNumber, DescRecord * record);
+	static SQLSMALLINT conciseSqlType(int type, int datetimeIntervalCode);
+	static SQLSMALLINT verboseSqlType(int conciseSqlType);
+	static SQLSMALLINT datetimeIntervalCodeOf(int conciseSqlType);
 	int getDefaultFromSQLToConciseType(int sqlType, int bufferLength = 0);
 
 //Head
